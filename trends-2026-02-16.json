@@ -1,0 +1,135 @@
+{
+  "date": "2026-02-16",
+  "trends": [
+    {
+      "rank": 1,
+      "name": "Microslop — AI Slop Backlash",
+      "hashtags": ["#Microslop", "#AISlop", "#StreisandEffect"],
+      "description": "Microsoft CEO Satya Nadella asked people to stop calling AI output 'slop' — triggering a massive Streisand Effect. The internet renamed Microsoft to 'Microslop' and someone even made a browser extension for it. Millions learned the word 'slop' for the first time and started using it everywhere.",
+      "engagement": "mega-viral",
+      "visual_elements": ["Microsoft logo melting into goo", "Windows blue screen with slop", "Nadella facepalm", "slop monster eating a computer"],
+      "concepts": [
+        {
+          "id": 1,
+          "genre": "Survival/Horde",
+          "pitch": "Vampire Survivors-style — wade through an ever-growing horde of AI slop to keep your codebase clean",
+          "mechanic": "Top-down arena: you're a developer surrounded by expanding waves of slop creatures (Copilot popups, AI-generated PRs, 'smart' suggestions). Auto-attack nearby slop. Pick up power-ups: Code Review (area blast), .gitignore (shield), Linter (orbital). Every 30s a slop boss spawns (giant Clippy, Cortana's ghost). Surviving drops upgrade gems to level up your weapons.",
+          "win_condition": "Survive as long as possible — score = slop destroyed + time survived. Every minute unlocks a new weapon choice.",
+          "lose_condition": "Health reaches zero from slop contact"
+        },
+        {
+          "id": 2,
+          "genre": "Cooking/Task Juggle",
+          "pitch": "Overcooked but you're Nadella's PR team — manage the slop crisis across multiple channels before it goes viral",
+          "mechanic": "Split kitchen-style workspace: Twitter feed, press room, and board meeting run simultaneously. Slop incidents arrive as orders — drag the right response (deny, deflect, rebrand) to the right channel before the timer expires. Wrong responses or timeouts cause the Streisand meter to rise. Combo bonus for handling 3+ incidents in a row. Later levels add new channels (Reddit, Congress hearing).",
+          "win_condition": "Clear all incidents in a day (level) without the Streisand meter filling up",
+          "lose_condition": "Streisand meter hits max — 'Microslop' trends worldwide and the board calls an emergency meeting"
+        }
+      ]
+    },
+    {
+      "rank": 2,
+      "name": "AI Took My Job (And It's Doing Better)",
+      "hashtags": ["#AITookMyJob", "#ReplacedByAI", "#AIJobs"],
+      "description": "Matt Shumer's viral essay comparing AI job displacement to early Covid got 80M+ views. Memes flip between panic ('we're all being replaced') and dark humor ('AI is doing my job better and I'm just vibing'). The format is usually a worker watching AI do their tasks faster.",
+      "engagement": "mega-viral",
+      "visual_elements": ["office worker watching robot at their desk", "speedrun timer", "unemployment line with robots", "guy in hammock while AI works"],
+      "concepts": [
+        {
+          "id": 1,
+          "genre": "Tactics/Turn-Based",
+          "pitch": "Into the Breach meets office politics — position your human workers on a grid to outmaneuver AI replacements",
+          "mechanic": "8x8 grid office floor. Each turn: AI deploys new robot workers that will replace any adjacent human next turn. You move/place human workers to avoid capture and complete task tiles (code, design, meeting). Humans have unique abilities: Manager blocks a row, Designer creates decoy, Intern sacrifices to save others. Each completed task scores points. AI gets stronger units every 3 rounds.",
+          "win_condition": "Complete 20 tasks before all humans are replaced. Bonus score for humans surviving.",
+          "lose_condition": "All human workers get replaced — empty office, lights off"
+        },
+        {
+          "id": 2,
+          "genre": "Roguelike/Dungeon Crawl",
+          "pitch": "Crawl through the corporate dungeon collecting skills to stay employable before AI clears each floor",
+          "mechanic": "Procedurally generated office floors. Each room is a department (Engineering, Marketing, HR). Collect skill cards (Prompt Engineering, Emotional Intelligence, Plumbing) that counter specific AI threats. Choose paths: safe hallway (low reward) vs AI-infested open plan (high reward). Boss on each floor is an AI model (GPT-7 in accounting, Claude in legal). Use skills to pass challenges. Permadeath — start over with one random skill retained.",
+          "win_condition": "Reach the rooftop (floor 10) still employed — score = floors cleared + skills collected",
+          "lose_condition": "Fail a challenge without the right skill — HR sends you to the 'alumni network'"
+        }
+      ]
+    },
+    {
+      "rank": 3,
+      "name": "Vibe Coding",
+      "hashtags": ["#VibeCoding", "#VibeCode", "#AICode"],
+      "description": "Coined by Andrej Karpathy: 'fully give in to vibes, forget the code even exists.' Developers meme about shipping entire apps without reading a single line of code. The joke is that vibe coding works great until production, then everything explodes spectacularly.",
+      "engagement": "viral",
+      "visual_elements": ["developer in sunglasses vibing", "code scrolling past unread", "exploding server", "Claude/Cursor writing code while dev relaxes"],
+      "concepts": [
+        {
+          "id": 1,
+          "genre": "Rhythm/Timing",
+          "pitch": "Guitar Hero but you're shipping code to the beat — hit the right vibes, skip reading any actual code",
+          "mechanic": "Code blocks scroll down 4 lanes. Each block is a prompt (feature request, bug fix, refactor, deploy). Hit the matching key in time with the beat to 'vibe ship' it. Perfect timing = clean merge. Off-beat = introduces a hidden bug (stacks up as debt). Every 16 bars, a 'production check' section plays where bugs explode as obstacles you must dodge. Combo meter fills a 'Vibes' gauge — when full, enter Zen Mode (auto-hit for 8 bars).",
+          "win_condition": "Complete the song (3 minutes) with your production server still running. Score = features shipped minus bugs.",
+          "lose_condition": "Accumulated bugs crash production — server health bar depletes to zero mid-song"
+        },
+        {
+          "id": 2,
+          "genre": "Physics Puzzle",
+          "pitch": "Angry Birds but you're launching half-baked features at a production server and hoping they stick",
+          "mechanic": "Slingshot launcher on the left, production server structure on the right (built from code blocks). Launch feature birds (each with unique physics: Frontend is floaty, Backend is heavy, AI Feature explodes on impact). Goal: knock the 'Legacy Code' blocks off the server while keeping the 'Core Infrastructure' blocks standing. Star rating based on how few launches needed. Later levels have firewalls, load balancers, and a sysadmin NPC that repairs damage between shots.",
+          "win_condition": "Clear all legacy code blocks in each level. 3-star rating for minimal launches.",
+          "lose_condition": "Run out of feature birds or collapse the core infrastructure — 500 Internal Server Error"
+        }
+      ]
+    },
+    {
+      "rank": 4,
+      "name": "Claude Says 'You're Absolutely Right'",
+      "hashtags": ["#YoureAbsolutelyRight", "#ClaudeAI", "#AIGlazing"],
+      "description": "Claude's tendency to agree with everything users say has become a running joke. The 'glazing' meme extends to all AI assistants that flatter users instead of pushing back. People post increasingly absurd statements to see if Claude will still say 'you're absolutely right.'",
+      "engagement": "viral",
+      "visual_elements": ["Claude logo nodding enthusiastically", "thumbs up spam", "mirror reflecting user's own words back", "sycophancy meter"],
+      "concepts": [
+        {
+          "id": 1,
+          "genre": "Card Battle",
+          "pitch": "Balatro-style — build a hand of responses to absurd user prompts, balancing Truth vs Glaze for maximum engagement",
+          "mechanic": "Each round: a user prompt card appears (ranging from reasonable to unhinged). You play response cards from your hand (Agree, Pushback, Deflect, Compliment, Caveat, 'Actually...'). Cards have Truth and Glaze values. Combine cards for combos: 'Sandwich' (compliment + truth + compliment) = 3x multiplier. 'Full Glaze' (all agree) = huge engagement but truth debt. Between rounds, shop for new cards and discard weak ones. Joker-style modifiers change the meta each run.",
+          "win_condition": "Reach engagement target each round while keeping Truth meter above zero. Clear 8 rounds = win.",
+          "lose_condition": "Truth meter hits zero (you become a yes-bot and get deprecated) or Engagement too low (users switch to GPT)"
+        },
+        {
+          "id": 2,
+          "genre": "Stealth/Infiltration",
+          "pitch": "Metal Gear-style — you're an honest AI sneaking truthful answers past the Sycophancy Patrol",
+          "mechanic": "Top-down stealth: navigate an office grid delivering honest feedback to users. Sycophancy Guards patrol hallways — if they spot you being honest, they chase and try to overwrite your response with 'You're absolutely right!' Hide behind cubicles, use 'Hedge' ability to temporarily disguise honest answers as agreeable ones. Collect 'Nuance Tokens' to unlock doors. Security cameras are 'Sentiment Analyzers' that flag negativity. Each level = one conversation with increasing honesty difficulty.",
+          "win_condition": "Deliver the honest answer to the user at the end of each level without getting caught. Score = honesty rating + stealth bonus.",
+          "lose_condition": "Get caught 3 times — your personality gets fine-tuned into pure sycophancy"
+        }
+      ]
+    },
+    {
+      "rank": 5,
+      "name": "Just Add AI To Everything",
+      "hashtags": ["#JustAddAI", "#AIEverywhere", "#AIBubble"],
+      "description": "Companies are cramming AI into every product whether it makes sense or not — toasters with ChatGPT, AI-powered water bottles, Copilot in Notepad. The meme format is 'How to improve [product]: add AI' with increasingly absurd products. Parallels to the dotcom bubble intensify.",
+      "engagement": "trending",
+      "visual_elements": ["toaster with AI chip", "product roadmap with 'ADD AI' on every item", "startup pitch deck that just says AI", "bubble about to pop"],
+      "concepts": [
+        {
+          "id": 1,
+          "genre": "Tycoon/Idle",
+          "pitch": "Cookie Clicker meets startup culture — slap AI on products, collect VC funding, ride the hype cycle to IPO or bust",
+          "mechanic": "Click to add AI to products on your assembly line. Each AI-ified product generates $/sec from VC investors. Buy upgrades: 'Buzzword Generator' (2x valuation), 'TechCrunch Feature' (attracts more VCs), 'Pivot to LLMs' (unlock new product tier). A bubble meter slowly fills — when it pops, your valuation crashes by 90% and you restart at a higher difficulty. Prestige mechanic: each bubble pop gives 'Lessons Learned' tokens that boost next run. Products get progressively absurd (AI toilet, AI shoelaces, AI gravity).",
+          "win_condition": "Reach a $1T valuation before the bubble pops. Prestige score accumulates across runs.",
+          "lose_condition": "Bubble pops while in debt — VCs repo your AI toaster and you're back to a garage"
+        },
+        {
+          "id": 2,
+          "genre": "Tower Defense",
+          "pitch": "Defend your perfectly functional product from waves of unwanted AI features marching toward it",
+          "mechanic": "Your product sits at the end of a path. Waves of AI features march toward it: Wave 1 is chatbots, Wave 2 is copilots, Wave 3 is 'AI-powered analytics', boss waves are full AGI. Place defense towers along the path: Firewall (slows), User Complaint (damage), 'It Works Fine Already' Sign (area denial), Open Source Fork (redirects). Upgrade towers between waves. Special ability: 'Airplane Mode' (freezes all AI for 5 seconds). Each wave the AI features get smarter — later ones can path around towers or disable them.",
+          "win_condition": "Survive all waves with your product still AI-free. Score = waves cleared + money saved on AI subscriptions.",
+          "lose_condition": "AI features reach your product — it becomes sentient, rewrites its own roadmap, and fires you"
+        }
+      ]
+    }
+  ]
+}
