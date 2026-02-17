@@ -1,0 +1,22 @@
+{
+  "name": "three-vite-game",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "three": "^0.172.0",
+    "@sttg/social-browser": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/three": "^0.172.0",
+    "typescript": "^5.7.0",
+    "vite": "^6.3.0",
+    "@playwright/test": "^1.49.0"
+  }
+}
