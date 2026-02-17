@@ -1,0 +1,51 @@
+// Developer wisdom & algorithm one-liners shown when picking up powerups.
+// Each powerup type has a pool of quotes; one is picked at random.
+
+export const POWERUP_QUOTES = {
+  CODE_REVIEW: [
+    { speaker: 'Senior Dev', text: '"Always code as if the person who ends up maintaining your code is a violent psychopath who knows where you live."' },
+    { speaker: 'Linus T.', text: '"Talk is cheap. Show me the code."' },
+    { speaker: 'Kent Beck', text: '"Make it work, make it right, make it fast."' },
+    { speaker: 'Donald Knuth', text: '"Premature optimization is the root of all evil."' },
+    { speaker: 'Edsger Dijkstra', text: '"If debugging is removing bugs, then programming must be putting them in."' },
+    { speaker: 'Code Review', text: 'LGTM! Nuke all slop in range!' },
+    { speaker: 'Bjarne Stroustrup', text: '"There are only two kinds of languages: the ones people complain about and the ones nobody uses."' },
+    { speaker: 'Brian Kernighan', text: '"Debugging is twice as hard as writing the code. So if you write it as cleverly as possible, you\'re not smart enough to debug it."' },
+    { speaker: 'PR Comment', text: 'Have you considered NOT shipping this? Code review complete — slop eliminated!' },
+    { speaker: 'Fred Brooks', text: '"Adding manpower to a late software project makes it later."' },
+    { speaker: 'John Carmack', text: '"Sometimes, the elegant implementation is just a function. Not a method. Not a class. Not a framework. Just a function."' },
+    { speaker: 'Rob Pike', text: '"Complexity is multiplicative. Simplifying one part of the system makes the whole system simpler."' },
+  ],
+  GITIGNORE: [
+    { speaker: '.gitignore', text: 'node_modules/\n*.slop\nai_suggestions/**\n\nShield activated!' },
+    { speaker: 'Senior Dev', text: '"The best code is no code at all. Every line is a liability."' },
+    { speaker: 'Grace Hopper', text: '"The most dangerous phrase in the language is: we\'ve always done it this way."' },
+    { speaker: 'Martin Fowler', text: '"Any fool can write code that a computer can understand. Good programmers write code that humans can understand."' },
+    { speaker: '.gitignore', text: '*.ai-generated\ncopilot.suggestions\n\nInvincibility!' },
+    { speaker: '.gitignore', text: 'dist/\nbuild/\n.DS_Store\n*.slop\n\nNothing gets through!' },
+    { speaker: 'Ken Thompson', text: '"One of my most productive days was throwing away 1,000 lines of code."' },
+    { speaker: '.gitignore', text: 'vibe_coded/**\n*.hallucination\ntemp_fix_FINAL_v3.*\n\nSlop shield online!' },
+    { speaker: 'Linus Torvalds', text: '"Bad programmers worry about the code. Good programmers worry about data structures and their relationships."' },
+    { speaker: '.gitignore', text: '# do not commit\nmy_genius_idea.js\ntodo_delete_this/\n*.secret\n\nForce field active!' },
+  ],
+  LINTER: [
+    { speaker: 'ESLint', text: 'Warning: unused variable "aiSlop" at line 42.\n\nLinter orbs deployed!' },
+    { speaker: 'Robert C. Martin', text: '"Clean code always looks like it was written by someone who cares."' },
+    { speaker: 'The Linter', text: 'error: Expected semicolon.\nerror: "slop" is not defined.\n\nOrbit strike active!' },
+    { speaker: 'Alan Turing', text: '"We can only see a short distance ahead, but we can see plenty there that needs to be done."' },
+    { speaker: 'Strict Mode', text: '"use strict";\n// No more sloppy code!\n\nOrbit shields engaged!' },
+    { speaker: 'ESLint', text: 'error: no-console (x47)\nerror: any-type-forbidden (x12)\nfix: delete everything\n\nOrbs incoming!' },
+    { speaker: 'Guido van Rossum', text: '"Code is read much more often than it is written."' },
+    { speaker: 'TypeScript', text: 'error TS2345: Argument of type "slop" is not\nassignable to parameter of type "quality".\n\nType-safe orbit engaged!' },
+    { speaker: 'Rich Hickey', text: '"Simplicity is a prerequisite for reliability."' },
+    { speaker: 'Prettier', text: 'Reformatting slop...\n✓ 847 files fixed\n✓ World saved\n\nOrbit lock acquired!' },
+  ],
+  MINES: [
+    { speaker: 'DevOps', text: 'Deploying landmines to production... YOLO!' },
+    { speaker: 'Mine Layer', text: 'Every step you take leaves a surprise for the slop!' },
+    { speaker: 'Junior Dev', text: '"I left some TODO bombs in the codebase."' },
+    { speaker: 'Git Blame', text: 'These mines are YOUR problem now.' },
+    { speaker: 'CI Pipeline', text: 'Build failed. Explosively.' },
+    { speaker: 'Tech Debt', text: 'Planting time bombs in the codebase since 2024.' },
+  ],
+};
