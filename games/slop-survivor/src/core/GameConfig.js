@@ -1,10 +1,8 @@
 import Phaser from 'phaser';
 import { GAME, COLORS, DPR } from './Constants.js';
 import { BootScene } from '../scenes/BootScene.js';
-import { MenuScene } from '../scenes/MenuScene.js';
 import { GameScene } from '../scenes/GameScene.js';
 import { UIScene } from '../scenes/UIScene.js';
-import { GameOverScene } from '../scenes/GameOverScene.js';
 import { LevelUpScene } from '../scenes/LevelUpScene.js';
 
 export const GameConfig = {
@@ -28,5 +26,5 @@ export const GameConfig = {
       debug: false,
     },
   },
-  scene: [BootScene, MenuScene, GameScene, UIScene, GameOverScene, LevelUpScene],
+  scene: [BootScene, GameScene, UIScene, LevelUpScene],
 };

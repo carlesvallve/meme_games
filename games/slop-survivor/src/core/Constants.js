@@ -569,12 +569,12 @@ export const VFX = {
 
 export const INTRO = {
   BED_X: ARENA.CENTER_X - 80 * PX,
-  BED_Y: ARENA.CENTER_Y + 20 * PX,
+  BED_Y: ARENA.CENTER_Y,
   // Standing position after getting out of bed (visible gap from bed)
   STAND_X: ARENA.CENTER_X - 16 * PX,
-  STAND_Y: ARENA.CENTER_Y + 20 * PX,
+  STAND_Y: ARENA.CENTER_Y,
   SHIP_PARK_X: ARENA.CENTER_X + 60 * PX,
-  SHIP_PARK_Y: ARENA.CENTER_Y + 20 * PX,
+  SHIP_PARK_Y: ARENA.CENTER_Y,
   WAKE_DURATION: 200,
   GET_OUT_DURATION: 600,   // walking out of bed
   WALK_DURATION: 1000,     // walking to ship

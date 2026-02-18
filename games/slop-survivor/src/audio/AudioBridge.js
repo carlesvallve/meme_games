@@ -30,6 +30,8 @@ import {
   mineDropSfx,
   smallExplosionSfx,
   navSfx,
+  titleAppearSfx,
+  titleDismissSfx,
 } from './sfx.js';
 
 export function initAudioBridge() {
@@ -180,6 +182,13 @@ export function playSmallExplosionSfx() {
 }
 export function playEnemyHitSfx() {
   enemyHitSfx();
+}
+
+export function playTitleAppearSfx() {
+  titleAppearSfx();
+}
+export function playTitleDismissSfx() {
+  titleDismissSfx();
 }
 
 export function duckMusic() {

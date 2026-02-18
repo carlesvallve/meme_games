@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { GAME, PLAYER, COLORS, PX, PIXEL_SCALE, TRANSITION, ARENA, POWERUP_TYPES, POWERUP_DROP, TOUCH, XP_GEM, INTRO, VFX, PARALLAX, WEAPONS, KNOCKBACK } from '../core/Constants.js';
+import { GAME, PLAYER, COLORS, PX, PIXEL_SCALE, TRANSITION, ARENA, POWERUP_TYPES, POWERUP_DROP, TOUCH, XP_GEM, INTRO, VFX, PARALLAX, WEAPONS, KNOCKBACK, UI } from '../core/Constants.js';
 import { eventBus, Events } from '../core/EventBus.js';
 import { gameState } from '../core/GameState.js';
 import { Player } from '../entities/Player.js';
@@ -18,7 +18,8 @@ import { DialogBubble } from '../ui/DialogBubble.js';
 import { SpeechBubble } from '../ui/SpeechBubble.js';
 import { DEV_QUOTES, MONSTER_QUOTES } from '../ui/DevQuotes.js';
 import { showPowerupChoiceOverlay } from '../scenes/PowerupChoiceOverlay.js';
-import { playStartEngine, playUpdateEngine, playStopEngine, playPauseEngine, playResumeEngine, duckMusic, unduckMusic, startFootsteps, stopFootsteps, playEnemyHitSfx } from '../audio/AudioBridge.js';
+import { showGameOverOverlay } from '../scenes/GameOverOverlay.js';
+import { playStartEngine, playUpdateEngine, playStopEngine, playPauseEngine, playResumeEngine, duckMusic, unduckMusic, startFootsteps, stopFootsteps, playEnemyHitSfx, playTitleAppearSfx, playTitleDismissSfx } from '../audio/AudioBridge.js';
 import { EnemyProjectile } from '../entities/EnemyProjectile.js';
 import { EnemyMine } from '../entities/EnemyMine.js';
 import { LightingSystem } from '../core/LightingSystem.js';
@@ -86,14 +87,11 @@ export class GameScene extends Phaser.Scene {
     // --- Player ---
     this.player = new Player(this);
 
-    // --- Camera follow ---
+    // --- Camera reset & follow ---
+    this.cameras.main.setZoom(this.isMobile ? 1.8 : 1);
+    this.cameras.main.setAlpha(1);
     this.cameras.main.startFollow(this.player.sprite, true, 0.08, 0.08);
     this.cameras.main.setBounds(0, 0, ARENA.WIDTH, ARENA.HEIGHT);
-
-    // Mobile: zoom in so game objects are larger and more visible
-    if (this.isMobile) {
-      this.cameras.main.setZoom(1.8);
-    }
 
     // --- Systems ---
     this.waveSystem = new WaveSystem(this);
@@ -161,10 +159,7 @@ export class GameScene extends Phaser.Scene {
     eventBus.on(Events.LEVEL_UP, this.onLevelUp);
     eventBus.on(Events.ENEMY_SPLIT, this.onEnemySplit);
 
-    // --- Audio: start gameplay music ---
-    eventBus.emit(Events.MUSIC_GAMEPLAY);
-
-    // --- Intro cutscene ---
+    // --- Intro cutscene (handles audio init + menu music) ---
     this.introPlaying = true;
     this.playIntro();
 
@@ -692,10 +687,16 @@ export class GameScene extends Phaser.Scene {
   async playIntro() {
     const { BED_X, BED_Y, STAND_X, STAND_Y, SHIP_PARK_X, SHIP_PARK_Y, WAKE_DURATION, GET_OUT_DURATION, WALK_DURATION, BOARD_DURATION } = INTRO;
 
+    // Init audio and play menu music (replaces MenuScene's role)
+    eventBus.emit(Events.AUDIO_INIT);
+    eventBus.emit(Events.MUSIC_MENU);
+
     this.introDialog = new DialogBubble(this);
 
-    // Snap camera to intro area immediately
-    this.cameras.main.centerOn(ARENA.CENTER_X, ARENA.CENTER_Y);
+    // Stop camera follow during intro so we can position freely
+    this.cameras.main.stopFollow();
+    // Center camera slightly above intro elements so they appear in lower half of screen
+    this.cameras.main.centerOn(ARENA.CENTER_X, ARENA.CENTER_Y - 35 * PX);
 
     // Place ship at parked position (will be adjusted to floor after floorY is computed)
     this.player.sprite.setPosition(SHIP_PARK_X, SHIP_PARK_Y);
@@ -721,7 +722,7 @@ export class GameScene extends Phaser.Scene {
     floorLine.lineStyle(10 * PX, 0x5588ff, 0.35);
     floorLine.lineBetween(
       ARENA.CENTER_X - 180 * PX, floorY,
-      ARENA.CENTER_X + 300 * PX, floorY
+      ARENA.CENTER_X + 180 * PX, floorY
     );
     floorLine.setDepth(4);
     this._introFloorLine = floorLine;
@@ -773,7 +774,17 @@ export class GameScene extends Phaser.Scene {
       onDismiss: () => this.unfreezeWorld(),
     });
 
-    // --- Step 4: Walk from standing position to ship ---
+    // --- Step 3b: Title overlay — pause for player input ---
+    await this._showTitleOverlay();
+
+    // --- Step 4: Launch UIScene (HUD fades in) ---
+    this.scene.launch('UIScene');
+
+    // Stop menu music, will start gameplay music after boarding
+    eventBus.emit(Events.AUDIO_INIT); // ensure audio is initialized on user gesture
+    eventBus.emit(Events.MUSIC_STOP);
+
+    // --- Step 5: Walk from standing position to ship ---
     if (this.anims.exists('player-walk')) {
       dev.play('player-walk');
     }
@@ -787,7 +798,7 @@ export class GameScene extends Phaser.Scene {
     });
     stopFootsteps();
 
-    // --- Step 5: Board ship — ship becomes controllable immediately ---
+    // --- Step 6: Board ship — ship becomes controllable immediately ---
     dev.stop();
 
     // Dev fades into ship
@@ -840,11 +851,17 @@ export class GameScene extends Phaser.Scene {
     // Reset ship origin back to center for gameplay
     this.player.sprite.setOrigin(0.5, 0.5);
 
+    // Re-enable camera follow for gameplay
+    this.cameras.main.startFollow(this.player.sprite, true, 0.08, 0.08);
+
     // --- Ship is NOW controllable — no scripted liftoff ---
     this.introPlaying = false;
     gameState.started = true;
     this.waveSystem.start();
     this.introDialog = null;
+
+    // Start gameplay music
+    eventBus.emit(Events.MUSIC_GAMEPLAY);
 
     // Engines on sound + start continuous engine hum
     eventBus.emit(Events.SHIP_BOARD);
@@ -857,6 +874,140 @@ export class GameScene extends Phaser.Scene {
 
     // Track first thrust to show a liftoff speech bubble
     this._waitingForFirstThrust = true;
+  }
+
+  /** Show floating title overlay and wait for space/tap to dismiss */
+  _showTitleOverlay() {
+    return new Promise((resolve) => {
+      const w = GAME.WIDTH;
+      const h = GAME.HEIGHT;
+      const cx = w / 2;
+      const cam = this.cameras.main;
+
+      // Create a UI container that ignores camera scroll
+      const container = this.add.container(0, 0).setDepth(100).setScrollFactor(0);
+
+      // Convert camera viewport center to screen coordinates
+      const screenCX = cam.width / 2;
+      const screenCY = cam.height / 2;
+      const lift = 20 * PX; // shift entire title UI upward
+
+      // Title appear sound
+      playTitleAppearSfx();
+
+      // Title
+      const titleSize = Math.round(h * UI.TITLE_RATIO);
+      const titleY = screenCY - h * 0.18 - lift;
+      const title = this.add.text(screenCX, titleY, 'SLOP SURVIVOR', {
+        fontSize: titleSize + 'px',
+        fontFamily: UI.FONT,
+        color: '#44ff44',
+        fontStyle: 'bold',
+        shadow: { offsetX: 0, offsetY: 4, color: 'rgba(0,80,0,0.6)', blur: 12, fill: true },
+      }).setOrigin(0.5).setScrollFactor(0);
+      container.add(title);
+
+      // Title float animation
+      this.tweens.add({
+        targets: title,
+        y: titleY - 6 * PX,
+        duration: 2000,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut',
+      });
+
+      // Subtitle
+      const subSize = Math.round(h * UI.SMALL_RATIO);
+      const subtitle = this.add.text(screenCX, screenCY - h * 0.06 - lift, 'Survive the AI slop coding invasion', {
+        fontSize: subSize + 'px',
+        fontFamily: UI.FONT,
+        color: '#66cc66',
+      }).setOrigin(0.5).setScrollFactor(0);
+      container.add(subtitle);
+
+      // Control hints
+      const hintSize = Math.round(h * UI.SMALL_RATIO * 0.9);
+      const isMobile = GAME.IS_MOBILE;
+      const hintText = isMobile
+        ? 'Tap to Start'
+        : 'Press Space to Start';
+      const hint = this.add.text(screenCX, screenCY + h * 0.1 + 100 * PX - lift, hintText, {
+        fontSize: hintSize + 'px',
+        fontFamily: UI.FONT,
+        color: COLORS.MUTED_TEXT,
+        align: 'center',
+      }).setOrigin(0.5).setScrollFactor(0);
+      container.add(hint);
+
+      // Hint pulse
+      this.tweens.add({
+        targets: hint,
+        alpha: 0.3,
+        duration: 1200,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut',
+      });
+
+      // Mute button
+      const muteSize = Math.max(36 * PX, UI.MIN_TOUCH);
+      const muteX = cam.width - muteSize / 2 - 10 * PX;
+      const muteY = muteSize / 2 + 10 * PX;
+      const muteIcon = this.add.text(muteX, muteY, gameState.isMuted ? '🔇' : '🔊', {
+        fontSize: Math.round(muteSize * 0.5) + 'px',
+      }).setOrigin(0.5).setDepth(200).setScrollFactor(0);
+      muteIcon.setInteractive({ useHandCursor: true });
+      muteIcon.on('pointerup', (pointer, lx, ly, event) => {
+        event.stopPropagation();
+        eventBus.emit(Events.AUDIO_TOGGLE_MUTE);
+        muteIcon.setText(gameState.isMuted ? '🔇' : '🔊');
+      });
+      container.add(muteIcon);
+
+      const dismiss = () => {
+        // Remove listeners
+        this.input.keyboard.off('keydown-SPACE', onKey);
+        this.input.off('pointerdown', onTap);
+
+        // Dismiss sound
+        playTitleDismissSfx();
+
+        // Title + subtitle slide up and fade
+        this.tweens.add({
+          targets: [title, subtitle, muteIcon],
+          y: '-=60',
+          alpha: 0,
+          duration: 400,
+          ease: 'Quad.easeIn',
+        });
+
+        // Hint slides down and fades
+        this.tweens.add({
+          targets: hint,
+          y: '+=60',
+          alpha: 0,
+          duration: 400,
+          ease: 'Quad.easeIn',
+          onComplete: () => {
+            container.destroy();
+            resolve();
+          },
+        });
+      };
+
+      const onKey = () => dismiss();
+      const onTap = (pointer) => {
+        // Don't dismiss if tapping the mute button
+        const mx = muteIcon.x, my = muteIcon.y;
+        const dist = Math.sqrt((pointer.x - mx) ** 2 + (pointer.y - my) ** 2);
+        if (dist < muteSize) return;
+        dismiss();
+      };
+
+      this.input.keyboard.on('keydown-SPACE', onKey);
+      this.input.on('pointerdown', onTap);
+    });
   }
 
   /** Promisified tween helper */
@@ -1177,16 +1328,21 @@ export class GameScene extends Phaser.Scene {
 
   update(time, delta) {
     if (gameState.gameOver) {
-      // Keep lighting alive after death — just the player glow, no headlight/enemies
+      // Keep lighting alive after death — same as intro dev character.
+      // Divide radius by current zoom so the on-screen light size stays
+      // constant regardless of the death-zoom tween (LightingSystem already
+      // multiplies radius × zoom internally).
       if (this.lighting && this.lighting.active && this.player.sprite) {
+        const zoom = this.cameras.main.zoom;
         this.lighting.setLight(
           'player',
           this.player.sprite.x,
           this.player.sprite.y,
-          180 * PX,
-          0.6,
-          1.0, 1.0, 1.0
+          200 * PX / zoom,
+          0.8,
+          1.0, 0.95, 0.8
         );
+        this.lighting.update();
       }
       return;
     }
@@ -2187,6 +2343,21 @@ export class GameScene extends Phaser.Scene {
     }
 
     playStopEngine();
+
+    // Pause wave/boss timers to prevent boss warnings after death
+    if (this.waveSystem.spawnTimer) this.waveSystem.spawnTimer.paused = true;
+    if (this.waveSystem.bossTimer) this.waveSystem.bossTimer.paused = true;
+
+    // Remove headlight and enemy lights so they don't blast the game over UI
+    if (this.lighting) {
+      this.lighting.removeLight('headlight');
+      // Remove all enemy lights
+      const activeEnemies = this.waveSystem.getActiveEnemies();
+      for (const enemy of activeEnemies) {
+        this.lighting.removeLight(`enemy_${enemy.id}`);
+      }
+    }
+
     gameState.saveBest();
     eventBus.emit(Events.GAME_OVER, {
       score: gameState.score,
@@ -2239,32 +2410,36 @@ export class GameScene extends Phaser.Scene {
       ...BUBBLE_COLORS.DEV,
     });
 
-    const goToGameOver = () => {
+    const showOverlay = () => {
       if (this._deathTransitioning) return;
       this._deathTransitioning = true;
       deathAnchor.destroy();
       this.input.off('pointerdown', onTap);
       this.input.keyboard.off('keydown-SPACE', onTap);
-      this.scene.stop('UIScene');
-      this.cameras.main.fadeOut(TRANSITION.FADE_DURATION, 0, 0, 0);
-      this.cameras.main.once('camerafadeoutcomplete', () => {
-        this.scene.start('GameOverScene');
+
+      // Show game over overlay in GameScene (so lighting affects it)
+      showGameOverOverlay(this, {
+        score: gameState.score,
+        enemiesKilled: gameState.enemiesKilled,
+        timeSurvived: gameState.timeSurvived,
+        level: gameState.level,
+        bestScore: gameState.bestScore,
+      }, () => {
+        // On restart: stop UIScene and restart GameScene
+        this.scene.stop('UIScene');
+        eventBus.emit(Events.MUSIC_STOP);
+        eventBus.emit(Events.GAME_RESTART);
+        this.scene.restart();
       });
-      // Safety fallback: if camerafadeoutcomplete never fires, force transition
-      setTimeout(() => {
-        if (this.scene.isActive()) {
-          this.scene.start('GameOverScene');
-        }
-      }, TRANSITION.FADE_DURATION + 500);
     };
-    const onTap = () => goToGameOver();
+    const onTap = () => showOverlay();
 
     // Allow tap to skip after 1s (real time, unaffected by slow-mo)
     setTimeout(() => {
       this.input.on('pointerdown', onTap);
       this.input.keyboard.on('keydown-SPACE', onTap);
     }, 1000);
-    // Auto-transition after 3s regardless
-    setTimeout(() => goToGameOver(), 3000);
+    // Auto-show overlay after 3s regardless
+    setTimeout(() => showOverlay(), 3000);
   }
 }
