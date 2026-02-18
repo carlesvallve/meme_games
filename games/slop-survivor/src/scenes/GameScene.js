@@ -55,8 +55,10 @@ export class GameScene extends Phaser.Scene {
 
   create() {
     gameState.reset();
-    // Ensure clean time scale on every session start (death slow-mo may have leaked)
-    this.time.timeScale = 1;
+    // Reset stale flags from previous session (Phaser reuses Scene instances)
+    this._deathTransitioning = false;
+    this._worldFrozen = false;
+    this._powerupDialogActive = false;
     this.cameras.main.setBackgroundColor(0x080808);
 
     // Mobile detection — prefer display config, fallback to device detection
@@ -159,8 +161,6 @@ export class GameScene extends Phaser.Scene {
 
     // Cleanup on shutdown
     this.events.on('shutdown', () => {
-      // Reset timeScale so it doesn't leak into the next scene or session
-      this.time.timeScale = 1;
       playStopEngine();
       eventBus.off(Events.ENEMY_KILLED, this.onEnemyKilled);
       eventBus.off(Events.WEAPON_UPGRADE, this.onWeaponUpgrade);
@@ -1835,10 +1835,6 @@ export class GameScene extends Phaser.Scene {
     if (gameState.gameOver) return;
     gameState.gameOver = true;
 
-    // CRITICAL: Reset timeScale immediately — death slow-mo must not leak
-    // into the transition or into the next game session
-    this.time.timeScale = 1;
-
     // If world was frozen (e.g. died during powerup dialog), unfreeze it
     if (this._worldFrozen) {
       this.unfreezeWorld();
@@ -1898,12 +1894,9 @@ export class GameScene extends Phaser.Scene {
       ...BUBBLE_COLORS.DEV,
     });
 
-    // Use real-time setTimeout (not scene time, which is affected by slow-mo timeScale)
     const goToGameOver = () => {
       if (this._deathTransitioning) return;
       this._deathTransitioning = true;
-      // Ensure timeScale is normal for the fade transition
-      this.time.timeScale = 1;
       deathAnchor.destroy();
       this.input.off('pointerdown', onTap);
       this.input.keyboard.off('keydown-SPACE', onTap);
