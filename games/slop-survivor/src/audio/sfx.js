@@ -157,6 +157,12 @@ export function clickSfx() {
   playTone(523.25, 'sine', 0.06, 0.15, 5000);
 }
 
+// UI navigate / card hover — soft high blip
+export function navSfx() {
+  if (gameState.isMuted) return;
+  playTone(880, 'sine', 0.04, 0.1, 4000);
+}
+
 // Ship explosion — big boom with noise burst and low rumble
 export function explosionSfx() {
   if (gameState.isMuted) return;

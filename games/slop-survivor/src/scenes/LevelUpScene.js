@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { GAME, COLORS, UI, PX, PIXEL_SCALE } from '../core/Constants.js';
 import { eventBus, Events } from '../core/EventBus.js';
 import { gameState } from '../core/GameState.js';
-import { playClickSfx } from '../audio/AudioBridge.js';
+import { playClickSfx, playNavSfx } from '../audio/AudioBridge.js';
 import { renderPixelArt } from '../core/PixelRenderer.js';
 import { PALETTE } from '../sprites/palette.js';
 import {
@@ -28,10 +28,9 @@ const ICON_MAP = {
 /**
  * Creates and shows the level-up overlay directly inside the given scene.
  * No separate Phaser Scene — just a container pinned to the camera.
- * Returns a cleanup function to remove it.
+ * Supports mouse/touch AND keyboard (A/D or Left/Right to navigate, Space to confirm).
  */
 export function showLevelUpOverlay(scene, levelData) {
-  const cam = scene.cameras.main;
   const w = GAME.WIDTH;
   const h = GAME.HEIGHT;
   const cx = w / 2;
@@ -40,9 +39,9 @@ export function showLevelUpOverlay(scene, levelData) {
   const root = scene.add.container(0, 0);
   root.setDepth(1000); // above everything
 
-  // Semi-transparent dark overlay
+  // Semi-transparent dark overlay — slight purple tint
   const overlay = scene.add.graphics();
-  overlay.fillStyle(0x000000, 0.6);
+  overlay.fillStyle(0x0a0018, 0.65);
   overlay.fillRect(0, 0, w, h);
   overlay.setAlpha(0);
   root.add(overlay);
@@ -74,22 +73,33 @@ export function showLevelUpOverlay(scene, levelData) {
     });
   }
 
-  // Title
-  const titleSize = Math.round(h * UI.HEADING_RATIO);
-  const title = scene.add.text(cx, h * 0.18, `LEVEL ${levelData.level}!`, {
+  // Title — big and celebratory
+  const titleSize = Math.round(h * UI.HEADING_RATIO * 1.15);
+  const title = scene.add.text(cx, h * 0.12, 'LEVEL UP!', {
     fontSize: titleSize + 'px',
     fontFamily: UI.FONT,
     color: '#ffcc00',
     fontStyle: 'bold',
-    shadow: { offsetX: 0, offsetY: 3, color: 'rgba(0,0,0,0.5)', blur: 8, fill: true },
+    shadow: { offsetX: 0, offsetY: 4, color: 'rgba(0,0,0,0.6)', blur: 10, fill: true },
   }).setOrigin(0.5);
   root.add(title);
 
-  const subSize = Math.round(h * UI.BODY_RATIO);
-  const subtitle = scene.add.text(cx, h * 0.25, 'Choose an upgrade:', {
+  // Level number badge
+  const lvlSize = Math.round(h * UI.BODY_RATIO * 1.1);
+  const lvlText = scene.add.text(cx, h * 0.20, `Level ${levelData.level}`, {
+    fontSize: lvlSize + 'px',
+    fontFamily: UI.FONT,
+    color: '#ffee88',
+    fontStyle: 'bold',
+  }).setOrigin(0.5);
+  root.add(lvlText);
+
+  // Subtitle — dev themed
+  const subSize = Math.round(h * UI.BODY_RATIO * 0.85);
+  const subtitle = scene.add.text(cx, h * 0.26, "Upgrade the codebase — it's permanent!", {
     fontSize: subSize + 'px',
     fontFamily: UI.FONT,
-    color: COLORS.UI_TEXT,
+    color: '#cc99ff',
   }).setOrigin(0.5);
   root.add(subtitle);
 
@@ -104,20 +114,91 @@ export function showLevelUpOverlay(scene, levelData) {
 
   const startX = cx - (options.length - 1) * (cardSize + gap) / 2;
 
+  // Track cards for keyboard navigation
+  const cards = [];
+  let selectedIndex = 0;
+  let confirmed = false;
+
+  const confirmSelection = () => {
+    if (confirmed) return;
+    confirmed = true;
+    playClickSfx();
+    eventBus.emit(Events.WEAPON_UPGRADE, { upgrade: options[selectedIndex] });
+    gameState.upgrades.push(options[selectedIndex].id);
+    cleanup();
+    root.destroy();
+  };
+
+  const setSelected = (idx) => {
+    if (idx === selectedIndex) return;
+    playNavSfx();
+    selectedIndex = idx;
+    updateHighlight();
+  };
+
+  const updateHighlight = () => {
+    cards.forEach((card, i) => {
+      card.bg.clear();
+      drawCardBg(card.bg, cardSize, cardSize, i === selectedIndex);
+      scene.tweens.add({
+        targets: card.container,
+        scaleX: i === selectedIndex ? 1.05 : 1,
+        scaleY: i === selectedIndex ? 1.05 : 1,
+        duration: 80,
+      });
+    });
+  };
+
   options.forEach((opt, i) => {
     const cardX = startX + i * (cardSize + gap);
     const cardY = h * 0.52;
-    createCard(scene, root, cardX, cardY, cardSize, cardSize, opt, () => {
-      // On select: emit upgrade, destroy overlay
-      playClickSfx();
-      eventBus.emit(Events.WEAPON_UPGRADE, { upgrade: opt });
-      gameState.upgrades.push(opt.id);
-      root.destroy();
-    });
+    const card = createCard(scene, root, cardX, cardY, cardSize, cardSize, opt, () => {
+      selectedIndex = i;
+      confirmSelection();
+    }, (idx) => {
+      setSelected(idx);
+    }, i);
+    cards.push(card);
   });
+
+  // Keyboard navigation
+  const keyA = scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.A);
+  const keyD = scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.D);
+  const keyLeft = scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.LEFT);
+  const keyRight = scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.RIGHT);
+  const keySpace = scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+  const keyEnter = scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ENTER);
+
+  const onKeyDown = (event) => {
+    if (confirmed) return;
+    const code = event.keyCode;
+    if (code === keyA.keyCode || code === keyLeft.keyCode) {
+      setSelected(Math.max(0, selectedIndex - 1));
+    } else if (code === keyD.keyCode || code === keyRight.keyCode) {
+      setSelected(Math.min(options.length - 1, selectedIndex + 1));
+    } else if (code === keySpace.keyCode || code === keyEnter.keyCode) {
+      confirmSelection();
+    }
+  };
+
+  scene.input.keyboard.on('keydown', onKeyDown);
+
+  // Initial highlight on first card
+  updateHighlight();
+
+  // Cleanup function to remove keyboard listeners
+  const cleanup = () => {
+    scene.input.keyboard.off('keydown', onKeyDown);
+    scene.input.keyboard.removeKey(keyA);
+    scene.input.keyboard.removeKey(keyD);
+    scene.input.keyboard.removeKey(keyLeft);
+    scene.input.keyboard.removeKey(keyRight);
+    scene.input.keyboard.removeKey(keySpace);
+    scene.input.keyboard.removeKey(keyEnter);
+  };
 }
 
-function createCard(scene, root, x, y, w, h, upgrade, onSelect) {
+function createCard(scene, root, x, y, w, h, upgrade, onSelect, onHover, index) {
   const container = scene.add.container(x, y);
   root.add(container);
 
@@ -158,13 +239,22 @@ function createCard(scene, root, x, y, w, h, upgrade, onSelect) {
   }).setOrigin(0.5);
   container.add(descText);
 
-  // "NEW WEAPON" badge for unique unlocks
+  // "NEW WEAPON" badge for unique unlocks, otherwise "PERMANENT"
+  const badgeY = h * 0.42;
+  const badgeSize = Math.round(GAME.HEIGHT * UI.SMALL_RATIO * 0.7);
   if (upgrade.unique) {
-    const badgeSize = Math.round(GAME.HEIGHT * UI.SMALL_RATIO * 0.7);
-    const badge = scene.add.text(0, h * 0.42, 'NEW WEAPON', {
+    const badge = scene.add.text(0, badgeY, '★ NEW WEAPON', {
       fontSize: badgeSize + 'px',
       fontFamily: UI.FONT,
       color: '#ff6633',
+      fontStyle: 'bold',
+    }).setOrigin(0.5);
+    container.add(badge);
+  } else {
+    const badge = scene.add.text(0, badgeY, 'PERMANENT', {
+      fontSize: badgeSize + 'px',
+      fontFamily: UI.FONT,
+      color: '#cc99ff',
       fontStyle: 'bold',
     }).setOrigin(0.5);
     container.add(badge);
@@ -175,9 +265,7 @@ function createCard(scene, root, x, y, w, h, upgrade, onSelect) {
   container.setInteractive({ useHandCursor: true });
 
   container.on('pointerover', () => {
-    bg.clear();
-    drawCardBg(bg, w, h, true);
-    scene.tweens.add({ targets: container, scaleX: 1.05, scaleY: 1.05, duration: 80 });
+    onHover(index);
   });
 
   container.on('pointerout', () => {
@@ -198,19 +286,21 @@ function createCard(scene, root, x, y, w, h, upgrade, onSelect) {
     delay: 100,
     ease: 'Back.easeOut',
   });
+
+  return { container, bg };
 }
 
 function drawCardBg(bg, w, h, hovered) {
   const r = 8 * PX;
   if (hovered) {
-    bg.fillStyle(0x222244, 0.85);
+    bg.fillStyle(0x1a1030, 0.9);
     bg.fillRoundedRect(-w / 2, -h / 2, w, h, r);
     bg.lineStyle(3, 0xffcc00, 1);
     bg.strokeRoundedRect(-w / 2, -h / 2, w, h, r);
   } else {
-    bg.fillStyle(0x111133, 0.75);
+    bg.fillStyle(0x140c28, 0.82);
     bg.fillRoundedRect(-w / 2, -h / 2, w, h, r);
-    bg.lineStyle(2, 0x6633cc, 0.6);
+    bg.lineStyle(2, 0x9955dd, 0.5);
     bg.strokeRoundedRect(-w / 2, -h / 2, w, h, r);
   }
 }

@@ -280,8 +280,7 @@ export const UPGRADE_OPTIONS = [
   { id: 'projectile_speed', name: 'Proj Speed+', desc: 'Faster projectiles', icon: 'icon-proj-speed', repeatable: true, apply: (w) => { w.projectileSpeed += 80 * PX; } },
   { id: 'extra_projectile', name: 'Multi-Shot', desc: '+1 projectile', icon: 'icon-multi-shot', repeatable: true, apply: (w) => { w.projectileCount = (w.projectileCount || 1) + 1; } },
   { id: 'wider_area', name: 'Area+', desc: 'Bigger hit area', icon: 'icon-area', repeatable: true, apply: (w) => { w.projectileSize += 4 * PX; } },
-  // One-time weapon unlocks
-  { id: 'homing_missiles', name: 'Homing Missiles', desc: 'Auto-targeting missiles with blast radius', icon: 'icon-homing', unique: true, apply: (w, ws) => { ws.homingUnlocked = true; } },
+  // homing_missiles removed — now a timed powerup drop
   // guided_laser removed — guided laser is now always active by default
   // triple_shot removed — now a timed powerup drop
   // mines removed — now a timed powerup drop
@@ -292,14 +291,16 @@ export const UPGRADE_OPTIONS = [
 export const POWERUP_TYPES = {
   CODE_REVIEW: {
     name: 'Code Review',
-    desc: 'Area blast — damages all nearby slop!',
+    desc: 'Vortex that pulls enemies in and damages them!',
     color: 0xff6633,
     width: 30 * PX,
     height: 30 * PX,
-    duration: 0, // instant
-    blastRadius: 180 * PX,
-    blastDamage: 5,
-    dropChance: 0.08,
+    duration: 8000,
+    vortexRadius: 200 * PX,
+    vortexPullForce: 120 * PX,  // pull speed px/s
+    vortexDamage: 1,             // damage per tick
+    vortexTickRate: 500,         // ms between damage ticks
+    unlockMinute: 1.5,
   },
   GITIGNORE: {
     name: '.gitignore',
@@ -308,7 +309,7 @@ export const POWERUP_TYPES = {
     width: 30 * PX,
     height: 30 * PX,
     duration: 5000,
-    dropChance: 0.05,
+    unlockMinute: 0,
   },
   LINTER: {
     name: 'Linter',
@@ -320,7 +321,7 @@ export const POWERUP_TYPES = {
     orbitRadius: 80 * PX,
     orbitSpeed: 0.004,
     orbitDamage: 2,
-    dropChance: 0.04,
+    unlockMinute: 1,
   },
   MINES: {
     name: 'Mine Layer',
@@ -329,7 +330,7 @@ export const POWERUP_TYPES = {
     width: 30 * PX,
     height: 30 * PX,
     duration: 8000,
-    dropChance: 0.04,
+    unlockMinute: 2,
   },
   TRIPLE_SHOT: {
     name: 'Triple Shot',
@@ -338,8 +339,34 @@ export const POWERUP_TYPES = {
     width: 30 * PX,
     height: 30 * PX,
     duration: 10000,
-    dropChance: 0.04,
+    unlockMinute: 2.5,
   },
+  HOMING: {
+    name: 'Homing Missiles',
+    desc: 'Auto-targeting missiles with blast radius for 12 seconds!',
+    color: 0xff4444,
+    width: 30 * PX,
+    height: 30 * PX,
+    duration: 12000,
+    unlockMinute: 3,
+  },
+};
+
+// --- Powerup drop system (unified) ---
+export const POWERUP_DROP = {
+  // Single drop chance per enemy kill (replaces per-type dropChance)
+  BASE_CHANCE: 0.06,           // 6% base chance per kill
+  // Scales with elapsed minutes
+  RAMP_START_MINUTE: 2,       // drop chance starts increasing at 2 min
+  RAMP_PER_MINUTE: 0.015,     // +1.5% per minute after ramp start
+  MAX_CHANCE: 0.14,            // cap at 14%
+  // Minimum time between powerup drops (prevents flooding)
+  MIN_INTERVAL: 8000,          // ms — at least 8s between drops
+  // Number of choices offered
+  CHOICE_COUNT: 2,
+  // Generic token appearance
+  TOKEN_SIZE: 30 * PX,
+  TOKEN_COLOR: 0x4488ff,
 };
 
 // --- XP Gems ---
@@ -544,7 +571,7 @@ export const INTRO = {
   BED_X: ARENA.CENTER_X - 80 * PX,
   BED_Y: ARENA.CENTER_Y + 20 * PX,
   // Standing position after getting out of bed (visible gap from bed)
-  STAND_X: ARENA.CENTER_X - 30 * PX,
+  STAND_X: ARENA.CENTER_X - 16 * PX,
   STAND_Y: ARENA.CENTER_Y + 20 * PX,
   SHIP_PARK_X: ARENA.CENTER_X + 60 * PX,
   SHIP_PARK_Y: ARENA.CENTER_Y + 20 * PX,

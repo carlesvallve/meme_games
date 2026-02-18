@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { GAME, PLAYER, COLORS, PX, PIXEL_SCALE, TRANSITION, ARENA, POWERUP_TYPES, TOUCH, XP_GEM, INTRO, VFX, PARALLAX, WEAPONS, KNOCKBACK } from '../core/Constants.js';
+import { GAME, PLAYER, COLORS, PX, PIXEL_SCALE, TRANSITION, ARENA, POWERUP_TYPES, POWERUP_DROP, TOUCH, XP_GEM, INTRO, VFX, PARALLAX, WEAPONS, KNOCKBACK } from '../core/Constants.js';
 import { eventBus, Events } from '../core/EventBus.js';
 import { gameState } from '../core/GameState.js';
 import { Player } from '../entities/Player.js';
@@ -8,6 +8,7 @@ import { WeaponSystem } from '../systems/WeaponSystem.js';
 import { LevelSystem } from '../systems/LevelSystem.js';
 import { XPGem } from '../entities/XPGem.js';
 import { PowerUp } from '../entities/PowerUp.js';
+import { BlastPickup, BLAST_CONFIG } from '../entities/BlastPickup.js';
 import { VFXSystem } from '../systems/VFXSystem.js';
 // Pixel art imports kept for potential future use
 // import { renderPixelArt } from '../core/PixelRenderer.js';
@@ -15,8 +16,8 @@ import { VFXSystem } from '../systems/VFXSystem.js';
 // import { PALETTE } from '../sprites/palette.js';
 import { DialogBubble } from '../ui/DialogBubble.js';
 import { SpeechBubble } from '../ui/SpeechBubble.js';
-import { POWERUP_QUOTES } from '../ui/PowerupQuotes.js';
 import { DEV_QUOTES, MONSTER_QUOTES } from '../ui/DevQuotes.js';
+import { showPowerupChoiceOverlay } from '../scenes/PowerupChoiceOverlay.js';
 import { playStartEngine, playUpdateEngine, playStopEngine, playPauseEngine, playResumeEngine, duckMusic, unduckMusic, startFootsteps, stopFootsteps, playEnemyHitSfx } from '../audio/AudioBridge.js';
 import { EnemyProjectile } from '../entities/EnemyProjectile.js';
 import { EnemyMine } from '../entities/EnemyMine.js';
@@ -58,7 +59,12 @@ export class GameScene extends Phaser.Scene {
     // Reset stale flags from previous session (Phaser reuses Scene instances)
     this._deathTransitioning = false;
     this._worldFrozen = false;
-    this._powerupDialogActive = false;
+    this._lastPowerupDropTime = 0; // throttle powerup drops
+    this._lastBlastDropTime = 0;   // throttle blast pickups
+    this._vortexActive = false;
+    this._vortexTimer = 0;
+    this._vortexLastTick = 0;
+    this._vortexGfx = null;
     this.cameras.main.setBackgroundColor(0x080808);
 
     // Mobile detection — prefer display config, fallback to device detection
@@ -109,6 +115,7 @@ export class GameScene extends Phaser.Scene {
     // --- Collectibles ---
     this.xpGems = [];
     this.powerUps = [];
+    this.blastPickups = [];
 
     // --- Enemy hazards (projectiles + mines from behavior variants) ---
     this.enemyProjectiles = [];
@@ -138,6 +145,7 @@ export class GameScene extends Phaser.Scene {
     this.onEnemyKilled = this.handleEnemyKilled.bind(this);
     this.onWeaponUpgrade = this.handleWeaponUpgrade.bind(this);
     this.onPowerupCollected = this.handlePowerupCollected.bind(this);
+    this.onPowerupChosen = this.handlePowerupChosen.bind(this);
     this.onBossSpawn = this.handleBossSpawn.bind(this);
     this.onLevelUp = this.handleLevelUp.bind(this);
     this.onEnemySplit = this.handleEnemySplit.bind(this);
@@ -145,6 +153,7 @@ export class GameScene extends Phaser.Scene {
     eventBus.on(Events.ENEMY_KILLED, this.onEnemyKilled);
     eventBus.on(Events.WEAPON_UPGRADE, this.onWeaponUpgrade);
     eventBus.on(Events.POWERUP_COLLECTED, this.onPowerupCollected);
+    eventBus.on(Events.POWERUP_CHOSEN, this.onPowerupChosen);
     eventBus.on(Events.BOSS_SPAWN, this.onBossSpawn);
     eventBus.on(Events.LEVEL_UP, this.onLevelUp);
     eventBus.on(Events.ENEMY_SPLIT, this.onEnemySplit);
@@ -165,9 +174,13 @@ export class GameScene extends Phaser.Scene {
       eventBus.off(Events.ENEMY_KILLED, this.onEnemyKilled);
       eventBus.off(Events.WEAPON_UPGRADE, this.onWeaponUpgrade);
       eventBus.off(Events.POWERUP_COLLECTED, this.onPowerupCollected);
+      eventBus.off(Events.POWERUP_CHOSEN, this.onPowerupChosen);
       eventBus.off(Events.BOSS_SPAWN, this.onBossSpawn);
       eventBus.off(Events.LEVEL_UP, this.onLevelUp);
       eventBus.off(Events.ENEMY_SPLIT, this.onEnemySplit);
+      // Clean up vortex
+      if (this._vortexGfx) { this._vortexGfx.destroy(); this._vortexGfx = null; }
+      this._vortexActive = false;
       // Clean up enemy hazards
       this.enemyProjectiles.forEach(p => { if (!p.dead) p.destroy(); });
       this.enemyMines.forEach(m => { if (!m.dead) m.destroy(); });
@@ -997,9 +1010,6 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
-    // Pause gameplay during powerup dialog
-    if (this._powerupDialogActive) return;
-
     // Update timer
     this.gameTimer += delta;
     gameState.timeSurvived = Math.floor(this.gameTimer / 1000);
@@ -1273,12 +1283,81 @@ export class GameScene extends Phaser.Scene {
         this.powerUps.splice(i, 1);
         continue;
       }
-      // Check collection
       const dx = px - pu.sprite.x;
       const dy = py - pu.sprite.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist < PLAYER.WIDTH * 0.5 + pu.config.width) {
+      if (dist < PLAYER.WIDTH * 0.5 + POWERUP_DROP.TOKEN_SIZE) {
         pu.collect();
+      }
+    }
+
+    // --- Update blast pickups (instant explosion on touch) ---
+    for (let i = this.blastPickups.length - 1; i >= 0; i--) {
+      const bp = this.blastPickups[i];
+      if (bp.collected || !bp.sprite.active) {
+        this.blastPickups.splice(i, 1);
+        continue;
+      }
+      const dx = px - bp.sprite.x;
+      const dy = py - bp.sprite.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < PLAYER.WIDTH * 0.5 + POWERUP_DROP.TOKEN_SIZE) {
+        bp.collect(enemies);
+      }
+    }
+
+    // --- Update Code Review vortex ---
+    if (this._vortexActive) {
+      this._vortexTimer += delta;
+      const cfg = POWERUP_TYPES.CODE_REVIEW;
+      // Pull enemies toward player and deal periodic damage
+      if (this._vortexTimer - this._vortexLastTick >= cfg.vortexTickRate) {
+        this._vortexLastTick = this._vortexTimer;
+        for (const enemy of enemies) {
+          if (enemy.dead) continue;
+          const edx = enemy.sprite.x - px;
+          const edy = enemy.sprite.y - py;
+          const eDist = Math.sqrt(edx * edx + edy * edy);
+          if (eDist <= cfg.vortexRadius && eDist > 0) {
+            enemy.takeDamage(cfg.vortexDamage);
+          }
+        }
+      }
+      // Continuous pull force (every frame)
+      const pullDt = delta / 1000;
+      for (const enemy of enemies) {
+        if (enemy.dead) continue;
+        const edx = enemy.sprite.x - px;
+        const edy = enemy.sprite.y - py;
+        const eDist = Math.sqrt(edx * edx + edy * edy);
+        if (eDist <= cfg.vortexRadius && eDist > 10) {
+          const pull = cfg.vortexPullForce * pullDt;
+          const nx = -edx / eDist;
+          const ny = -edy / eDist;
+          enemy.sprite.x += nx * pull;
+          enemy.sprite.y += ny * pull;
+        }
+      }
+      // Visual: spinning ring around player
+      if (this._vortexGfx && this._vortexGfx.active) {
+        this._vortexAngle += delta * 0.003;
+        this._vortexGfx.clear();
+        this._vortexGfx.setPosition(px, py);
+        // Outer ring
+        this._vortexGfx.lineStyle(3 * PX, cfg.color, 0.5);
+        this._vortexGfx.strokeCircle(0, 0, cfg.vortexRadius);
+        // Spinning dashes
+        const dashCount = 8;
+        for (let d = 0; d < dashCount; d++) {
+          const angle = this._vortexAngle + (Math.PI * 2 * d) / dashCount;
+          const innerR = cfg.vortexRadius * 0.3;
+          const outerR = cfg.vortexRadius * 0.9;
+          this._vortexGfx.lineStyle(2 * PX, cfg.color, 0.6);
+          this._vortexGfx.beginPath();
+          this._vortexGfx.moveTo(Math.cos(angle) * innerR, Math.sin(angle) * innerR);
+          this._vortexGfx.lineTo(Math.cos(angle) * outerR, Math.sin(angle) * outerR);
+          this._vortexGfx.strokePath();
+        }
       }
     }
 
@@ -1354,23 +1433,17 @@ export class GameScene extends Phaser.Scene {
     }
     this._lastEnemyLightCount = enemyIdx;
 
-    // Power-up glows
+    // Power-up glows (generic teal for all tokens)
     for (let i = 0; i < this.powerUps.length; i++) {
       const pu = this.powerUps[i];
       if (pu.collected || !pu.sprite.active) continue;
-      const colors = {
-        CODE_REVIEW: [1.0, 0.4, 0.2],
-        GITIGNORE: [0.2, 0.5, 1.0],
-        LINTER: [1.0, 0.9, 0.2],
-      };
-      const c = colors[pu.typeName] || [1, 1, 1];
       this.lighting.setLight(
         `powerup-${i}`,
         pu.sprite.x,
         pu.sprite.y,
         100 * PX,
         0.7,
-        c[0], c[1], c[2]
+        0.3, 0.5, 1.0
       );
     }
     // Clean stale power-up lights
@@ -1393,16 +1466,29 @@ export class GameScene extends Phaser.Scene {
     const gem = new XPGem(this, x, y, gemSize);
     this.xpGems.push(gem);
 
-    // Random power-up drop (drop rate decreases over time via difficulty scaling)
-    const dropMult = this.waveSystem.getPowerupDropMult();
-    const roll = Math.random();
-    let cumChance = 0;
-    for (const [typeName, cfg] of Object.entries(POWERUP_TYPES)) {
-      cumChance += cfg.dropChance * dropMult;
-      if (roll < cumChance) {
-        const pu = new PowerUp(this, x, y, typeName);
+    const elapsed = this.gameTimer;
+
+    // Blast pickup drop (Code Review — instant explosion)
+    const blastTimeSinceLast = elapsed - this._lastBlastDropTime;
+    if (blastTimeSinceLast >= BLAST_CONFIG.MIN_INTERVAL && Math.random() < BLAST_CONFIG.DROP_CHANCE) {
+      const bp = new BlastPickup(this, x, y);
+      this.blastPickups.push(bp);
+      this._lastBlastDropTime = elapsed;
+    }
+
+    // Powerup token drop (choice system)
+    const puTimeSinceLast = elapsed - this._lastPowerupDropTime;
+    if (puTimeSinceLast >= POWERUP_DROP.MIN_INTERVAL) {
+      const minutes = elapsed / 60000;
+      const rampExtra = minutes > POWERUP_DROP.RAMP_START_MINUTE
+        ? POWERUP_DROP.RAMP_PER_MINUTE * (minutes - POWERUP_DROP.RAMP_START_MINUTE)
+        : 0;
+      const dropChance = Math.min(POWERUP_DROP.MAX_CHANCE, POWERUP_DROP.BASE_CHANCE + rampExtra);
+
+      if (Math.random() < dropChance) {
+        const pu = new PowerUp(this, x, y);
         this.powerUps.push(pu);
-        break;
+        this._lastPowerupDropTime = elapsed;
       }
     }
   }
@@ -1413,15 +1499,33 @@ export class GameScene extends Phaser.Scene {
     this.scene.resume('GameScene');
   }
 
-  handlePowerupCollected({ type, x, y, config }) {
-    // Apply the powerup effect
+  /**
+   * Token collected — pause game and show the powerup choice overlay.
+   */
+  handlePowerupCollected() {
+    // Pause GameScene and show choice overlay in UIScene
+    this.scene.pause('GameScene');
+
+    const uiScene = this.scene.get('UIScene');
+    if (!uiScene) return;
+
+    // Pick 2 random powerups from the unlocked pool (avoid duplicates, prefer not-active)
+    const options = this.getRandomPowerupChoices(POWERUP_DROP.CHOICE_COUNT);
+    showPowerupChoiceOverlay(uiScene, options);
+  }
+
+  /**
+   * Player chose a powerup — apply it and resume game.
+   */
+  handlePowerupChosen({ type }) {
+    const config = POWERUP_TYPES[type];
+    if (!config) return;
+
     const enemies = this.waveSystem.getActiveEnemies();
 
     switch (type) {
       case 'CODE_REVIEW':
-        this.weaponSystem.activateCodeReview(
-          this.player.sprite.x, this.player.sprite.y, enemies
-        );
+        this._activateVortex(config);
         break;
       case 'GITIGNORE':
         this.player.setShield(true);
@@ -1446,54 +1550,88 @@ export class GameScene extends Phaser.Scene {
           this.weaponSystem.tripleUnlocked = false;
         });
         break;
+      case 'HOMING':
+        this.weaponSystem.homingUnlocked = true;
+        this.time.delayedCall(config.duration, () => {
+          this.weaponSystem.homingUnlocked = false;
+        });
+        break;
     }
 
-    // Show a quote dialog (pauses game briefly)
-    this.showPowerupQuote(type);
+    // Resume game
+    this.scene.resume('GameScene');
   }
 
   /**
-   * Show a powerup quote with game freeze — the only dialog that pauses gameplay.
-   * Gives the player a brief break and shows a deeper quote.
+   * Pick N random powerup types from those unlocked at current elapsed time.
+   * Avoids duplicates and prefers powerups the player doesn't currently have active.
    */
-  async showPowerupQuote(type) {
-    const quotes = POWERUP_QUOTES[type];
-    if (!quotes || quotes.length === 0) return;
+  getRandomPowerupChoices(count) {
+    const minutes = this.gameTimer / 60000;
+    const allTypes = Object.entries(POWERUP_TYPES);
 
-    // 50% chance: show specific powerup quote, 50% chance: dev reaction
-    const useDevReaction = Math.random() < 0.5 && DEV_QUOTES.POWERUP.length > 0;
-    const quoteText = useDevReaction
-      ? Phaser.Utils.Array.GetRandom(DEV_QUOTES.POWERUP)
-      : Phaser.Utils.Array.GetRandom(quotes).text;
+    // Filter to unlocked powerups
+    const unlocked = allTypes.filter(([, cfg]) => minutes >= cfg.unlockMinute);
+    if (unlocked.length === 0) return allTypes.slice(0, count).map(([t]) => ({ type: t }));
 
-    const dialog = new DialogBubble(this);
-    this._powerupDialogActive = true;
+    // Deprioritize currently active powerups
+    const active = new Set();
+    if (this._vortexActive) active.add('CODE_REVIEW');
+    if (this.player.shieldActive) active.add('GITIGNORE');
+    if (this.weaponSystem.minesUnlocked) active.add('MINES');
+    if (this.weaponSystem.tripleUnlocked) active.add('TRIPLE_SHOT');
+    if (this.weaponSystem.homingUnlocked) active.add('HOMING');
 
-    // Use the powerup's name + description as speaker, so player knows what it does
-    const powerupConfig = POWERUP_TYPES[type];
-    const accentColor = powerupConfig ? powerupConfig.color : null;
-    const speaker = powerupConfig ? powerupConfig.name : type;
-    const desc = powerupConfig && powerupConfig.desc ? powerupConfig.desc : '';
-    const text = desc ? `${desc}\n\n"${quoteText}"` : quoteText;
+    // Sort: non-active first, then shuffle within groups
+    const preferred = unlocked.filter(([t]) => !active.has(t));
+    const activeCandidates = unlocked.filter(([t]) => active.has(t));
 
-    // Map type to texture key for the icon
-    const ICON_KEYS = {
-      CODE_REVIEW: 'powerup-code-review',
-      GITIGNORE: 'powerup-gitignore',
-      LINTER: 'powerup-linter',
-      MINES: 'powerup-mines',
-      TRIPLE_SHOT: 'powerup-triple-shot',
-    };
+    const shuffled = [
+      ...preferred.sort(() => Math.random() - 0.5),
+      ...activeCandidates.sort(() => Math.random() - 0.5),
+    ];
 
-    await dialog.show(speaker, text, {
-      onShow: () => this.freezeWorld(),
-      onDismiss: () => this.unfreezeWorld(),
-      accentColor,
-      iconKey: ICON_KEYS[type] || null,
+    return shuffled.slice(0, count).map(([t]) => ({ type: t }));
+  }
+
+  /**
+   * Activate the Code Review vortex — pulls enemies in and damages them.
+   */
+  _activateVortex(config) {
+    this._vortexActive = true;
+    this._vortexTimer = 0;
+    this._vortexLastTick = 0;
+
+    // Visual: spinning ring around the player
+    const gfx = this.add.graphics();
+    gfx.setDepth(15);
+    this._vortexGfx = gfx;
+    this._vortexAngle = 0;
+
+    // Deactivate after duration
+    this.time.delayedCall(config.duration, () => {
+      this._deactivateVortex();
     });
+  }
 
-    this._powerupDialogActive = false;
-    dialog.destroy();
+  /**
+   * Deactivate the vortex effect.
+   */
+  _deactivateVortex() {
+    this._vortexActive = false;
+    if (this._vortexGfx) {
+      this.tweens.add({
+        targets: this._vortexGfx,
+        alpha: 0,
+        duration: 300,
+        onComplete: () => {
+          if (this._vortexGfx) {
+            this._vortexGfx.destroy();
+            this._vortexGfx = null;
+          }
+        },
+      });
+    }
   }
 
   /**
@@ -1835,11 +1973,10 @@ export class GameScene extends Phaser.Scene {
     if (gameState.gameOver) return;
     gameState.gameOver = true;
 
-    // If world was frozen (e.g. died during powerup dialog), unfreeze it
+    // If world was frozen, unfreeze it
     if (this._worldFrozen) {
       this.unfreezeWorld();
     }
-    this._powerupDialogActive = false;
 
     playStopEngine();
     gameState.saveBest();

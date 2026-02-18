@@ -4,7 +4,7 @@ import { PIXEL_SCALE } from '../core/Constants.js';
 import { PLAYER_FRAMES } from '../sprites/player.js';
 // Enemy sprites are now generated procedurally in Enemy.js constructor
 import { XP_GEM_SMALL, XP_GEM_MEDIUM, XP_GEM_LARGE, POWERUP_CODE_REVIEW, POWERUP_GITIGNORE, POWERUP_LINTER } from '../sprites/items.js';
-import { BRACKET_PROJECTILE, LASER_CAPSULE, LINTER_ORB, MINE_SPRITE, ICON_TRIPLE } from '../sprites/projectiles.js';
+import { BRACKET_PROJECTILE, LASER_CAPSULE, LINTER_ORB, MINE_SPRITE, ICON_TRIPLE, ICON_HOMING } from '../sprites/projectiles.js';
 import { DECO_SLOP_DEBRIS } from '../sprites/tiles.js';
 import { BED_SPRITE } from '../sprites/intro.js';
 import { SHIP_FRAMES, SHIP_DESTROYED } from '../sprites/ship.js';
@@ -35,6 +35,7 @@ export class BootScene extends Phaser.Scene {
     renderPixelArt(this, POWERUP_LINTER, PALETTE, 'powerup-linter', S);
     renderPixelArt(this, MINE_SPRITE, PALETTE, 'powerup-mines', S);
     renderPixelArt(this, ICON_TRIPLE, PALETTE, 'powerup-triple-shot', S);
+    renderPixelArt(this, ICON_HOMING, PALETTE, 'powerup-homing', S);
 
     // Ship — hand-crafted sprites
     renderSpriteSheet(this, SHIP_FRAMES, PALETTE, 'ship-sheet', S);
