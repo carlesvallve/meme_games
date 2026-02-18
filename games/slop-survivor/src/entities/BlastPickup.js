@@ -70,7 +70,7 @@ export class BlastPickup {
     });
 
     // "Commit" label floating above the orb
-    const labelSize = Math.round(GAME.HEIGHT * UI.SMALL_RATIO * 0.85);
+    const labelSize = Math.round(UI.BASE * UI.SMALL_RATIO * 0.85);
     this.label = scene.add.text(x, y - size * 1.2, 'COMMIT', {
       fontSize: labelSize + 'px',
       fontFamily: UI.FONT,

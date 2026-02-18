@@ -108,10 +108,11 @@ export class LightingSystem {
     this._createGradientTexture();
     this._createConeTexture();
 
-    // Create RT with generous padding to cover any camera zoom level
-    // At zoom Z, scrollFactor(0) objects are scaled by Z from the camera center,
-    // so the RT (scaled back to 1/Z) needs extra margin to cover the full viewport.
-    const pad = Math.ceil(Math.max(this._width, this._height) * 0.5);
+    // Create RT with generous padding to cover any camera zoom level.
+    // At zoom Z, scrollFactor(0) objects are offset from camera center by (pos - center) * Z,
+    // so the RT (scaled back to 1/Z) needs margin >= maxDim * (Z-1)/2.
+    // Factor of 1.0 covers up to zoom 3x safely.
+    const pad = Math.ceil(Math.max(this._width, this._height) * 1.0);
     this._pad = pad;
     this._lightMapRT = scene.add.renderTexture(-pad, -pad, this._width + pad * 2, this._height + pad * 2);
     this._lightMapRT.setOrigin(0, 0);

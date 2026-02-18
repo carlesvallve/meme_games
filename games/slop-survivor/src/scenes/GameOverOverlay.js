@@ -4,26 +4,26 @@ import { gameState } from '../core/GameState.js';
 import { playClickSfx } from '../audio/AudioBridge.js';
 
 /**
- * Shows a game over overlay in GameScene.
- * All elements are added directly to the scene (not in a container)
- * with setScrollFactor(0) so lighting MULTIPLY blend affects them
- * the same way it affects the title overlay.
+ * Shows a game over overlay in GameScene (for lighting).
+ * Uses scrollFactor(0) so elements stay fixed on screen despite camera scroll/zoom.
  */
 export function showGameOverOverlay(scene, stats, onRestart) {
   const w = GAME.WIDTH;
   const h = GAME.HEIGHT;
   const cx = w / 2;
-  const DEPTH = 100; // same as title overlay, well below lighting at 999
+  const cy = h / 2;
+  const DEPTH = 998; // below lighting overlay (999) so MULTIPLY blend affects it
 
-  // Track all elements for cleanup
+  // All elements go into elements array for cleanup
   const elements = [];
   const add = (el) => { elements.push(el); return el; };
 
-  // Light semi-transparent overlay
+  // Semi-transparent overlay — covers full screen via scrollFactor(0)
   const overlay = scene.add.graphics();
-  overlay.fillStyle(0x000000, 0.25);
-  overlay.fillRect(0, 0, w, h);
-  overlay.setAlpha(0).setDepth(DEPTH).setScrollFactor(0);
+  overlay.fillStyle(0x000000, 0.12);
+  // Draw large enough to cover viewport at any zoom
+  overlay.fillRect(-w, -h, w * 3, h * 3);
+  overlay.setScrollFactor(0).setAlpha(0).setDepth(DEPTH);
   add(overlay);
 
   scene.tweens.add({
@@ -32,16 +32,19 @@ export function showGameOverOverlay(scene, stats, onRestart) {
     duration: 300,
   });
 
-  // "GAME OVER" title
-  const titleSize = Math.round(h * UI.HEADING_RATIO * 1.2);
-  const titleY = h * 0.32;
+  // "GAME OVER" title — center layout
+  const titleSize = Math.round(UI.BASE * UI.HEADING_RATIO * 1.2);
+  const titleY = cy + UI.BASE * 0.18;
   const title = add(scene.add.text(cx, titleY, 'GAME OVER', {
     fontSize: titleSize + 'px',
     fontFamily: UI.FONT,
     color: '#44ff44',
     fontStyle: 'bold',
     shadow: { offsetX: 0, offsetY: 3, color: 'rgba(0,80,0,0.5)', blur: 8, fill: true },
-  }).setOrigin(0.5).setAlpha(0).setDepth(DEPTH).setScrollFactor(0));
+  }).setOrigin(0.5).setScrollFactor(0).setAlpha(0).setDepth(DEPTH));
+
+  // Disable roundPixels so slow float tweens aren't choppy
+  scene.cameras.main.roundPixels = false;
 
   scene.tweens.add({
     targets: title,
@@ -52,6 +55,7 @@ export function showGameOverOverlay(scene, stats, onRestart) {
     ease: 'Quad.easeOut',
   });
 
+  // Float — match title overlay: 6*PX over 2000ms
   scene.tweens.add({
     targets: title,
     y: titleY - 6 * PX,
@@ -64,9 +68,9 @@ export function showGameOverOverlay(scene, stats, onRestart) {
 
   // --- Single-row compact stats ---
   const isMobile = GAME.IS_MOBILE;
-  const statY = h * 0.62;
-  const labelSize = Math.round(h * UI.SMALL_RATIO * 0.7);
-  const valueSize = Math.round(h * UI.SMALL_RATIO * 1.1);
+  const statY = cy + UI.BASE * 0.06;
+  const labelSize = Math.round(UI.BASE * UI.SMALL_RATIO * 0.7);
+  const valueSize = Math.round(UI.BASE * UI.SMALL_RATIO * 1.1);
   const separator = '·';
 
   const mins = Math.floor(stats.timeSurvived / 60);
@@ -82,7 +86,7 @@ export function showGameOverOverlay(scene, stats, onRestart) {
 
   const itemGap = isMobile ? 24 * PX : 36 * PX;
 
-  // Build stat cells — individual elements, no container
+  // Build stat cells
   const cells = [];
   statItems.forEach((item, i) => {
     const vText = add(scene.add.text(0, statY, item.animated ? '0' : `${item.value}`, {
@@ -90,13 +94,13 @@ export function showGameOverOverlay(scene, stats, onRestart) {
       fontFamily: UI.FONT,
       color: item.color,
       fontStyle: 'bold',
-    }).setOrigin(0.5, 1).setDepth(DEPTH).setScrollFactor(0));
+    }).setOrigin(0.5, 1).setScrollFactor(0).setDepth(DEPTH));
 
     const lbl = add(scene.add.text(0, statY + 4 * PX, item.label, {
       fontSize: labelSize + 'px',
       fontFamily: UI.FONT,
       color: COLORS.MUTED_TEXT,
-    }).setOrigin(0.5, 0).setDepth(DEPTH).setScrollFactor(0));
+    }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(DEPTH));
 
     if (item.animated) {
       const counter = { val: 0 };
@@ -154,7 +158,7 @@ export function showGameOverOverlay(scene, stats, onRestart) {
           fontSize: valueSize + 'px',
           fontFamily: UI.FONT,
           color: COLORS.MUTED_TEXT,
-        }).setOrigin(0.5).setAlpha(0).setDepth(DEPTH).setScrollFactor(0));
+        }).setOrigin(0.5).setScrollFactor(0).setAlpha(0).setDepth(DEPTH));
         scene.tweens.add({
           targets: sep,
           alpha: 0.4,
@@ -166,45 +170,18 @@ export function showGameOverOverlay(scene, stats, onRestart) {
   });
 
   // Best score
-  const bestSize = Math.round(h * UI.SMALL_RATIO * 0.75);
+  const bestSize = Math.round(UI.BASE * UI.SMALL_RATIO * 0.75);
   const bestText = add(scene.add.text(cx, statY + 30 * PX, `BEST: ${stats.bestScore}`, {
     fontSize: bestSize + 'px',
     fontFamily: UI.FONT,
     color: COLORS.MUTED_TEXT,
-  }).setOrigin(0.5).setAlpha(0).setDepth(DEPTH).setScrollFactor(0));
+  }).setOrigin(0.5).setScrollFactor(0).setAlpha(0).setDepth(DEPTH));
 
   scene.tweens.add({
     targets: bestText,
     alpha: 0.7,
     duration: 300,
     delay: 600,
-  });
-
-  // Restart hint
-  const hintSize = Math.round(h * UI.SMALL_RATIO * 0.9);
-  const hintText = isMobile ? 'Tap to restart' : 'Space / Tap to restart';
-  const hint = add(scene.add.text(cx, h * 0.88, hintText, {
-    fontSize: hintSize + 'px',
-    fontFamily: UI.FONT,
-    color: COLORS.MUTED_TEXT,
-    align: 'center',
-  }).setOrigin(0.5).setAlpha(0).setDepth(DEPTH).setScrollFactor(0));
-
-  scene.tweens.add({
-    targets: hint,
-    alpha: 1,
-    duration: 300,
-    delay: 500,
-  });
-
-  scene.tweens.add({
-    targets: hint,
-    alpha: 0.3,
-    duration: 1200,
-    delay: 800,
-    yoyo: true,
-    repeat: -1,
-    ease: 'Sine.easeInOut',
   });
 
   // Input handling with grace period
@@ -215,6 +192,8 @@ export function showGameOverOverlay(scene, stats, onRestart) {
     if (confirmed || !inputReady) return;
     confirmed = true;
     playClickSfx();
+    scene.cameras.main.roundPixels = true; // restore for gameplay
+    if (scene.lighting) scene.lighting.setAmbient(0.75); // restore gameplay ambient
     cleanup();
     elements.forEach(el => el.destroy());
     onRestart();

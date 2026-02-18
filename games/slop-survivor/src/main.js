@@ -1,8 +1,24 @@
 import Phaser from 'phaser';
 import { GameConfig } from './core/GameConfig.js';
+import { GAME, DPR, PX } from './core/Constants.js';
 import { eventBus, Events } from './core/EventBus.js';
 import { gameState } from './core/GameState.js';
 import { initAudioBridge } from './audio/AudioBridge.js';
+
+// Debug: log display config values so we can compare real device vs simulator
+console.log('[Display]', JSON.stringify({
+  innerWidth: window.innerWidth,
+  innerHeight: window.innerHeight,
+  devicePixelRatio: window.devicePixelRatio,
+  DPR,
+  PX: Math.round(PX * 1000) / 1000,
+  GAME_WIDTH: GAME.WIDTH,
+  GAME_HEIGHT: GAME.HEIGHT,
+  IS_MOBILE: GAME.IS_MOBILE,
+  IS_PORTRAIT: GAME.IS_PORTRAIT,
+  maxTouchPoints: navigator.maxTouchPoints,
+  phaserZoom: 1 / DPR,
+}));
 
 // Initialize audio bridge (wires EventBus events to audio playback)
 initAudioBridge();

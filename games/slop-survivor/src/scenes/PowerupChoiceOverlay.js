@@ -31,6 +31,7 @@ export function showPowerupChoiceOverlay(scene, options) {
   const w = GAME.WIDTH;
   const h = GAME.HEIGHT;
   const cx = w / 2;
+  const cy = h / 2;
 
   const root = scene.add.container(0, 0);
   root.setDepth(1000);
@@ -48,9 +49,23 @@ export function showPowerupChoiceOverlay(scene, options) {
     duration: 150,
   });
 
+  // --- Layout: compute card size first, then stack from center ---
+  const gap = 20 * PX;
+  const maxCardW = Math.min(w * 0.38, h * 0.42);
+  const cardW = maxCardW;
+  const cardH = cardW * 1.3;
+
+  const titleSize = Math.round(UI.BASE * UI.HEADING_RATIO);
+  const subSize = Math.round(UI.BASE * UI.BODY_RATIO * 0.85);
+  const textGap = 10 * PX;
+  const contentGap = 24 * PX;
+
+  const headerH = titleSize + textGap + subSize;
+  const totalH = headerH + contentGap + cardH;
+  let curY = cy - totalH / 2;
+
   // Title
-  const titleSize = Math.round(h * UI.HEADING_RATIO);
-  const title = scene.add.text(cx, h * 0.15, 'POWERUP', {
+  const title = scene.add.text(cx, curY + titleSize / 2, 'POWERUP', {
     fontSize: titleSize + 'px',
     fontFamily: UI.FONT,
     color: '#4488ff',
@@ -59,28 +74,20 @@ export function showPowerupChoiceOverlay(scene, options) {
   }).setOrigin(0.5);
   root.add(title);
 
-  // Subtitle
-  const subSize = Math.round(h * UI.BODY_RATIO * 0.85);
-  const subtitle = scene.add.text(cx, h * 0.22, 'Equip a temporary boost', {
-    fontSize: subSize + 'px',
-    fontFamily: UI.FONT,
-    color: '#6699cc',
-  }).setOrigin(0.5);
-  root.add(subtitle);
-
-  // Particle burst
+  // Particle burst (centered on title)
+  const burstY = curY + titleSize / 2;
   const burstColors = [0x4488ff, 0x5599ff, 0x3366dd, 0xffffff];
   for (let i = 0; i < 10; i++) {
     const angle = (Math.PI * 2 * i) / 10;
     const speed = 60 * PX + Math.random() * 40 * PX;
     const size = 2 * PX + Math.random() * 2 * PX;
     const color = Phaser.Utils.Array.GetRandom(burstColors);
-    const particle = scene.add.circle(cx, h * 0.18, size, color, 1);
+    const particle = scene.add.circle(cx, burstY, size, color, 1);
     root.add(particle);
     scene.tweens.add({
       targets: particle,
       x: cx + Math.cos(angle) * speed,
-      y: h * 0.18 + Math.sin(angle) * speed,
+      y: burstY + Math.sin(angle) * speed,
       alpha: 0,
       scale: 0.2,
       duration: 400 + Math.random() * 200,
@@ -88,12 +95,17 @@ export function showPowerupChoiceOverlay(scene, options) {
       onComplete: () => particle.destroy(),
     });
   }
+  curY += titleSize + textGap;
 
-  // Cards
-  const gap = 20 * PX;
-  const maxCardW = Math.min(w * 0.38, h * 0.42);
-  const cardW = maxCardW;
-  const cardH = cardW * 1.3;
+  // Subtitle
+  const subtitle = scene.add.text(cx, curY + subSize / 2, 'Equip a temporary boost', {
+    fontSize: subSize + 'px',
+    fontFamily: UI.FONT,
+    color: '#6699cc',
+  }).setOrigin(0.5);
+  root.add(subtitle);
+  curY += subSize + contentGap;
+
   const startX = cx - (options.length - 1) * (cardW + gap) / 2;
 
   // Track cards for keyboard navigation
@@ -136,7 +148,7 @@ export function showPowerupChoiceOverlay(scene, options) {
 
   options.forEach((opt, i) => {
     const cardX = startX + i * (cardW + gap);
-    const cardY = h * 0.52;
+    const cardY = curY + cardH / 2;
     const card = createPowerupCard(scene, root, cardX, cardY, cardW, cardH, opt, () => {
       selectedIndex = i;
       confirmSelection();
@@ -206,7 +218,7 @@ function createPowerupCard(scene, root, x, y, w, h, option, onSelect, onHover, i
   }
 
   // Name
-  const nameSize = Math.round(GAME.HEIGHT * UI.SMALL_RATIO * 1.2);
+  const nameSize = Math.round(UI.BASE * UI.SMALL_RATIO * 1.2);
   const nameText = scene.add.text(0, h * 0.0, config.name, {
     fontSize: nameSize + 'px',
     fontFamily: UI.FONT,
@@ -218,7 +230,7 @@ function createPowerupCard(scene, root, x, y, w, h, option, onSelect, onHover, i
   container.add(nameText);
 
   // Description
-  const descSize = Math.round(GAME.HEIGHT * UI.SMALL_RATIO * 0.9);
+  const descSize = Math.round(UI.BASE * UI.SMALL_RATIO * 0.9);
   const descText = scene.add.text(0, h * 0.12, config.desc, {
     fontSize: descSize + 'px',
     fontFamily: UI.FONT,
@@ -231,7 +243,7 @@ function createPowerupCard(scene, root, x, y, w, h, option, onSelect, onHover, i
   // Duration badge — prominent pill
   const durSec = config.duration > 0 ? Math.round(config.duration / 1000) : 0;
   const durLabel = durSec > 0 ? `⏱ ${durSec}s` : 'INSTANT';
-  const durSize = Math.round(GAME.HEIGHT * UI.SMALL_RATIO * 0.9);
+  const durSize = Math.round(UI.BASE * UI.SMALL_RATIO * 0.9);
   const durText = scene.add.text(0, h * 0.25, durLabel, {
     fontSize: durSize + 'px',
     fontFamily: UI.FONT,
@@ -256,7 +268,7 @@ function createPowerupCard(scene, root, x, y, w, h, option, onSelect, onHover, i
   const quotes = POWERUP_QUOTES[option.type];
   if (quotes && quotes.length > 0) {
     const quote = Phaser.Utils.Array.GetRandom(quotes);
-    const quoteSize = Math.round(GAME.HEIGHT * UI.SMALL_RATIO * 0.65);
+    const quoteSize = Math.round(UI.BASE * UI.SMALL_RATIO * 0.65);
     const maxLines = 3;
     const wrapWidth = w * 0.82;
     const quoteText = scene.add.text(0, h * 0.42, quote.text, {

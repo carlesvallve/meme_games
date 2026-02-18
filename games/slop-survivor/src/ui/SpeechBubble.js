@@ -8,7 +8,7 @@ const BUBBLE = {
   PADDING_Y: (_isMobile ? 4 : 5) * PX,
   BORDER_RADIUS: 4 * PX,
   TAIL_SIZE: 5 * PX,
-  MAX_WIDTH_RATIO: 0.45,
+  MAX_WIDTH_RATIO: _isMobile ? 0.65 : 0.45,
   BG_ALPHA: 0.9,
   FLOAT_SPEED: 15 * PX,
   FADE_IN: 120,
@@ -88,7 +88,7 @@ export class SpeechBubble {
     } = opts;
     this._persistent = persistent;
 
-    const fontSize = Math.round(scene.game.config.height * UI.SMALL_RATIO * 0.85);
+    const fontSize = Math.round(UI.BASE * UI.SMALL_RATIO * (GAME.IS_MOBILE ? 0.9 : 0.85));
     const zoom = scene.cameras.main.zoom || 1;
     this._baseZoom = zoom; // zoom at creation time — used to counter-scale
     const visibleW = GAME.WIDTH / zoom;

@@ -11,7 +11,7 @@ const DIALOG = {
   BORDER_WIDTH: 2 * PX,
   BORDER_COLOR: 0x9944ff,      // default purple (overridden by accentColor)
   BG_COLOR: 0x0a050f,          // dark background
-  BG_ALPHA: 0.95,
+  BG_ALPHA: 0.7,
   TEXT_COLOR: '#f0e8ff',        // near-white lavender text
   TEXT_STROKE: '#110022',       // dark stroke for legibility
   TEXT_STROKE_WIDTH: 3 * PX,
@@ -108,7 +108,7 @@ export class DialogBubble {
     const visW = GAME.WIDTH / zoom;
     const visH = GAME.HEIGHT / zoom;
     const w = visW * DIALOG.BOX_W_RATIO;
-    const fontSize = Math.round(GAME.HEIGHT * UI.SMALL_RATIO / zoom);
+    const fontSize = Math.round(UI.BASE * UI.SMALL_RATIO * (GAME.IS_MOBILE ? 1.35 : 1) / zoom);
 
     // Pre-measure text height to size the box dynamically
     const measureText = this.scene.add.text(0, 0, this.fullText, {
