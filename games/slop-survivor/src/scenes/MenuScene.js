@@ -54,7 +54,7 @@ export class MenuScene extends Phaser.Scene {
     }).setOrigin(0.5);
 
     const tagSize = Math.round(h * UI.SMALL_RATIO * 0.85);
-    const tagline = this.add.text(cx, 0, 'Survive the AI slop invasion', {
+    const tagline = this.add.text(cx, 0, 'Survive the AI slop coding invasion', {
       fontSize: tagSize + 'px',
       fontFamily: UI.FONT,
       color: COLORS.MUTED_TEXT,
