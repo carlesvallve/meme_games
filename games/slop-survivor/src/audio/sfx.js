@@ -412,6 +412,92 @@ export function stopEngine() {
   }
 }
 
+// Title screen appear — rising swoosh
+export function titleAppearSfx() {
+  if (gameState.isMuted) return;
+  const ctx = getCtx();
+  const now = ctx.currentTime;
+
+  // Filtered noise swoosh — rising bandpass sweep
+  const bufSize = Math.floor(ctx.sampleRate * 0.8);
+  const buf = ctx.createBuffer(1, bufSize, ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < bufSize; i++) data[i] = Math.random() * 2 - 1;
+  const noise = ctx.createBufferSource();
+  noise.buffer = buf;
+
+  const bpf = ctx.createBiquadFilter();
+  bpf.type = 'bandpass';
+  bpf.frequency.setValueAtTime(200, now);
+  bpf.frequency.exponentialRampToValueAtTime(3000, now + 0.5);
+  bpf.frequency.exponentialRampToValueAtTime(1500, now + 0.7);
+  bpf.Q.setValueAtTime(2, now);
+
+  const ng = ctx.createGain();
+  ng.gain.setValueAtTime(0, now);
+  ng.gain.linearRampToValueAtTime(0.12, now + 0.15);
+  ng.gain.setValueAtTime(0.12, now + 0.3);
+  ng.gain.exponentialRampToValueAtTime(0.001, now + 0.7);
+
+  noise.connect(bpf).connect(ng).connect(ctx.destination);
+  noise.start(now);
+  noise.stop(now + 0.8);
+
+  // Subtle tonal sweep underneath
+  const osc = ctx.createOscillator();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(150, now);
+  osc.frequency.exponentialRampToValueAtTime(800, now + 0.4);
+  const og = ctx.createGain();
+  og.gain.setValueAtTime(0, now);
+  og.gain.linearRampToValueAtTime(0.04, now + 0.1);
+  og.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
+  osc.connect(og).connect(ctx.destination);
+  osc.start(now);
+  osc.stop(now + 0.5);
+}
+
+// Title screen dismiss — falling swoosh
+export function titleDismissSfx() {
+  if (gameState.isMuted) return;
+  const ctx = getCtx();
+  const now = ctx.currentTime;
+
+  // Filtered noise swoosh — falling bandpass sweep
+  const bufSize = Math.floor(ctx.sampleRate * 0.6);
+  const buf = ctx.createBuffer(1, bufSize, ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < bufSize; i++) data[i] = Math.random() * 2 - 1;
+  const noise = ctx.createBufferSource();
+  noise.buffer = buf;
+
+  const bpf = ctx.createBiquadFilter();
+  bpf.type = 'bandpass';
+  bpf.frequency.setValueAtTime(2500, now);
+  bpf.frequency.exponentialRampToValueAtTime(200, now + 0.4);
+  bpf.Q.setValueAtTime(2, now);
+
+  const ng = ctx.createGain();
+  ng.gain.setValueAtTime(0.12, now);
+  ng.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
+
+  noise.connect(bpf).connect(ng).connect(ctx.destination);
+  noise.start(now);
+  noise.stop(now + 0.6);
+
+  // Tonal sweep down
+  const osc = ctx.createOscillator();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(600, now);
+  osc.frequency.exponentialRampToValueAtTime(100, now + 0.35);
+  const og = ctx.createGain();
+  og.gain.setValueAtTime(0.05, now);
+  og.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
+  osc.connect(og).connect(ctx.destination);
+  osc.start(now);
+  osc.stop(now + 0.4);
+}
+
 // Player death — ominous descending notes (plays after explosion)
 export function deathSfx() {
   if (gameState.isMuted) return;

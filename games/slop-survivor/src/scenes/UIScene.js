@@ -65,6 +65,18 @@ export class UIScene extends Phaser.Scene {
     // --- Mute button (top-right, below timer) ---
     this.createMuteButton();
 
+    // --- Fade in all HUD elements ---
+    const hudElements = [this.scoreText, this.killsText, this.timerText, this.levelText, this.xpBar, this.muteIcon, ...this.hearts];
+    for (const el of hudElements) {
+      if (el) el.setAlpha(0);
+    }
+    this.tweens.add({
+      targets: hudElements.filter(Boolean),
+      alpha: 1,
+      duration: 300,
+      ease: 'Quad.easeOut',
+    });
+
     // --- Event handlers ---
     this._lastScore = 0;
     this.onScoreChanged = ({ score }) => {
