@@ -95,15 +95,15 @@ export class Player {
   }
 
   wrapPosition() {
-    const margin = PLAYER.WIDTH;
+    const push = PLAYER.WIDTH * 0.5; // push inward after wrapping
     const x = this.sprite.x;
     const y = this.sprite.y;
 
-    if (x < -margin) this.sprite.x = ARENA.WIDTH + margin;
-    else if (x > ARENA.WIDTH + margin) this.sprite.x = -margin;
+    if (x < 0) this.sprite.x = ARENA.WIDTH - push;
+    else if (x > ARENA.WIDTH) this.sprite.x = push;
 
-    if (y < -margin) this.sprite.y = ARENA.HEIGHT + margin;
-    else if (y > ARENA.HEIGHT + margin) this.sprite.y = -margin;
+    if (y < 0) this.sprite.y = ARENA.HEIGHT - push;
+    else if (y > ARENA.HEIGHT) this.sprite.y = push;
   }
 
   emitThrusterParticles() {
