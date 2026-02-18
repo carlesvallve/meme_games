@@ -3,7 +3,7 @@ import { POWERUP_TYPES, PX, PIXEL_SCALE, GAME } from '../core/Constants.js';
 import { eventBus, Events } from '../core/EventBus.js';
 import { renderPixelArt } from '../core/PixelRenderer.js';
 import { POWERUP_CODE_REVIEW, POWERUP_GITIGNORE, POWERUP_LINTER } from '../sprites/items.js';
-import { MINE_SPRITE } from '../sprites/projectiles.js';
+import { MINE_SPRITE, ICON_TRIPLE } from '../sprites/projectiles.js';
 import { PALETTE } from '../sprites/palette.js';
 
 const POWERUP_TEXTURES = {
@@ -11,6 +11,7 @@ const POWERUP_TEXTURES = {
   GITIGNORE: { pixels: POWERUP_GITIGNORE, key: 'powerup-gitignore' },
   LINTER: { pixels: POWERUP_LINTER, key: 'powerup-linter' },
   MINES: { pixels: MINE_SPRITE, key: 'powerup-mines' },
+  TRIPLE_SHOT: { pixels: ICON_TRIPLE, key: 'powerup-triple-shot' },
 };
 
 const SPRITE_SCALE = PX;
@@ -34,6 +35,7 @@ export class PowerUp {
       GITIGNORE: 0x3388ff,
       LINTER: 0xffdd33,
       MINES: 0xcc33ff,
+      TRIPLE_SHOT: 0x33ccff,
     };
     const haloColor = HALO_COLORS[typeName] || 0xffffff;
     const haloRadius = config.width * 1.5;
@@ -73,6 +75,7 @@ export class PowerUp {
       GITIGNORE: '.GITIGNORE',
       LINTER: 'LINTER',
       MINES: 'MINE LAYER',
+      TRIPLE_SHOT: 'TRIPLE SHOT',
     };
     const tagSize = Math.round(GAME.HEIGHT * 0.014);
     this.nameTag = scene.add.text(x, y - config.width * 1.2, TAG_NAMES[typeName] || typeName, {

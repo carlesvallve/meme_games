@@ -124,11 +124,106 @@ export const BOSS = {
 
 export const WAVES = {
   INITIAL_SPAWN_RATE: 2200, // ms between spawns
-  MIN_SPAWN_RATE: 500,      // fastest spawn rate
+  MIN_SPAWN_RATE: 400,      // fastest spawn rate
   SPAWN_RATE_DECREASE: 40,  // ms decrease per wave
   ENEMIES_PER_WAVE: 4,
   WAVE_DURATION: 10000,     // ms per wave
-  MAX_ENEMIES: 25,          // cap on simultaneous enemies (lower — bigger sprites fill more screen)
+  MAX_ENEMIES: 25,          // starting cap on simultaneous enemies
+};
+
+// --- Difficulty scaling ---
+// All values scale linearly with elapsed minutes (capped at max)
+
+export const DIFFICULTY = {
+  // Enemy stat multipliers (multiply base stats by 1 + rate * minutes, capped)
+  HEALTH_SCALE_RATE: 0.15,     // +15% health per minute
+  HEALTH_SCALE_MAX: 3.0,       // cap at 3x base health
+  SPEED_SCALE_RATE: 0.06,      // +6% speed per minute
+  SPEED_SCALE_MAX: 1.6,        // cap at 1.6x base speed
+  DAMAGE_SCALE_RATE: 0.08,     // +8% damage per minute (rounded, so kicks in ~min 6+)
+  DAMAGE_SCALE_MAX: 3.0,       // cap at 3x damage
+
+  // Wave composition scaling
+  ENEMIES_PER_WAVE_RATE: 0.5,  // +0.5 enemies per wave per minute
+  ENEMIES_PER_WAVE_MAX: 10,    // cap
+  MAX_ENEMIES_RATE: 3,         // +3 max enemies per minute
+  MAX_ENEMIES_CAP: 50,         // hard cap
+
+  // Boss escalation (per boss number, not time)
+  BOSS_HEALTH_PER_SPAWN: 15,   // +15 HP per successive boss
+  BOSS_SPEED_PER_SPAWN: 5 * PX,  // +5 speed per successive boss
+  BOSS_CHARGE_CD_REDUCTION: 300,  // charge cooldown decreases by 300ms per boss
+  BOSS_CHARGE_CD_MIN: 2000,      // minimum charge cooldown
+  BOSS_CHARGE_DURATION_INCREASE: 200, // charge duration increases by 200ms per boss (longer dash)
+  BOSS_CHARGE_DURATION_MAX: 2000,     // cap on charge duration
+
+  // Powerup scarcity
+  POWERUP_DROP_DECAY_RATE: 0.04,  // drop chance multiplier decreases by 4% per minute
+  POWERUP_DROP_MIN_MULT: 0.4,    // never below 40% of original drop rate
+
+  // Enemy speed variance — random per-enemy modifier increases over time
+  SPEED_VARIANCE_RATE: 0.02,     // variance range grows by 2% per minute
+  SPEED_VARIANCE_MAX: 0.3,       // max ±30% speed variance
+};
+
+// --- Enemy behavior variants ---
+// Behaviors unlock progressively; chance starts low and ramps up
+
+export const ENEMY_BEHAVIORS = {
+  DASHER: {
+    unlockMinute: 2,            // when this behavior can first appear
+    initialChance: 0.08,        // chance at unlock time
+    chancePerMinute: 0.04,      // additional chance per minute after unlock
+    maxChance: 0.35,            // cap
+    appliesTo: ['COPILOT'],     // which enemy types can get this behavior
+    // Dasher stats
+    telegraphDuration: 600,     // ms flashing before dash
+    dashSpeed: 350 * PX,        // speed during dash
+    dashDuration: 500,          // ms of dash
+    dashCooldown: 4000,         // ms between dashes
+    dashColor: 0xff4444,        // flash color during telegraph
+  },
+  SHOOTER: {
+    unlockMinute: 3.5,
+    initialChance: 0.06,
+    chancePerMinute: 0.03,
+    maxChance: 0.25,
+    appliesTo: ['PR'],
+    // Shooter stats
+    telegraphDuration: 800,     // ms warning before firing
+    projectileSpeed: 180 * PX,
+    projectileDamage: 1,
+    projectileLifetime: 2500,   // ms
+    projectileSize: 8 * PX,
+    projectileColor: 0xff6633,
+    fireCooldown: 3500,         // ms between shots
+    fireRange: 350 * PX,        // only fires when player is within this range
+  },
+  SPLITTER: {
+    unlockMinute: 5,
+    initialChance: 0.05,
+    chancePerMinute: 0.025,
+    maxChance: 0.20,
+    appliesTo: ['SUGGESTION'],
+    // Splitter stats
+    splitCount: 3,              // how many mini-enemies spawn on death
+    splitSpeedMult: 1.8,        // children are faster
+    splitHealthMult: 0.3,       // children have less health
+  },
+  MINE_LAYER: {
+    unlockMinute: 6.5,
+    initialChance: 0.04,
+    chancePerMinute: 0.02,
+    maxChance: 0.15,
+    appliesTo: ['PR'],
+    // Mine layer stats
+    mineCooldown: 3000,         // ms between mine drops
+    mineLifetime: 5000,         // ms before mine despawns
+    mineDamage: 1,
+    mineRadius: 40 * PX,        // blast radius
+    mineArmTime: 1000,          // ms before mine becomes active
+    mineColor: 0xff3366,
+  },
 };
 
 // --- Weapons ---
@@ -145,7 +240,7 @@ export const WEAPONS = {
   },
   LASER: {
     damage: 2,
-    cooldown: 280, // ms between shots
+    cooldown: 420, // ms between shots (was 280)
     projectileSpeed: 550 * PX,
     projectileSize: 12 * PX,
     projectileColor: 0xffcc00,
