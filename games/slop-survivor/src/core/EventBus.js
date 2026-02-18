@@ -32,6 +32,9 @@ export const Events = {
   BOSS_SPAWN: 'boss:spawn',
   BOSS_KILLED: 'boss:killed',
 
+  // Enemy behaviors
+  ENEMY_SPLIT: 'enemy:split',
+
   // Wave
   WAVE_START: 'wave:start',
   WAVE_COMPLETE: 'wave:complete',

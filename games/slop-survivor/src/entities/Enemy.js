@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { ENEMY_TYPES, BOSS, ENEMY, ARENA, PX, PIXEL_SCALE } from '../core/Constants.js';
+import { ENEMY_TYPES, BOSS, ENEMY, ARENA, PX, PIXEL_SCALE, ENEMY_BEHAVIORS } from '../core/Constants.js';
 import { eventBus, Events } from '../core/EventBus.js';
 import { gameState } from '../core/GameState.js';
 import { InvaderGenerator, INVADER_PALETTES } from '../sprites/InvaderGenerator.js';
@@ -31,21 +31,42 @@ const BOSS_PHASE = {
   ORBIT: 'orbit',         // circle-strafe around the player
 };
 
+// Dasher phases (for behavior variant)
+const DASHER_PHASE = {
+  CHASE: 'chase',
+  TELEGRAPH: 'telegraph',
+  DASH: 'dash',
+  COOLDOWN: 'cooldown',
+};
+
 export class Enemy {
-  constructor(scene, x, y, typeName, isBoss = false) {
+  /**
+   * @param {Phaser.Scene} scene
+   * @param {number} x
+   * @param {number} y
+   * @param {string} typeName
+   * @param {boolean} isBoss
+   * @param {object} [scaledStats] - Optional difficulty-scaled overrides { health, speed, damage, chargeCooldown, chargeDuration }
+   */
+  constructor(scene, x, y, typeName, isBoss = false, scaledStats = null) {
     this.scene = scene;
     this.typeName = typeName;
     this.isBoss = isBoss;
 
     const config = isBoss ? BOSS : ENEMY_TYPES[typeName];
     this.config = config;
-    this.health = config.health;
-    this.maxHealth = config.health;
-    this.damage = config.damage;
-    this.speed = config.speed;
+
+    // Apply difficulty-scaled stats if provided, otherwise use base config
+    this.health = scaledStats ? scaledStats.health : config.health;
+    this.maxHealth = this.health;
+    this.damage = scaledStats ? scaledStats.damage : config.damage;
+    this.speed = scaledStats ? scaledStats.speed : config.speed;
     this.scoreValue = config.score;
     this.xpDrop = config.xpDrop;
     this.dead = false;
+
+    // Behavior variant (set by WaveSystem after construction)
+    this.behavior = null;
 
     // Zigzag state for PR type
     this.spawnTime = scene.time.now;
@@ -62,12 +83,14 @@ export class Enemy {
     if (isBoss) {
       this.bossPhase = BOSS_PHASE.CHASE;
       this.bossPhaseTimer = 0;
-      this.bossChargeCooldown = BOSS.CHARGE_COOLDOWN * 0.5; // first charge comes sooner
+      const chargeCd = scaledStats && scaledStats.chargeCooldown ? scaledStats.chargeCooldown : BOSS.CHARGE_COOLDOWN;
+      this.bossChargeCooldown = chargeCd * 0.5;
+      this.bossChargeCooldownBase = chargeCd;
+      this.bossChargeDuration = scaledStats && scaledStats.chargeDuration ? scaledStats.chargeDuration : BOSS.CHARGE_DURATION;
       this.chargeTargetX = 0;
       this.chargeTargetY = 0;
       this.orbitAngle = 0;
       this.orbitTimer = 0;
-      // Telegraph warning ring
       this.telegraphGfx = scene.add.graphics();
       this.telegraphGfx.setDepth(4);
       this.telegraphGfx.setAlpha(0);
@@ -83,7 +106,6 @@ export class Enemy {
     const gen = new InvaderGenerator(seed * 7 + typeName.length * 31);
     const { frame1, frame2, width: gridW, height: gridH } = gen.generate(genOpts);
 
-    // Render the 2-frame spritesheet
     const scale = PIXEL_SCALE;
     const frameW = gridW * scale;
     const frameH = gridH * scale;
@@ -124,26 +146,69 @@ export class Enemy {
     }
 
     this.sprite = scene.physics.add.sprite(x, y, texKey, 0);
-    // Scale sprite so visual size matches the config width
     const renderedW = gridW * scale;
-    const renderedH = gridH * scale;
     const sprScale = config.width / renderedW;
     this.spriteScale = sprScale;
     this.sprite.setScale(sprScale);
     this.sprite.play(animKey);
     this.sprite.setDepth(isBoss ? 6 : 5);
 
-    // Set physics body to match config dimensions
-    this.sprite.body.setSize(renderedW * 0.8, renderedH * 0.8);
-
-    // Store reference on the sprite for collision callbacks
+    this.sprite.body.setSize(renderedW * 0.8, gridH * scale * 0.8);
     this.sprite.entityRef = this;
 
     // Health bar for tanky enemies
-    if (config.health > 2 || isBoss) {
+    if (this.maxHealth > 2 || isBoss) {
       this.healthBar = scene.add.graphics();
       this.healthBar.setDepth(15);
       this.updateHealthBar();
+    }
+  }
+
+  /**
+   * Apply a behavior variant to this enemy. Called by WaveSystem after construction.
+   */
+  setBehavior(behaviorName) {
+    this.behavior = behaviorName;
+    const cfg = ENEMY_BEHAVIORS[behaviorName];
+    if (!cfg) return;
+
+    switch (behaviorName) {
+      case 'DASHER':
+        this._dasherPhase = DASHER_PHASE.CHASE;
+        this._dasherCooldown = cfg.dashCooldown * (0.5 + Math.random() * 0.5); // stagger initial
+        this._dasherTimer = 0;
+        this._dasherTargetX = 0;
+        this._dasherTargetY = 0;
+        // Visual indicator: slight red tint
+        this.sprite.setTint(0xffcccc);
+        break;
+
+      case 'SHOOTER':
+        this._shootCooldown = cfg.fireCooldown * (0.3 + Math.random() * 0.7); // stagger
+        this._shootTelegraphing = false;
+        this._shootTelegraphTimer = 0;
+        // Visual indicator: orange glow outline
+        break;
+
+      case 'SPLITTER':
+        // No special state needed — handled on death
+        // Visual indicator: pulsing scale
+        this.scene.tweens.add({
+          targets: this.sprite,
+          scaleX: this.spriteScale * 1.1,
+          scaleY: this.spriteScale * 1.1,
+          duration: 800,
+          yoyo: true,
+          repeat: -1,
+          ease: 'Sine.easeInOut',
+        });
+        break;
+
+      case 'MINE_LAYER':
+        this._mineCooldown = cfg.mineCooldown * (0.3 + Math.random() * 0.7);
+        // Visual indicator: pinkish tint
+        this.sprite.setTint(0xffccdd);
+        break;
     }
   }
 
@@ -155,11 +220,9 @@ export class Enemy {
     const x = this.sprite.x;
     const y = this.sprite.y - this.config.height / 2 - 8 * PX;
 
-    // Background
     this.healthBar.fillStyle(0x333333, 0.8);
     this.healthBar.fillRect(x - barW / 2, y, barW, barH);
 
-    // Health fill
     const ratio = this.health / this.maxHealth;
     const fillColor = ratio > 0.5 ? 0x44ff44 : ratio > 0.25 ? 0xffcc00 : 0xff4444;
     this.healthBar.fillStyle(fillColor, 1);
@@ -180,41 +243,200 @@ export class Enemy {
     // Boss uses special AI
     if (this.isBoss) {
       this._updateBossAI(playerX, playerY, dx, dy, dist, dt, delta);
+    } else if (this.behavior === 'DASHER') {
+      this._updateDasherAI(playerX, playerY, dx, dy, dist, dt, delta);
     } else {
       this._updateNormalAI(playerX, playerY, dx, dy, dist, dt);
     }
 
-    // Wrap at arena edges (same as player)
+    // Behavior-specific timers (shooter, mine layer)
+    if (this.behavior === 'SHOOTER') {
+      this._updateShooterBehavior(playerX, playerY, dist, delta);
+    } else if (this.behavior === 'MINE_LAYER') {
+      this._updateMineLayerBehavior(delta);
+    }
+
     this._wrapPosition();
 
-    // Update health bar position
     if (this.healthBar) {
       this.updateHealthBar();
     }
   }
 
-  _wrapPosition() {
-    const margin = this.config.width;
-    const x = this.sprite.x;
-    const y = this.sprite.y;
+  // ===================== BEHAVIOR: DASHER =====================
 
-    if (x < -margin) this.sprite.x = ARENA.WIDTH + margin;
-    else if (x > ARENA.WIDTH + margin) this.sprite.x = -margin;
+  _updateDasherAI(playerX, playerY, dx, dy, dist, dt, delta) {
+    const cfg = ENEMY_BEHAVIORS.DASHER;
 
-    if (y < -margin) this.sprite.y = ARENA.HEIGHT + margin;
-    else if (y > ARENA.HEIGHT + margin) this.sprite.y = -margin;
+    switch (this._dasherPhase) {
+      case DASHER_PHASE.CHASE: {
+        // Normal chase, but count down to dash
+        this._updateNormalAI(playerX, playerY, dx, dy, dist, dt);
+        this._dasherCooldown -= delta;
+
+        // Only start telegraph when chasing and cooldown is up
+        if (this._dasherCooldown <= 0 && this.isChasing && dist < ENEMY.TRACK_RANGE * 1.5) {
+          this._dasherPhase = DASHER_PHASE.TELEGRAPH;
+          this._dasherTimer = cfg.telegraphDuration;
+          this._dasherTargetX = playerX;
+          this._dasherTargetY = playerY;
+          // Stop moving during telegraph
+          this.sprite.body.setVelocity(0, 0);
+        }
+        break;
+      }
+
+      case DASHER_PHASE.TELEGRAPH: {
+        // Flash red and grow — warning the player
+        this._dasherTimer -= delta;
+        this.sprite.body.setVelocity(0, 0);
+
+        const progress = 1 - (this._dasherTimer / cfg.telegraphDuration);
+        const flashRate = Math.max(50, 150 - progress * 100);
+        if (Math.floor(this.scene.time.now / flashRate) % 2 === 0) {
+          this.sprite.setTint(cfg.dashColor);
+        } else {
+          this.sprite.setTint(0xffcccc);
+        }
+        this.sprite.setScale(this.spriteScale * (1 + progress * 0.25));
+
+        if (this._dasherTimer <= 0) {
+          // Lock target and start dash
+          this._dasherTargetX = playerX;
+          this._dasherTargetY = playerY;
+          this._dasherPhase = DASHER_PHASE.DASH;
+          this._dasherTimer = cfg.dashDuration;
+          this.sprite.setTint(cfg.dashColor);
+        }
+        break;
+      }
+
+      case DASHER_PHASE.DASH: {
+        // Dash toward locked target position at high speed
+        this._dasherTimer -= delta;
+        const ddx = this._dasherTargetX - this.sprite.x;
+        const ddy = this._dasherTargetY - this.sprite.y;
+        const ddist = Math.sqrt(ddx * ddx + ddy * ddy);
+
+        if (ddist > 5 * PX && this._dasherTimer > 0) {
+          this.sprite.body.setVelocity(
+            (ddx / ddist) * cfg.dashSpeed,
+            (ddy / ddist) * cfg.dashSpeed
+          );
+        } else {
+          // Dash ended
+          this._dasherPhase = DASHER_PHASE.COOLDOWN;
+          this._dasherCooldown = cfg.dashCooldown;
+          this.sprite.body.setVelocity(0, 0);
+          this.sprite.setTint(0xffcccc);
+          this.sprite.setScale(this.spriteScale);
+        }
+        break;
+      }
+
+      case DASHER_PHASE.COOLDOWN: {
+        // Brief stun after dash, then back to chase
+        this._dasherCooldown -= delta;
+        // Slow recovery movement
+        const recoverySpeed = this.speed * 0.3;
+        const rvx = (dx / dist) * recoverySpeed;
+        const rvy = (dy / dist) * recoverySpeed;
+        this.sprite.body.setVelocity(rvx, rvy);
+
+        if (this._dasherCooldown <= 0) {
+          this._dasherPhase = DASHER_PHASE.CHASE;
+          this._dasherCooldown = cfg.dashCooldown;
+        }
+        break;
+      }
+    }
+
+    // Flip sprite
+    if (this.sprite.body.velocity.x < 0) this.sprite.setFlipX(true);
+    else if (this.sprite.body.velocity.x > 0) this.sprite.setFlipX(false);
   }
 
+  // ===================== BEHAVIOR: SHOOTER =====================
+
   /**
-   * Normal enemy AI: wander when far, chase when near.
+   * Shooter behavior update. Returns fire info when ready to shoot.
+   * GameScene polls `enemy.pendingShot` to create EnemyProjectile.
    */
+  _updateShooterBehavior(playerX, playerY, dist, delta) {
+    const cfg = ENEMY_BEHAVIORS.SHOOTER;
+    this.pendingShot = null;
+
+    if (this._shootTelegraphing) {
+      this._shootTelegraphTimer -= delta;
+
+      // Visual telegraph: flash orange
+      const flashRate = Math.max(40, 120 - (cfg.telegraphDuration - this._shootTelegraphTimer) * 0.1);
+      if (Math.floor(this.scene.time.now / flashRate) % 2 === 0) {
+        this.sprite.setTint(cfg.projectileColor);
+      } else {
+        this.sprite.clearTint();
+      }
+
+      // Scale up slightly during telegraph
+      const progress = 1 - (this._shootTelegraphTimer / cfg.telegraphDuration);
+      this.sprite.setScale(this.spriteScale * (1 + progress * 0.15));
+
+      // Slow down while telegraphing
+      this.sprite.body.velocity.x *= 0.95;
+      this.sprite.body.velocity.y *= 0.95;
+
+      if (this._shootTelegraphTimer <= 0) {
+        // Fire!
+        this._shootTelegraphing = false;
+        this._shootCooldown = cfg.fireCooldown;
+        this.sprite.clearTint();
+        this.sprite.setScale(this.spriteScale);
+
+        // Signal to GameScene to create projectile
+        this.pendingShot = {
+          x: this.sprite.x,
+          y: this.sprite.y,
+          targetX: playerX,
+          targetY: playerY,
+        };
+      }
+    } else {
+      this._shootCooldown -= delta;
+
+      if (this._shootCooldown <= 0 && dist < cfg.fireRange && this.isChasing) {
+        // Start telegraph
+        this._shootTelegraphing = true;
+        this._shootTelegraphTimer = cfg.telegraphDuration;
+      }
+    }
+  }
+
+  // ===================== BEHAVIOR: MINE LAYER =====================
+
+  /**
+   * Mine layer behavior. Sets `enemy.pendingMine` when it's time to drop one.
+   */
+  _updateMineLayerBehavior(delta) {
+    this.pendingMine = null;
+    this._mineCooldown -= delta;
+
+    if (this._mineCooldown <= 0 && this.isChasing) {
+      this._mineCooldown = ENEMY_BEHAVIORS.MINE_LAYER.mineCooldown;
+      this.pendingMine = {
+        x: this.sprite.x,
+        y: this.sprite.y,
+      };
+    }
+  }
+
+  // ===================== NORMAL AI =====================
+
   _updateNormalAI(playerX, playerY, dx, dy, dist, dt) {
     let vx, vy;
     const trackRange = this.rallied ? BOSS.RALLY_TRACK_RANGE : ENEMY.TRACK_RANGE;
     const speedMult = this.rallied ? BOSS.RALLY_SPEED_MULT : 1;
 
     if (dist <= trackRange) {
-      // Chase mode
       this.isChasing = true;
       vx = (dx / dist) * this.speed * speedMult;
       vy = (dy / dist) * this.speed * speedMult;
@@ -230,7 +452,6 @@ export class Enemy {
         vy += perpY * offset * this.speed;
       }
     } else {
-      // Wander mode
       this.isChasing = false;
       this.wanderTimer -= dt;
       if (this.wanderTimer <= 0) {
@@ -242,11 +463,9 @@ export class Enemy {
       vy = Math.sin(this.wanderAngle) * wanderSpeed;
     }
 
-    // Flip sprite based on horizontal movement
     if (vx < 0) this.sprite.setFlipX(true);
     else if (vx > 0) this.sprite.setFlipX(false);
 
-    // Smooth transition: lerp toward target velocity
     const currentVx = this.sprite.body.velocity.x;
     const currentVy = this.sprite.body.velocity.y;
     const lerpFactor = 0.1;
@@ -256,25 +475,33 @@ export class Enemy {
     );
   }
 
-  /**
-   * Boss AI with distinct phases: chase → telegraph → charge → orbit → repeat
-   */
+  _wrapPosition() {
+    const margin = this.config.width;
+    const x = this.sprite.x;
+    const y = this.sprite.y;
+
+    if (x < -margin) this.sprite.x = ARENA.WIDTH + margin;
+    else if (x > ARENA.WIDTH + margin) this.sprite.x = -margin;
+
+    if (y < -margin) this.sprite.y = ARENA.HEIGHT + margin;
+    else if (y > ARENA.HEIGHT + margin) this.sprite.y = -margin;
+  }
+
+  // ===================== BOSS AI =====================
+
   _updateBossAI(playerX, playerY, dx, dy, dist, dt, delta) {
     this.isChasing = true;
     this.bossChargeCooldown -= delta;
 
     switch (this.bossPhase) {
       case BOSS_PHASE.CHASE: {
-        // Standard pursuit (slower, menacing)
         const vx = (dx / dist) * this.speed;
         const vy = (dy / dist) * this.speed;
         this._applyBossVelocity(vx, vy, 0.08);
 
-        // Pulsing scale for visual presence
         const pulse = 1 + Math.sin(this.scene.time.now * 0.003) * 0.05;
         this.sprite.setScale(this.spriteScale * pulse);
 
-        // Transition to telegraph when cooldown is up
         if (this.bossChargeCooldown <= 0) {
           this._startTelegraph(playerX, playerY);
         }
@@ -282,11 +509,9 @@ export class Enemy {
       }
 
       case BOSS_PHASE.TELEGRAPH: {
-        // Stop moving, flash red, grow, draw warning
         this.sprite.body.setVelocity(0, 0);
         this.bossPhaseTimer -= delta;
 
-        // Pulsing red flash
         const flashRate = Math.max(60, 200 - (BOSS.CHARGE_TELEGRAPH - this.bossPhaseTimer) * 0.15);
         if (Math.floor(this.scene.time.now / flashRate) % 2 === 0) {
           this.sprite.setTint(0xff2222);
@@ -294,11 +519,8 @@ export class Enemy {
           this.sprite.clearTint();
         }
 
-        // Growing scale
         const progress = 1 - (this.bossPhaseTimer / BOSS.CHARGE_TELEGRAPH);
         this.sprite.setScale(this.spriteScale * (1 + progress * 0.3));
-
-        // Telegraph warning ring
         this._drawTelegraphRing(progress);
 
         if (this.bossPhaseTimer <= 0) {
@@ -308,7 +530,6 @@ export class Enemy {
       }
 
       case BOSS_PHASE.CHARGE: {
-        // Dash toward the locked target position
         this.bossPhaseTimer -= delta;
         const cdx = this.chargeTargetX - this.sprite.x;
         const cdy = this.chargeTargetY - this.sprite.y;
@@ -319,13 +540,11 @@ export class Enemy {
           const cvy = (cdy / cdist) * BOSS.CHARGE_SPEED;
           this.sprite.body.setVelocity(cvx, cvy);
         } else {
-          // Charge ended — brief pause then orbit
           this.sprite.body.setVelocity(0, 0);
           this.sprite.clearTint();
           this.sprite.setScale(this.spriteScale);
           this._clearTelegraph();
 
-          // Screen shake on charge impact
           this.scene.cameras.main.shake(200, 0.01);
 
           this.bossPhase = BOSS_PHASE.ORBIT;
@@ -339,7 +558,6 @@ export class Enemy {
       }
 
       case BOSS_PHASE.ORBIT: {
-        // Circle-strafe around the player
         this.orbitTimer -= delta;
         this.orbitAngle += BOSS.ORBIT_SPEED * dt;
 
@@ -356,13 +574,12 @@ export class Enemy {
 
         if (this.orbitTimer <= 0) {
           this.bossPhase = BOSS_PHASE.CHASE;
-          this.bossChargeCooldown = BOSS.CHARGE_COOLDOWN;
+          this.bossChargeCooldown = this.bossChargeCooldownBase || BOSS.CHARGE_COOLDOWN;
         }
         break;
       }
     }
 
-    // Flip sprite
     if (this.sprite.body.velocity.x < 0) this.sprite.setFlipX(true);
     else if (this.sprite.body.velocity.x > 0) this.sprite.setFlipX(false);
   }
@@ -379,15 +596,13 @@ export class Enemy {
   _startTelegraph(playerX, playerY) {
     this.bossPhase = BOSS_PHASE.TELEGRAPH;
     this.bossPhaseTimer = BOSS.CHARGE_TELEGRAPH;
-    // Lock target position at start of telegraph
     this.chargeTargetX = playerX;
     this.chargeTargetY = playerY;
   }
 
   _startCharge(playerX, playerY) {
     this.bossPhase = BOSS_PHASE.CHARGE;
-    this.bossPhaseTimer = BOSS.CHARGE_DURATION;
-    // Update target to latest player position
+    this.bossPhaseTimer = this.bossChargeDuration || BOSS.CHARGE_DURATION;
     this.chargeTargetX = playerX;
     this.chargeTargetY = playerY;
     this.sprite.clearTint();
@@ -400,12 +615,10 @@ export class Enemy {
     this.telegraphGfx.clear();
     this.telegraphGfx.setAlpha(0.3 + progress * 0.5);
 
-    // Warning ring expanding outward
     const radius = this.config.width * 0.6 + progress * this.config.width * 0.8;
     this.telegraphGfx.lineStyle(2 * PX, 0xff2222, 0.6 + progress * 0.4);
     this.telegraphGfx.strokeCircle(this.sprite.x, this.sprite.y, radius);
 
-    // Direction line toward charge target
     const angle = Math.atan2(this.chargeTargetY - this.sprite.y, this.chargeTargetX - this.sprite.x);
     const lineLen = radius + 30 * PX * progress;
     this.telegraphGfx.lineStyle(1.5 * PX, 0xff4444, 0.4 + progress * 0.4);
@@ -423,13 +636,14 @@ export class Enemy {
     }
   }
 
+  // ===================== DAMAGE & DEATH =====================
+
   takeDamage(amount) {
     if (this.dead) return false;
 
     this.health -= amount;
     this.updateHealthBar();
 
-    // Floating damage number
     eventBus.emit(Events.DAMAGE_NUMBER, {
       x: this.sprite.x,
       y: this.sprite.y,
@@ -478,10 +692,24 @@ export class Enemy {
       isBoss: this.isBoss,
       xpDrop: this.xpDrop,
       config: this.config,
+      behavior: this.behavior,
     });
 
     if (this.isBoss) {
       eventBus.emit(Events.BOSS_KILLED, { x: this.sprite.x, y: this.sprite.y });
+    }
+
+    // Splitter: emit split event so WaveSystem can spawn children
+    if (this.behavior === 'SPLITTER') {
+      const cfg = ENEMY_BEHAVIORS.SPLITTER;
+      eventBus.emit(Events.ENEMY_SPLIT, {
+        x: this.sprite.x,
+        y: this.sprite.y,
+        count: cfg.splitCount,
+        speedMult: cfg.splitSpeedMult,
+        healthMult: cfg.splitHealthMult,
+        parentType: this.typeName,
+      });
     }
 
     // Quick death animation

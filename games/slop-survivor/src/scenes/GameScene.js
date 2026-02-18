@@ -18,6 +18,8 @@ import { SpeechBubble } from '../ui/SpeechBubble.js';
 import { POWERUP_QUOTES } from '../ui/PowerupQuotes.js';
 import { DEV_QUOTES, MONSTER_QUOTES } from '../ui/DevQuotes.js';
 import { playStartEngine, playUpdateEngine, playStopEngine, playPauseEngine, playResumeEngine, duckMusic, unduckMusic, startFootsteps, stopFootsteps, playEnemyHitSfx } from '../audio/AudioBridge.js';
+import { EnemyProjectile } from '../entities/EnemyProjectile.js';
+import { EnemyMine } from '../entities/EnemyMine.js';
 import { LightingSystem } from '../core/LightingSystem.js';
 import { VirtualJoystick } from '../ui/VirtualJoystick.js';
 
@@ -104,6 +106,10 @@ export class GameScene extends Phaser.Scene {
     this.xpGems = [];
     this.powerUps = [];
 
+    // --- Enemy hazards (projectiles + mines from behavior variants) ---
+    this.enemyProjectiles = [];
+    this.enemyMines = [];
+
     // --- Timer ---
     this.gameTimer = 0;
 
@@ -130,12 +136,14 @@ export class GameScene extends Phaser.Scene {
     this.onPowerupCollected = this.handlePowerupCollected.bind(this);
     this.onBossSpawn = this.handleBossSpawn.bind(this);
     this.onLevelUp = this.handleLevelUp.bind(this);
+    this.onEnemySplit = this.handleEnemySplit.bind(this);
 
     eventBus.on(Events.ENEMY_KILLED, this.onEnemyKilled);
     eventBus.on(Events.WEAPON_UPGRADE, this.onWeaponUpgrade);
     eventBus.on(Events.POWERUP_COLLECTED, this.onPowerupCollected);
     eventBus.on(Events.BOSS_SPAWN, this.onBossSpawn);
     eventBus.on(Events.LEVEL_UP, this.onLevelUp);
+    eventBus.on(Events.ENEMY_SPLIT, this.onEnemySplit);
 
     // --- Audio: start gameplay music ---
     eventBus.emit(Events.MUSIC_GAMEPLAY);
@@ -155,6 +163,10 @@ export class GameScene extends Phaser.Scene {
       eventBus.off(Events.POWERUP_COLLECTED, this.onPowerupCollected);
       eventBus.off(Events.BOSS_SPAWN, this.onBossSpawn);
       eventBus.off(Events.LEVEL_UP, this.onLevelUp);
+      eventBus.off(Events.ENEMY_SPLIT, this.onEnemySplit);
+      // Clean up enemy hazards
+      this.enemyProjectiles.forEach(p => { if (!p.dead) p.destroy(); });
+      this.enemyMines.forEach(m => { if (!m.dead) m.destroy(); });
       this.waveSystem.destroy();
       this.weaponSystem.destroy();
       this.levelSystem.destroy();
@@ -1165,6 +1177,73 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
+    // --- Process enemy behavior outputs (shooter projectiles, mine drops) ---
+    for (const enemy of enemies) {
+      if (enemy.dead) continue;
+
+      // Shooter fires a projectile
+      if (enemy.pendingShot) {
+        const shot = enemy.pendingShot;
+        enemy.pendingShot = null;
+        const ep = new EnemyProjectile(this, shot.x, shot.y, shot.targetX, shot.targetY);
+        this.enemyProjectiles.push(ep);
+      }
+
+      // Mine layer drops a mine
+      if (enemy.pendingMine) {
+        const mine = enemy.pendingMine;
+        enemy.pendingMine = null;
+        const em = new EnemyMine(this, mine.x, mine.y);
+        this.enemyMines.push(em);
+      }
+    }
+
+    // --- Collision: enemy projectiles vs player ---
+    for (let i = this.enemyProjectiles.length - 1; i >= 0; i--) {
+      const ep = this.enemyProjectiles[i];
+      if (ep.dead || !ep.sprite.active) {
+        this.enemyProjectiles.splice(i, 1);
+        continue;
+      }
+      const dx = px - ep.sprite.x;
+      const dy = py - ep.sprite.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < PLAYER.WIDTH * 0.4 + 8 * PX) {
+        // Knockback
+        if (dist > 0) {
+          const kx = (dx / dist) * PLAYER.HIT_KNOCKBACK * 0.5;
+          const ky = (dy / dist) * PLAYER.HIT_KNOCKBACK * 0.5;
+          this.player.vx += kx;
+          this.player.vy += ky;
+        }
+        playEnemyHitSfx();
+        ep.destroy();
+        const dead = this.player.hit(ep.damage);
+        if (dead) {
+          this.triggerGameOver();
+          return;
+        }
+      }
+    }
+
+    // --- Collision: enemy mines vs player ---
+    for (let i = this.enemyMines.length - 1; i >= 0; i--) {
+      const em = this.enemyMines[i];
+      if (em.dead) {
+        this.enemyMines.splice(i, 1);
+        continue;
+      }
+      if (em.checkPlayerCollision(px, py)) {
+        playEnemyHitSfx();
+        const dead = this.player.hit(em.damage);
+        if (dead) {
+          this.triggerGameOver();
+          return;
+        }
+        this.enemyMines.splice(i, 1);
+      }
+    }
+
     // --- Update XP gems ---
     for (let i = this.xpGems.length - 1; i >= 0; i--) {
       const gem = this.xpGems[i];
@@ -1310,11 +1389,12 @@ export class GameScene extends Phaser.Scene {
     const gem = new XPGem(this, x, y, gemSize);
     this.xpGems.push(gem);
 
-    // Random power-up drop
+    // Random power-up drop (drop rate decreases over time via difficulty scaling)
+    const dropMult = this.waveSystem.getPowerupDropMult();
     const roll = Math.random();
     let cumChance = 0;
     for (const [typeName, cfg] of Object.entries(POWERUP_TYPES)) {
-      cumChance += cfg.dropChance;
+      cumChance += cfg.dropChance * dropMult;
       if (roll < cumChance) {
         const pu = new PowerUp(this, x, y, typeName);
         this.powerUps.push(pu);
@@ -1548,6 +1628,13 @@ export class GameScene extends Phaser.Scene {
         });
       }
     }
+  }
+
+  /**
+   * Splitter death: spawn smaller, faster children via WaveSystem.
+   */
+  handleEnemySplit({ x, y, count, speedMult, healthMult }) {
+    this.waveSystem.spawnSplitChildren(x, y, count, speedMult, healthMult);
   }
 
   /**

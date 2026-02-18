@@ -40,6 +40,14 @@ export const POWERUP_QUOTES = {
     { speaker: 'Rich Hickey', text: '"Simplicity is a prerequisite for reliability."' },
     { speaker: 'Prettier', text: 'Reformatting slop...\n✓ 847 files fixed\n✓ World saved\n\nOrbit lock acquired!' },
   ],
+  TRIPLE_SHOT: [
+    { speaker: 'Triple Shot', text: 'Three times the firepower, three times the fun!' },
+    { speaker: 'Multithread', text: 'Running three threads in parallel. What could go wrong?' },
+    { speaker: 'Senior Dev', text: '"Why fire one when you can fire three?"' },
+    { speaker: 'Fork Bomb', text: ':(){ :|:& };: — but for lasers!' },
+    { speaker: 'Load Balancer', text: 'Distributing damage across three lanes.' },
+    { speaker: 'Git Branch', text: 'Three branches, zero merge conflicts.' },
+  ],
   MINES: [
     { speaker: 'DevOps', text: 'Deploying landmines to production... YOLO!' },
     { speaker: 'Mine Layer', text: 'Every step you take leaves a surprise for the slop!' },
