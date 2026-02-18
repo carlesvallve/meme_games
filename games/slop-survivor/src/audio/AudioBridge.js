@@ -29,6 +29,7 @@ import {
   missileSfx,
   mineDropSfx,
   smallExplosionSfx,
+  navSfx,
 } from './sfx.js';
 
 export function initAudioBridge() {
@@ -127,6 +128,10 @@ export function playLaserSfx() {
 // Hook for button clicks in scenes
 export function playClickSfx() {
   clickSfx();
+}
+
+export function playNavSfx() {
+  navSfx();
 }
 
 // Engine sound — always-on hum after boarding, velocity-based pitch

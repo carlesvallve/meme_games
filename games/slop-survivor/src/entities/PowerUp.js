@@ -1,59 +1,51 @@
 import Phaser from 'phaser';
-import { POWERUP_TYPES, PX, PIXEL_SCALE, GAME } from '../core/Constants.js';
+import { POWERUP_DROP, PX, PIXEL_SCALE, GAME } from '../core/Constants.js';
 import { eventBus, Events } from '../core/EventBus.js';
-import { renderPixelArt } from '../core/PixelRenderer.js';
-import { POWERUP_CODE_REVIEW, POWERUP_GITIGNORE, POWERUP_LINTER } from '../sprites/items.js';
-import { MINE_SPRITE, ICON_TRIPLE } from '../sprites/projectiles.js';
-import { PALETTE } from '../sprites/palette.js';
 
-const POWERUP_TEXTURES = {
-  CODE_REVIEW: { pixels: POWERUP_CODE_REVIEW, key: 'powerup-code-review' },
-  GITIGNORE: { pixels: POWERUP_GITIGNORE, key: 'powerup-gitignore' },
-  LINTER: { pixels: POWERUP_LINTER, key: 'powerup-linter' },
-  MINES: { pixels: MINE_SPRITE, key: 'powerup-mines' },
-  TRIPLE_SHOT: { pixels: ICON_TRIPLE, key: 'powerup-triple-shot' },
-};
-
-const SPRITE_SCALE = PX;
-
+/**
+ * Generic powerup token drop.
+ * Collecting it triggers the powerup choice overlay — the token itself
+ * has no type. Visual: glowing teal orb with "POWER UP" tag.
+ */
 export class PowerUp {
-  constructor(scene, x, y, typeName) {
+  constructor(scene, x, y) {
     this.scene = scene;
-    this.typeName = typeName;
     this.collected = false;
 
-    const config = POWERUP_TYPES[typeName];
-    this.config = config;
+    const size = POWERUP_DROP.TOKEN_SIZE;
+    const color = POWERUP_DROP.TOKEN_COLOR;
 
-    // Render power-up texture
-    const texData = POWERUP_TEXTURES[typeName];
-    renderPixelArt(scene, texData.pixels, PALETTE, texData.key, PIXEL_SCALE);
-
-    // Color halo per type
-    const HALO_COLORS = {
-      CODE_REVIEW: 0xff6633,
-      GITIGNORE: 0x3388ff,
-      LINTER: 0xffdd33,
-      MINES: 0xcc33ff,
-      TRIPLE_SHOT: 0x33ccff,
-    };
-    const haloColor = HALO_COLORS[typeName] || 0xffffff;
-    const haloRadius = config.width * 1.5;
-    this.halo = scene.add.circle(x, y, haloRadius, haloColor, 0.12);
+    // Halo glow
+    const haloRadius = size * 1.5;
+    this.halo = scene.add.circle(x, y, haloRadius, color, 0.12);
     this.halo.setDepth(3);
 
-    this.sprite = scene.physics.add.sprite(x, y, texData.key);
-    this.sprite.setScale(SPRITE_SCALE * 1.2);
+    // Use a simple circle texture for the token
+    const texKey = 'powerup-token';
+    if (!scene.textures.exists(texKey)) {
+      const gfx = scene.add.graphics();
+      const r = Math.round(size * 0.5);
+      gfx.fillStyle(color, 1);
+      gfx.fillCircle(r, r, r);
+      // Inner bright core
+      gfx.fillStyle(0xffffff, 0.6);
+      gfx.fillCircle(r, r, r * 0.4);
+      gfx.generateTexture(texKey, r * 2, r * 2);
+      gfx.destroy();
+    }
+
+    this.sprite = scene.physics.add.sprite(x, y, texKey);
+    this.sprite.setScale(PIXEL_SCALE * 0.8);
     this.sprite.setDepth(4);
-    this.sprite.body.setSize(config.width * 1.5 / SPRITE_SCALE, config.width * 1.5 / SPRITE_SCALE);
+    this.sprite.body.setSize(size * 1.5 / PIXEL_SCALE, size * 1.5 / PIXEL_SCALE);
     this.sprite.entityRef = this;
 
-    // Pulsing glow on sprite + halo
+    // Pulsing glow
     scene.tweens.add({
       targets: this.sprite,
-      scaleX: SPRITE_SCALE * 1.4,
-      scaleY: SPRITE_SCALE * 1.4,
-      duration: 500,
+      scaleX: PIXEL_SCALE * 1.1,
+      scaleY: PIXEL_SCALE * 1.1,
+      duration: 600,
       yoyo: true,
       repeat: -1,
       ease: 'Sine.easeInOut',
@@ -61,27 +53,20 @@ export class PowerUp {
     scene.tweens.add({
       targets: this.halo,
       alpha: 0.25,
-      scaleX: 1.4,
-      scaleY: 1.4,
-      duration: 700,
+      scaleX: 1.5,
+      scaleY: 1.5,
+      duration: 800,
       yoyo: true,
       repeat: -1,
       ease: 'Sine.easeInOut',
     });
 
-    // Name tag floating above
-    const TAG_NAMES = {
-      CODE_REVIEW: 'CODE REVIEW',
-      GITIGNORE: '.GITIGNORE',
-      LINTER: 'LINTER',
-      MINES: 'MINE LAYER',
-      TRIPLE_SHOT: 'TRIPLE SHOT',
-    };
+    // Name tag
     const tagSize = Math.round(GAME.HEIGHT * 0.014);
-    this.nameTag = scene.add.text(x, y - config.width * 1.2, TAG_NAMES[typeName] || typeName, {
+    this.nameTag = scene.add.text(x, y - size * 1.2, 'POWER UP', {
       fontSize: tagSize + 'px',
       fontFamily: '"Courier New", Courier, monospace',
-      color: '#' + haloColor.toString(16).padStart(6, '0'),
+      color: '#4488ff',
       stroke: '#000000',
       strokeThickness: 2,
     }).setOrigin(0.5).setDepth(5).setAlpha(0.8);
@@ -97,18 +82,17 @@ export class PowerUp {
     this.collected = true;
 
     eventBus.emit(Events.POWERUP_COLLECTED, {
-      type: this.typeName,
       x: this.sprite.x,
       y: this.sprite.y,
-      config: this.config,
     });
 
-    // Quick collect animation — sprite + halo burst
+    // Quick collect animation
+    const s = PIXEL_SCALE;
     this.scene.tweens.add({
       targets: this.sprite,
       alpha: 0,
-      scaleX: SPRITE_SCALE * 2,
-      scaleY: SPRITE_SCALE * 2,
+      scaleX: s * 2,
+      scaleY: s * 2,
       duration: 200,
       onComplete: () => this.destroy(),
     });

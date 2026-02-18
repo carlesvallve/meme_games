@@ -3,18 +3,12 @@
 
 export const POWERUP_QUOTES = {
   CODE_REVIEW: [
-    { speaker: 'Senior Dev', text: '"Always code as if the person who ends up maintaining your code is a violent psychopath who knows where you live."' },
+    { speaker: 'PR Reviewer', text: 'Merging all slop into /dev/null. LGTM!' },
+    { speaker: 'Senior Dev', text: '"Always code as if the person maintaining your code is a violent psychopath."' },
+    { speaker: 'Git Merge', text: 'Resolving conflicts... by force. Vortex engaged!' },
     { speaker: 'Linus T.', text: '"Talk is cheap. Show me the code."' },
-    { speaker: 'Kent Beck', text: '"Make it work, make it right, make it fast."' },
-    { speaker: 'Donald Knuth', text: '"Premature optimization is the root of all evil."' },
-    { speaker: 'Edsger Dijkstra', text: '"If debugging is removing bugs, then programming must be putting them in."' },
-    { speaker: 'Code Review', text: 'LGTM! Nuke all slop in range!' },
-    { speaker: 'Bjarne Stroustrup', text: '"There are only two kinds of languages: the ones people complain about and the ones nobody uses."' },
-    { speaker: 'Brian Kernighan', text: '"Debugging is twice as hard as writing the code. So if you write it as cleverly as possible, you\'re not smart enough to debug it."' },
-    { speaker: 'PR Comment', text: 'Have you considered NOT shipping this? Code review complete — slop eliminated!' },
-    { speaker: 'Fred Brooks', text: '"Adding manpower to a late software project makes it later."' },
-    { speaker: 'John Carmack', text: '"Sometimes, the elegant implementation is just a function. Not a method. Not a class. Not a framework. Just a function."' },
-    { speaker: 'Rob Pike', text: '"Complexity is multiplicative. Simplifying one part of the system makes the whole system simpler."' },
+    { speaker: 'PR Comment', text: 'Requested changes: DELETE EVERYTHING. Pulling in all slop!' },
+    { speaker: 'CI/CD', text: 'Pipeline triggered. All slop pulled into the review zone.' },
   ],
   GITIGNORE: [
     { speaker: '.gitignore', text: 'node_modules/\n*.slop\nai_suggestions/**\n\nShield activated!' },
@@ -55,5 +49,13 @@ export const POWERUP_QUOTES = {
     { speaker: 'Git Blame', text: 'These mines are YOUR problem now.' },
     { speaker: 'CI Pipeline', text: 'Build failed. Explosively.' },
     { speaker: 'Tech Debt', text: 'Planting time bombs in the codebase since 2024.' },
+  ],
+  HOMING: [
+    { speaker: 'Homing Missiles', text: 'Lock on. Fire. Forget. Let the missiles do the debugging.' },
+    { speaker: 'Senior Dev', text: '"Write code that seeks out problems automatically."' },
+    { speaker: 'Garbage Collector', text: 'Auto-targeting enabled. No slop escapes the heap.' },
+    { speaker: 'Smart Pointer', text: 'These missiles have better aim than your average AI suggestion.' },
+    { speaker: 'Seek & Destroy', text: 'Heat-seeking missiles deployed. Slop temperature: critical.' },
+    { speaker: 'Runtime', text: 'Launching guided refactors at all detected slop instances.' },
   ],
 };

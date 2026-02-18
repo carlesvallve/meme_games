@@ -21,6 +21,7 @@ export const Events = {
   // Power-ups
   POWERUP_COLLECTED: 'powerup:collected',
   POWERUP_SPAWN: 'powerup:spawn',
+  POWERUP_CHOSEN: 'powerup:chosen',
 
   // XP / Leveling
   XP_COLLECTED: 'xp:collected',
