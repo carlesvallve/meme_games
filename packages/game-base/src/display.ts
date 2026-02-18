@@ -4,6 +4,8 @@ export interface DisplayConfig {
   GAME: {
     WIDTH: number;
     HEIGHT: number;
+    UI_BASE: number;
+    MOBILE_SCALE: number;
     IS_PORTRAIT: boolean;
     IS_MOBILE: boolean;
     GRAVITY: number;
@@ -63,12 +65,19 @@ export function createDisplayConfig(opts: DisplayOptions = {}): DisplayConfig {
     ? Math.min(canvasW / dw, canvasH / dh)
     : canvasW / dw;
 
+  // Mobile scale factor — everything (UI + game content) renders bigger on mobile
+  // because the device is held closer and touch targets need to be larger.
+  // Games apply this as camera zoom (game content) and UI_BASE multiplier (text/HUD).
+  const mobileScale = isMobile ? 1.4 : 1;
+
   return {
     DPR,
     PX,
     GAME: {
       WIDTH: canvasW,
       HEIGHT: canvasH,
+      UI_BASE: Math.min(canvasW, canvasH),
+      MOBILE_SCALE: mobileScale,
       IS_PORTRAIT: isPortrait,
       IS_MOBILE: isMobile,
       GRAVITY: gravity * PX,

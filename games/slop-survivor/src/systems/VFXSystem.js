@@ -78,15 +78,15 @@ export class VFXSystem {
       duration: VFX.SHAKE_BOSS_DURATION,
     });
 
-    // Boss warning text (fixed to viewport)
+    // Boss warning text — scrollFactor(0) pins to screen
     const warnText = this.scene.add.text(GAME.WIDTH / 2, GAME.HEIGHT / 2, 'BOSS INCOMING!', {
-      fontSize: Math.round(GAME.HEIGHT * UI.HEADING_RATIO) + 'px',
+      fontSize: Math.round(UI.BASE * UI.HEADING_RATIO) + 'px',
       fontFamily: UI.FONT,
       color: '#ff4444',
       fontStyle: 'bold',
       stroke: '#000000',
       strokeThickness: 4 * PX,
-    }).setOrigin(0.5).setDepth(1100).setAlpha(0).setScrollFactor(0);
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(1100).setAlpha(0);
 
     this.scene.tweens.add({
       targets: warnText,
@@ -362,7 +362,7 @@ export class VFXSystem {
 
   damageNumber({ x, y, amount, color }) {
     const textColor = color || '#ffffff';
-    const size = Math.round(GAME.HEIGHT * VFX.DAMAGE_NUM_SIZE_RATIO);
+    const size = Math.round(UI.BASE * VFX.DAMAGE_NUM_SIZE_RATIO);
 
     const dmgText = this.scene.add.text(
       x + (Math.random() - 0.5) * 10 * PX,

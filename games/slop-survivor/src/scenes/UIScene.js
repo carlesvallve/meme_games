@@ -11,40 +11,13 @@ export class UIScene extends Phaser.Scene {
 
   create() {
     const padding = UI.HUD_PADDING;
+    const scoreSize = Math.round(UI.BASE * UI.SCORE_SIZE_RATIO);
+    const smallSize = Math.round(UI.BASE * UI.SMALL_RATIO);
+    const rowGap = 6 * PX;
 
     // --- Health hearts (top-left) ---
     this.hearts = [];
     this.drawHearts();
-
-    // --- Score (top-right) ---
-    const scoreSize = Math.round(GAME.HEIGHT * UI.SCORE_SIZE_RATIO);
-    this.scoreText = this.add.text(GAME.WIDTH - padding, padding, 'Score: 0', {
-      fontSize: scoreSize + 'px',
-      fontFamily: UI.FONT,
-      color: COLORS.SCORE_GOLD,
-      fontStyle: 'bold',
-      stroke: COLORS.UI_SHADOW,
-      strokeThickness: UI.SCORE_STROKE,
-    }).setOrigin(1, 0);
-
-    // --- Enemies killed (below score) ---
-    const smallSize = Math.round(GAME.HEIGHT * UI.SMALL_RATIO);
-    this.killsText = this.add.text(GAME.WIDTH - padding, padding + scoreSize + 4 * PX, 'Kills: 0', {
-      fontSize: smallSize + 'px',
-      fontFamily: UI.FONT,
-      color: COLORS.UI_TEXT,
-      stroke: COLORS.UI_SHADOW,
-      strokeThickness: 2 * PX,
-    }).setOrigin(1, 0);
-
-    // --- Timer (below kills) ---
-    this.timerText = this.add.text(GAME.WIDTH - padding, padding + scoreSize + smallSize + 10 * PX, 'Time: 0:00', {
-      fontSize: smallSize + 'px',
-      fontFamily: UI.FONT,
-      color: COLORS.UI_TEXT,
-      stroke: COLORS.UI_SHADOW,
-      strokeThickness: 2 * PX,
-    }).setOrigin(1, 0);
 
     // --- Level indicator (below hearts) ---
     this.levelText = this.add.text(padding, padding + UI.HEART_SIZE + 10 * PX, 'Lv.1', {
@@ -57,13 +30,44 @@ export class UIScene extends Phaser.Scene {
     });
 
     // --- XP bar (below level) ---
-    this.xpBarX = padding;
-    this.xpBarY = padding + UI.HEART_SIZE + 10 * PX + smallSize + 6 * PX;
     this.xpBar = this.add.graphics();
+    this._xpBarX = padding;
+    this._xpBarY = padding + UI.HEART_SIZE + 10 * PX + smallSize + 6 * PX;
+    this._xpBarW = UI.XP_BAR_WIDTH;
+    this._xpBarH = UI.XP_BAR_HEIGHT;
     this.drawXPBar(0, 1);
 
+    // --- Right side: Score, Kills, Time with even gaps ---
+    this.scoreText = this.add.text(GAME.WIDTH - padding, padding, 'Score: 0', {
+      fontSize: scoreSize + 'px',
+      fontFamily: UI.FONT,
+      color: COLORS.SCORE_GOLD,
+      fontStyle: 'bold',
+      stroke: COLORS.UI_SHADOW,
+      strokeThickness: UI.SCORE_STROKE,
+    }).setOrigin(1, 0);
+
+    const rightRowGap = 8 * PX;
+    const killsY = padding + scoreSize + rightRowGap;
+    this.killsText = this.add.text(GAME.WIDTH - padding, killsY, 'Kills: 0', {
+      fontSize: smallSize + 'px',
+      fontFamily: UI.FONT,
+      color: COLORS.UI_TEXT,
+      stroke: COLORS.UI_SHADOW,
+      strokeThickness: 2 * PX,
+    }).setOrigin(1, 0);
+
+    const timerY = killsY + smallSize + rightRowGap;
+    this.timerText = this.add.text(GAME.WIDTH - padding, timerY, 'Time: 0:00', {
+      fontSize: smallSize + 'px',
+      fontFamily: UI.FONT,
+      color: COLORS.UI_TEXT,
+      stroke: COLORS.UI_SHADOW,
+      strokeThickness: 2 * PX,
+    }).setOrigin(1, 0);
+
     // --- Mute button (top-right, below timer) ---
-    this.createMuteButton();
+    this.createMuteButton(timerY + smallSize + rightRowGap);
 
     // --- Fade in all HUD elements ---
     const hudElements = [this.scoreText, this.killsText, this.timerText, this.levelText, this.xpBar, this.muteIcon, ...this.hearts];
@@ -99,7 +103,7 @@ export class UIScene extends Phaser.Scene {
           this.scoreText.y + this.scoreText.height + 4 * PX,
           `+${delta}`,
           {
-            fontSize: Math.round(GAME.HEIGHT * UI.SMALL_RATIO) + 'px',
+            fontSize: Math.round(UI.BASE * UI.SMALL_RATIO) + 'px',
             fontFamily: UI.FONT,
             color: '#ffff00',
             fontStyle: 'bold',
@@ -150,8 +154,8 @@ export class UIScene extends Phaser.Scene {
           ease: 'Quad.easeOut',
         });
         // Floating "LEVEL UP!" text
-        const lvlUp = this.add.text(GAME.WIDTH / 2, GAME.HEIGHT * 0.15, 'LEVEL UP!', {
-          fontSize: Math.round(GAME.HEIGHT * UI.HEADING_RATIO) + 'px',
+        const lvlUp = this.add.text(GAME.WIDTH / 2, GAME.HEIGHT / 2 - UI.BASE * 0.3, 'LEVEL UP!', {
+          fontSize: Math.round(UI.BASE * UI.HEADING_RATIO) + 'px',
           fontFamily: UI.FONT,
           color: '#ffcc00',
           fontStyle: 'bold',
@@ -175,36 +179,10 @@ export class UIScene extends Phaser.Scene {
       this.killsText.setText(`Kills: ${gameState.enemiesKilled}`);
     };
 
-    this.onWaveStart = ({ wave }) => {
-      if (wave > 0 && wave % 5 === 0) {
-        const waveText = this.add.text(GAME.WIDTH / 2, GAME.HEIGHT * 0.5, `WAVE ${wave}`, {
-          fontSize: Math.round(GAME.HEIGHT * UI.HEADING_RATIO * 0.8) + 'px',
-          fontFamily: UI.FONT,
-          color: '#44ff44',
-          fontStyle: 'bold',
-          stroke: '#000000',
-          strokeThickness: 3 * PX,
-        }).setOrigin(0.5).setAlpha(0);
-
-        this.tweens.add({
-          targets: waveText,
-          alpha: 0.8,
-          scaleX: 1.1,
-          scaleY: 1.1,
-          duration: 300,
-          yoyo: true,
-          hold: 500,
-          ease: 'Quad.easeOut',
-          onComplete: () => waveText.destroy(),
-        });
-      }
-    };
-
     eventBus.on(Events.SCORE_CHANGED, this.onScoreChanged);
     eventBus.on(Events.PLAYER_HIT, this.onPlayerHit);
     eventBus.on(Events.XP_CHANGED, this.onXPChanged);
     eventBus.on(Events.ENEMY_KILLED, this.onEnemyKilled);
-    eventBus.on(Events.WAVE_START, this.onWaveStart);
 
     // Update timer every second
     this.timerEvent = this.time.addEvent({
@@ -223,7 +201,6 @@ export class UIScene extends Phaser.Scene {
       eventBus.off(Events.PLAYER_HIT, this.onPlayerHit);
       eventBus.off(Events.XP_CHANGED, this.onXPChanged);
       eventBus.off(Events.ENEMY_KILLED, this.onEnemyKilled);
-      eventBus.off(Events.WAVE_START, this.onWaveStart);
       if (this.timerEvent) this.timerEvent.destroy();
     });
   }
@@ -264,37 +241,90 @@ export class UIScene extends Phaser.Scene {
     }
   }
 
-  createMuteButton() {
-    const size = Math.max(36 * PX, UI.MIN_TOUCH);
-    // Position below the timer text area
-    const scoreSize = Math.round(GAME.HEIGHT * UI.SCORE_SIZE_RATIO);
-    const smallSize = Math.round(GAME.HEIGHT * UI.SMALL_RATIO);
-    const x = GAME.WIDTH - size / 2 - 6 * PX;
-    const y = UI.HUD_PADDING + scoreSize + smallSize * 2 + 24 * PX;
+  createMuteButton(yPos) {
+    const iconSize = 18 * PX;
+    const touchSize = Math.max(36 * PX, UI.MIN_TOUCH);
+    const x = GAME.WIDTH - UI.HUD_PADDING - touchSize / 2 + 6 * PX;
+    const y = yPos + 4 * PX;
 
-    this.muteIcon = this.add.text(x, y, gameState.isMuted ? '🔇' : '🔊', {
-      fontSize: Math.round(size * 0.45) + 'px',
-    }).setOrigin(0.5).setDepth(200);
+    // Draw a flat white speaker icon using Graphics
+    this.muteIcon = this.add.graphics();
+    this.muteIcon.setDepth(200);
+    this._muteIconX = x;
+    this._muteIconY = y;
+    this._muteIconSize = iconSize;
+    this._drawMuteIcon(gameState.isMuted);
 
-    this.muteIcon.setInteractive({ useHandCursor: true });
-    this.muteIcon.on('pointerup', () => {
+    // Invisible interactive hit area
+    const hitZone = this.add.zone(x, y, touchSize, touchSize)
+      .setInteractive({ useHandCursor: true })
+      .setDepth(201);
+
+    hitZone.on('pointerup', () => {
       eventBus.emit(Events.AUDIO_TOGGLE_MUTE);
-      this.muteIcon.setText(gameState.isMuted ? '🔇' : '🔊');
+      this._drawMuteIcon(gameState.isMuted);
     });
 
     // M key shortcut
     this._muteKeyHandler = this.input.keyboard.on('keydown-M', () => {
       eventBus.emit(Events.AUDIO_TOGGLE_MUTE);
-      if (this.muteIcon) this.muteIcon.setText(gameState.isMuted ? '🔇' : '🔊');
+      this._drawMuteIcon(gameState.isMuted);
     });
+  }
+
+  _drawMuteIcon(muted) {
+    const g = this.muteIcon;
+    const x = this._muteIconX;
+    const y = this._muteIconY;
+    const s = this._muteIconSize;
+
+    g.clear();
+
+    // Speaker body — trapezoid + rectangle
+    const bodyW = s * 0.3;
+    const bodyH = s * 0.35;
+    const coneW = s * 0.25;
+
+    g.fillStyle(0xffffff, 0.85);
+    // Rectangle (speaker grille)
+    g.fillRect(x - s * 0.25, y - bodyH / 2, bodyW, bodyH);
+    // Cone (triangle pointing left)
+    g.fillTriangle(
+      x - s * 0.25, y - bodyH / 2,
+      x - s * 0.25 - coneW, y,
+      x - s * 0.25, y + bodyH / 2,
+    );
+
+    if (muted) {
+      // X mark for muted
+      const lw = 2 * PX;
+      const xOff = x + s * 0.15;
+      g.lineStyle(lw, 0xff4444, 0.9);
+      g.lineBetween(xOff - s * 0.15, y - s * 0.2, xOff + s * 0.15, y + s * 0.2);
+      g.lineBetween(xOff + s * 0.15, y - s * 0.2, xOff - s * 0.15, y + s * 0.2);
+    } else {
+      // Sound waves (arcs)
+      const lw = 2 * PX;
+      g.lineStyle(lw, 0xffffff, 0.6);
+      // Small wave
+      const arcX = x + s * 0.1;
+      g.beginPath();
+      g.arc(arcX, y, s * 0.18, -Math.PI * 0.35, Math.PI * 0.35, false);
+      g.strokePath();
+      // Large wave
+      g.lineStyle(lw, 0xffffff, 0.4);
+      g.beginPath();
+      g.arc(arcX, y, s * 0.32, -Math.PI * 0.4, Math.PI * 0.4, false);
+      g.strokePath();
+    }
   }
 
   drawXPBar(xp, xpToNext) {
     this.xpBar.clear();
-    const w = UI.XP_BAR_WIDTH;
-    const h = UI.XP_BAR_HEIGHT;
-    const x = this.xpBarX;
-    const y = this.xpBarY;
+    const x = this._xpBarX;
+    const y = this._xpBarY;
+    const w = this._xpBarW;
+    const h = this._xpBarH;
 
     // Background
     this.xpBar.fillStyle(0x222222, 0.8);

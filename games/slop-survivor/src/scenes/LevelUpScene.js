@@ -34,6 +34,7 @@ export function showLevelUpOverlay(scene, levelData) {
   const w = GAME.WIDTH;
   const h = GAME.HEIGHT;
   const cx = w / 2;
+  const cy = h / 2;
 
   // Root container — rendered in UIScene (no scrolling)
   const root = scene.add.container(0, 0);
@@ -52,19 +53,42 @@ export function showLevelUpOverlay(scene, levelData) {
     duration: 200,
   });
 
-  // Gold particle burst
+  // --- Layout: compute card size first, then stack elements from center ---
+  const options = levelData.options || [];
+  const gap = 16 * PX;
+  const maxCardSize = Math.min(w * 0.28, h * 0.35);
+  const totalNeeded = options.length * maxCardSize + (options.length - 1) * gap;
+  const cardSize = totalNeeded > w * 0.9
+    ? (w * 0.9 - (options.length - 1) * gap) / options.length
+    : maxCardSize;
+
+  const titleSize = Math.round(UI.BASE * UI.HEADING_RATIO * 1.15);
+  const lvlSize = Math.round(UI.BASE * UI.BODY_RATIO * 1.1);
+  const subSize = Math.round(UI.BASE * UI.BODY_RATIO * 0.85);
+  const textGap = 10 * PX;
+
+  // Total content height: title + level + subtitle + gap + cards
+  const headerH = titleSize + textGap + lvlSize + textGap + subSize;
+  const contentGap = 24 * PX;
+  const totalH = headerH + contentGap + cardSize;
+
+  // Start Y so content block is vertically centered
+  let curY = cy - totalH / 2;
+
+  // Gold particle burst (centered on title area)
+  const burstY = curY + titleSize / 2;
   const burstColors = [0xffcc00, 0xffe866, 0x9944ff, 0xffffff];
   for (let i = 0; i < 12; i++) {
     const angle = (Math.PI * 2 * i) / 12;
     const speed = 80 * PX + Math.random() * 40 * PX;
     const size = 2 * PX + Math.random() * 3 * PX;
     const color = Phaser.Utils.Array.GetRandom(burstColors);
-    const particle = scene.add.circle(cx, h * 0.18, size, color, 1);
+    const particle = scene.add.circle(cx, burstY, size, color, 1);
     root.add(particle);
     scene.tweens.add({
       targets: particle,
       x: cx + Math.cos(angle) * speed,
-      y: h * 0.18 + Math.sin(angle) * speed,
+      y: burstY + Math.sin(angle) * speed,
       alpha: 0,
       scale: 0.2,
       duration: 500 + Math.random() * 300,
@@ -74,8 +98,7 @@ export function showLevelUpOverlay(scene, levelData) {
   }
 
   // Title — big and celebratory
-  const titleSize = Math.round(h * UI.HEADING_RATIO * 1.15);
-  const title = scene.add.text(cx, h * 0.12, 'LEVEL UP!', {
+  const title = scene.add.text(cx, curY + titleSize / 2, 'LEVEL UP!', {
     fontSize: titleSize + 'px',
     fontFamily: UI.FONT,
     color: '#ffcc00',
@@ -83,34 +106,26 @@ export function showLevelUpOverlay(scene, levelData) {
     shadow: { offsetX: 0, offsetY: 4, color: 'rgba(0,0,0,0.6)', blur: 10, fill: true },
   }).setOrigin(0.5);
   root.add(title);
+  curY += titleSize + textGap;
 
   // Level number badge
-  const lvlSize = Math.round(h * UI.BODY_RATIO * 1.1);
-  const lvlText = scene.add.text(cx, h * 0.20, `Level ${levelData.level}`, {
+  const lvlText = scene.add.text(cx, curY + lvlSize / 2, `Level ${levelData.level}`, {
     fontSize: lvlSize + 'px',
     fontFamily: UI.FONT,
     color: '#ffee88',
     fontStyle: 'bold',
   }).setOrigin(0.5);
   root.add(lvlText);
+  curY += lvlSize + textGap;
 
   // Subtitle — dev themed
-  const subSize = Math.round(h * UI.BODY_RATIO * 0.85);
-  const subtitle = scene.add.text(cx, h * 0.26, "Upgrade the codebase — it's permanent!", {
+  const subtitle = scene.add.text(cx, curY + subSize / 2, "Upgrade the codebase — it's permanent!", {
     fontSize: subSize + 'px',
     fontFamily: UI.FONT,
     color: '#cc99ff',
   }).setOrigin(0.5);
   root.add(subtitle);
-
-  // Upgrade cards — square, responsive
-  const options = levelData.options || [];
-  const gap = 16 * PX;
-  const maxCardSize = Math.min(w * 0.28, h * 0.35);
-  const totalNeeded = options.length * maxCardSize + (options.length - 1) * gap;
-  const cardSize = totalNeeded > w * 0.9
-    ? (w * 0.9 - (options.length - 1) * gap) / options.length
-    : maxCardSize;
+  curY += subSize + contentGap;
 
   const startX = cx - (options.length - 1) * (cardSize + gap) / 2;
 
@@ -155,7 +170,7 @@ export function showLevelUpOverlay(scene, levelData) {
 
   options.forEach((opt, i) => {
     const cardX = startX + i * (cardSize + gap);
-    const cardY = h * 0.52;
+    const cardY = curY + cardSize / 2;
     const card = createCard(scene, root, cardX, cardY, cardSize, cardSize, opt, () => {
       selectedIndex = i;
       confirmSelection();
@@ -221,7 +236,7 @@ function createCard(scene, root, x, y, w, h, upgrade, onSelect, onHover, index) 
   }
 
   // Name
-  const nameSize = Math.round(GAME.HEIGHT * UI.SMALL_RATIO * 1.1);
+  const nameSize = Math.round(UI.BASE * UI.SMALL_RATIO * 1.1);
   const nameText = scene.add.text(0, h * 0.1, upgrade.name, {
     fontSize: nameSize + 'px',
     fontFamily: UI.FONT,
@@ -233,7 +248,7 @@ function createCard(scene, root, x, y, w, h, upgrade, onSelect, onHover, index) 
   container.add(nameText);
 
   // Description
-  const descSize = Math.round(GAME.HEIGHT * UI.SMALL_RATIO * 0.85);
+  const descSize = Math.round(UI.BASE * UI.SMALL_RATIO * 0.85);
   const descText = scene.add.text(0, h * 0.28, upgrade.desc, {
     fontSize: descSize + 'px',
     fontFamily: UI.FONT,
@@ -245,7 +260,7 @@ function createCard(scene, root, x, y, w, h, upgrade, onSelect, onHover, index) 
 
   // "NEW WEAPON" badge for unique unlocks, otherwise "PERMANENT"
   const badgeY = h * 0.42;
-  const badgeSize = Math.round(GAME.HEIGHT * UI.SMALL_RATIO * 0.7);
+  const badgeSize = Math.round(UI.BASE * UI.SMALL_RATIO * 0.7);
   if (upgrade.unique) {
     const badge = scene.add.text(0, badgeY, '★ NEW WEAPON', {
       fontSize: badgeSize + 'px',

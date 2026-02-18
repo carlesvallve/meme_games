@@ -304,8 +304,9 @@ export function startEngine() {
   engineNoiseLpf.Q.setValueAtTime(1.0, now);
 
   engineNoiseGain = ctx.createGain();
+  engineNoiseGain = ctx.createGain();
   engineNoiseGain.gain.setValueAtTime(0, now);
-  engineNoiseGain.gain.linearRampToValueAtTime(0.005, now + 0.5);
+  engineNoiseGain.gain.linearRampToValueAtTime(0.00275, now + 0.5);
 
   engineNoiseSource.connect(engineNoiseHpf).connect(engineNoiseLpf)
     .connect(engineNoiseGain).connect(ctx.destination);
@@ -322,7 +323,7 @@ export function startEngine() {
 
   engineWhistleGain = ctx.createGain();
   engineWhistleGain.gain.setValueAtTime(0, now);
-  engineWhistleGain.gain.linearRampToValueAtTime(0.003, now + 0.5);
+  engineWhistleGain.gain.linearRampToValueAtTime(0.00165, now + 0.5);
 
   engineWhistle.connect(engineWhistleFilter).connect(engineWhistleGain)
     .connect(ctx.destination);
@@ -335,7 +336,7 @@ export function updateEngine(speedRatio) {
   const ctx = getCtx();
   const now = ctx.currentTime;
 
-  const noiseVol = 0.005 + speedRatio * 0.02;
+  const noiseVol = 0.00275 + speedRatio * 0.011;
   engineNoiseGain.gain.setTargetAtTime(noiseVol, now, 0.08);
   const hpf = 400 - speedRatio * 200;
   engineNoiseHpf.frequency.setTargetAtTime(hpf, now, 0.08);
@@ -344,7 +345,7 @@ export function updateEngine(speedRatio) {
 
   const whistleFreq = 280 + speedRatio * 420;
   engineWhistle.frequency.setTargetAtTime(whistleFreq, now, 0.08);
-  const whistleVol = 0.003 + speedRatio * 0.008;
+  const whistleVol = 0.00165 + speedRatio * 0.0044;
   engineWhistleGain.gain.setTargetAtTime(whistleVol, now, 0.08);
   engineWhistleFilter.frequency.setTargetAtTime(whistleFreq, now, 0.08);
 }

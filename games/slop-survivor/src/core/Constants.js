@@ -460,22 +460,18 @@ export const PARALLAX = {
 
 // --- UI sizing ---
 
-// On mobile, GAME.HEIGHT is in device pixels (e.g. 2532 at DPR 3) but
-// the physical screen is small. Scale down "big" text ratios so titles,
-// headings and button labels don't overflow the narrow viewport.
-const _mob = GAME.IS_MOBILE ? 0.75 : 1;
-
 export const UI = {
-  FONT: '"Courier New", Courier, monospace',
-  TITLE_RATIO: 0.09 * _mob,
-  HEADING_RATIO: 0.05 * _mob,
-  BODY_RATIO: 0.035 * _mob,
-  SMALL_RATIO: 0.025 * _mob,
+  BASE: GAME.UI_BASE,
+  FONT: 'ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas, monospace',
+  TITLE_RATIO: 0.09,
+  HEADING_RATIO: 0.05,
+  BODY_RATIO: 0.035,
+  SMALL_RATIO: 0.025,
   BTN_W_RATIO: 0.45,
-  BTN_H_RATIO: 0.075 * Math.max(_mob, 0.7),
+  BTN_H_RATIO: 0.075,
   BTN_RADIUS: 8 * PX,
   MIN_TOUCH: 44 * PX,
-  SCORE_SIZE_RATIO: 0.03 * _mob,
+  SCORE_SIZE_RATIO: 0.03,
   SCORE_STROKE: 3 * PX,
   HEART_SIZE: 24 * PX,
   HEART_SPACING: 32 * PX,
