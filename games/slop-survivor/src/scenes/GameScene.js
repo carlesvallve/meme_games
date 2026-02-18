@@ -2334,9 +2334,11 @@ export class GameScene extends Phaser.Scene {
     // Show mobile controls
     if (this.joystick) this.joystick.setVisible(true);
 
-    // Resume audio: restore engine, unduck soundtrack
-    playResumeEngine();
-    unduckMusic();
+    // Resume audio: restore engine, unduck soundtrack (skip if game over — about to play game over music)
+    if (!gameState.gameOver) {
+      playResumeEngine();
+      unduckMusic();
+    }
 
     // Resume wave/boss timers
     if (this.waveSystem.spawnTimer) this.waveSystem.spawnTimer.paused = false;
@@ -2395,6 +2397,9 @@ export class GameScene extends Phaser.Scene {
     this.player.vx = 0;
     this.player.vy = 0;
 
+    // Lower ship depth so enemies render on top of the wreckage
+    this.player.sprite.setDepth(3);
+
     // Hide virtual controls on death
     if (this.joystick) this.joystick.setVisible(false);
 
@@ -2444,6 +2449,17 @@ export class GameScene extends Phaser.Scene {
         this._deathZoomTween.stop();
         cam.zoom = deathZoomTarget;
       }
+
+      // Unlink camera from player so the pan tween works
+      cam.stopFollow();
+
+      // Pan camera downward so ship sits in upper area, game over UI below
+      this.tweens.add({
+        targets: cam,
+        scrollY: cam.scrollY + 60 * PX,
+        duration: 1500,
+        ease: 'Sine.easeInOut',
+      });
 
       // Show game over overlay in GameScene (for lighting)
       showGameOverOverlay(this, {

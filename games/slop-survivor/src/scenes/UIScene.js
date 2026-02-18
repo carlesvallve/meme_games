@@ -179,10 +179,21 @@ export class UIScene extends Phaser.Scene {
       this.killsText.setText(`Kills: ${gameState.enemiesKilled}`);
     };
 
+    this.onGameOver = () => {
+      const hudElements = [this.scoreText, this.killsText, this.timerText, this.levelText, this.xpBar, this.muteIcon, ...this.hearts];
+      this.tweens.add({
+        targets: hudElements.filter(Boolean),
+        alpha: 0,
+        duration: 600,
+        ease: 'Quad.easeIn',
+      });
+    };
+
     eventBus.on(Events.SCORE_CHANGED, this.onScoreChanged);
     eventBus.on(Events.PLAYER_HIT, this.onPlayerHit);
     eventBus.on(Events.XP_CHANGED, this.onXPChanged);
     eventBus.on(Events.ENEMY_KILLED, this.onEnemyKilled);
+    eventBus.on(Events.GAME_OVER, this.onGameOver);
 
     // Update timer every second
     this.timerEvent = this.time.addEvent({
@@ -201,6 +212,7 @@ export class UIScene extends Phaser.Scene {
       eventBus.off(Events.PLAYER_HIT, this.onPlayerHit);
       eventBus.off(Events.XP_CHANGED, this.onXPChanged);
       eventBus.off(Events.ENEMY_KILLED, this.onEnemyKilled);
+      eventBus.off(Events.GAME_OVER, this.onGameOver);
       if (this.timerEvent) this.timerEvent.destroy();
     });
   }

@@ -231,7 +231,7 @@ export class VFXSystem {
     this.scene.time.delayedCall(300, () => {
       const wreck = this.scene.add.image(px, py, 'ship-destroyed');
       wreck.setScale(PX);
-      wreck.setDepth(10);
+      wreck.setDepth(3);
       wreck.setAlpha(0);
       wreck.setRotation(player.sprite.rotation + (Math.random() - 0.5) * 0.4);
       // Slight tint to look scorched

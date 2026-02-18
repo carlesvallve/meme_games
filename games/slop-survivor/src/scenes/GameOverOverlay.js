@@ -34,7 +34,8 @@ export function showGameOverOverlay(scene, stats, onRestart) {
 
   // "GAME OVER" title — center layout
   const titleSize = Math.round(UI.BASE * UI.HEADING_RATIO * 1.2);
-  const titleY = cy + UI.BASE * 0.18;
+  const lift = 30 * PX; // compensate for camera pan downward on game over
+  const titleY = cy + UI.BASE * 0.18 - lift;
   const title = add(scene.add.text(cx, titleY, 'GAME OVER', {
     fontSize: titleSize + 'px',
     fontFamily: UI.FONT,
@@ -68,7 +69,7 @@ export function showGameOverOverlay(scene, stats, onRestart) {
 
   // --- Single-row compact stats ---
   const isMobile = GAME.IS_MOBILE;
-  const statY = cy + UI.BASE * 0.06;
+  const statY = cy + UI.BASE * 0.06 - lift;
   const labelSize = Math.round(UI.BASE * UI.SMALL_RATIO * 0.7);
   const valueSize = Math.round(UI.BASE * UI.SMALL_RATIO * 1.1);
   const separator = '·';

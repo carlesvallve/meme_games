@@ -36,7 +36,7 @@ export const PLAYER = {
   ROTATION_SPEED: 4.5, // radians per second
   THRUST_FORCE: 400 * PX, // acceleration per second
   MAX_SPEED: 220 * PX, // max velocity magnitude
-  DRAG: 0.95, // velocity multiplier per frame (at 60fps) — moderate friction
+  DRAG: 0.965, // velocity multiplier per frame (at 60fps) — moderate friction
   DEAD_STOP: 2 * PX, // snap to 0 below this speed
   REVERSE_RATIO: 0.6, // reverse thrust is 75% of forward thrust
   // Aiming cone preference
