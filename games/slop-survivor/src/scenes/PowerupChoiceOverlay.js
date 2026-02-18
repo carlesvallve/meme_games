@@ -93,16 +93,20 @@ export function showPowerupChoiceOverlay(scene, options) {
   const gap = 20 * PX;
   const maxCardW = Math.min(w * 0.38, h * 0.42);
   const cardW = maxCardW;
-  const cardH = cardW * 1.15;
+  const cardH = cardW * 1.3;
   const startX = cx - (options.length - 1) * (cardW + gap) / 2;
 
   // Track cards for keyboard navigation
   const cards = [];
   let selectedIndex = 0;
   let confirmed = false;
+  let inputReady = false;
+
+  // Grace period — ignore space/enter for 400ms so frantic shooting doesn't auto-confirm
+  scene.time.delayedCall(400, () => { inputReady = true; });
 
   const confirmSelection = () => {
-    if (confirmed) return;
+    if (confirmed || !inputReady) return;
     confirmed = true;
     playClickSfx();
     eventBus.emit(Events.POWERUP_CHOSEN, { type: options[selectedIndex].type });
@@ -248,22 +252,28 @@ function createPowerupCard(scene, root, x, y, w, h, option, onSelect, onHover, i
   container.add(pill);
   container.moveDown(pill); // behind text
 
-  // Quote (flavor text)
+  // Quote (flavor text) — max 3 lines
   const quotes = POWERUP_QUOTES[option.type];
   if (quotes && quotes.length > 0) {
     const quote = Phaser.Utils.Array.GetRandom(quotes);
-    // Truncate long quotes for card display
-    let quoteStr = quote.text;
-    if (quoteStr.length > 60) quoteStr = quoteStr.substring(0, 57) + '...';
     const quoteSize = Math.round(GAME.HEIGHT * UI.SMALL_RATIO * 0.65);
-    const quoteText = scene.add.text(0, h * 0.36, quoteStr, {
+    const maxLines = 3;
+    const wrapWidth = w * 0.82;
+    const quoteText = scene.add.text(0, h * 0.42, quote.text, {
       fontSize: quoteSize + 'px',
       fontFamily: UI.FONT,
       fontStyle: 'italic',
       color: COLORS.MUTED_TEXT,
       align: 'center',
-      wordWrap: { width: w * 0.82 },
+      wordWrap: { width: wrapWidth },
+      maxLines,
     }).setOrigin(0.5);
+    // If text was clamped, add ellipsis
+    if (quoteText.getWrappedText().length > maxLines) {
+      const lines = quoteText.getWrappedText().slice(0, maxLines);
+      lines[maxLines - 1] = lines[maxLines - 1].replace(/\s*\S*$/, '...');
+      quoteText.setText(lines.join('\n'));
+    }
     container.add(quoteText);
   }
 

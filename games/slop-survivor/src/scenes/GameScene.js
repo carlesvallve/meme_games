@@ -80,6 +80,9 @@ export class GameScene extends Phaser.Scene {
     // --- Arena floor with grid ---
     this.drawArenaFloor();
 
+    // --- Arena edge barriers (glowing energy) ---
+    this.createEdgeBarriers();
+
     // --- Player ---
     this.player = new Player(this);
 
@@ -555,6 +558,10 @@ export class GameScene extends Phaser.Scene {
         }
       }
 
+      // Fade edge barrier — always vivid so the energy field pops
+      const edgeTheme = vivid[Phaser.Math.Between(0, vivid.length - 1)];
+      this._tweenEdgeBarrierColors(edgeTheme, PARALLAX.COLOR_FADE_DURATION);
+
       // Schedule next transition after fade + hold
       this.time.delayedCall(
         PARALLAX.COLOR_FADE_DURATION + PARALLAX.COLOR_HOLD_DURATION,
@@ -633,6 +640,53 @@ export class GameScene extends Phaser.Scene {
         }
       },
     });
+  }
+
+  /**
+   * Smoothly tween edge barrier particle/tendril colors to a new theme.
+   */
+  _tweenEdgeBarrierColors(themeColors, duration) {
+    if (!this._edgeParticles || this._edgeParticles.length === 0) return;
+
+    // Pick ONE base color for the entire edge energy field
+    const base = Phaser.Utils.Array.GetRandom(themeColors);
+    const brighten = (c, amount) => {
+      let r = Math.min(255, ((c >> 16) & 0xff) + amount);
+      let g = Math.min(255, ((c >> 8) & 0xff) + amount);
+      let b = Math.min(255, (c & 0xff) + amount);
+      return (r << 16) | (g << 8) | b;
+    };
+    const bright = brighten(base, 60);
+
+    // Tween ALL particles to the same base color (with slight bright variation)
+    for (const p of this._edgeParticles) {
+      const target = Math.random() < 0.7 ? base : bright;
+      const current = p.obj.fillColor || 0xaa44ff;
+
+      const cr = (current >> 16) & 0xff, cg = (current >> 8) & 0xff, cb = current & 0xff;
+      const tr = (target >> 16) & 0xff, tg = (target >> 8) & 0xff, tb = target & 0xff;
+
+      const proxy = { r: cr, g: cg, b: cb };
+      this.tweens.add({
+        targets: proxy,
+        r: tr, g: tg, b: tb,
+        duration: duration + Math.random() * 1000, // slight stagger
+        ease: 'Sine.easeInOut',
+        onUpdate: () => {
+          if (p.obj && p.obj.active) {
+            const color = (Math.round(proxy.r) << 16) | (Math.round(proxy.g) << 8) | Math.round(proxy.b);
+            p.obj.setFillStyle(color);
+          }
+        },
+      });
+    }
+
+    // Tendrils — all same base color
+    if (this._edgeTendrils) {
+      for (const t of this._edgeTendrils) {
+        t.color = Math.random() < 0.7 ? base : bright;
+      }
+    }
   }
 
   async playIntro() {
@@ -864,6 +918,159 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  createEdgeBarriers() {
+    const W = ARENA.WIDTH;
+    const H = ARENA.HEIGHT;
+    const depth = 50;
+    const colors = [0xaa44ff, 0xdd66ff, 0x7733cc, 0xff44aa, 0x8855ee, 0xcc55ff];
+    const particleCount = 300; // spread across all 4 edges
+
+    this._edgeParticles = [];
+
+    // Edges: 0=top, 1=bottom, 2=left, 3=right
+    for (let i = 0; i < particleCount; i++) {
+      const edge = i % 4;
+      const size = (4 + Math.random() * 12) * PX;
+      const color = Phaser.Utils.Array.GetRandom(colors);
+
+      const circle = this.add.circle(0, 0, size, color, 1);
+      circle.setDepth(depth);
+      circle.setBlendMode(Phaser.BlendModes.ADD);
+
+      // Position along the edge
+      const pos = Math.random(); // 0-1 along edge length
+      let x, y;
+      if (edge === 0)      { x = pos * W; y = 0; }
+      else if (edge === 1) { x = pos * W; y = H; }
+      else if (edge === 2) { x = 0; y = pos * H; }
+      else                 { x = W; y = pos * H; }
+
+      circle.setPosition(x, y);
+
+      const p = {
+        obj: circle,
+        edge,
+        pos,               // normalized position along edge (0-1)
+        baseSize: size,
+        drift: 10 * PX + Math.random() * 50 * PX,  // how far it drifts inward
+        speed: 0.3 + Math.random() * 0.7,           // drift animation speed
+        slideSpeed: (0.002 + Math.random() * 0.008) * (Math.random() < 0.5 ? 1 : -1), // slide along edge
+        phase: Math.random() * Math.PI * 2,          // unique phase offset
+        pulseSpeed: 1.5 + Math.random() * 2.5,       // size pulsing speed
+        maxAlpha: 0.3 + Math.random() * 0.5,          // peak alpha (higher for ADD blend)
+      };
+
+      this._edgeParticles.push(p);
+    }
+
+    // Wispy tendrils — larger, elongated shapes that flow along edges
+    this._edgeTendrils = [];
+    const tendrilCount = 40;
+    for (let i = 0; i < tendrilCount; i++) {
+      const edge = i % 4;
+      const gfx = this.add.graphics();
+      gfx.setDepth(depth - 1);
+      gfx.setBlendMode(Phaser.BlendModes.ADD);
+
+      const tendril = {
+        gfx,
+        edge,
+        pos: Math.random(),
+        length: (30 + Math.random() * 60) * PX,
+        width: (4 + Math.random() * 8) * PX,
+        drift: 20 * PX + Math.random() * 50 * PX,
+        speed: 0.2 + Math.random() * 0.4,
+        slideSpeed: (0.003 + Math.random() * 0.006) * (Math.random() < 0.5 ? 1 : -1),
+        phase: Math.random() * Math.PI * 2,
+        color: Phaser.Utils.Array.GetRandom(colors),
+        maxAlpha: 0.08 + Math.random() * 0.15,
+        waveFreq: 2 + Math.random() * 3,
+        waveAmp: (5 + Math.random() * 15) * PX,
+      };
+
+      this._edgeTendrils.push(tendril);
+    }
+  }
+
+  _updateEdgeBarriers() {
+    if (!this._edgeParticles) return;
+    const time = this.time.now / 1000;
+    const W = ARENA.WIDTH;
+    const H = ARENA.HEIGHT;
+
+    // Update floating particles
+    for (const p of this._edgeParticles) {
+      // Slide along edge
+      p.pos += p.slideSpeed * 0.016; // ~60fps normalized
+      if (p.pos > 1) p.pos -= 1;
+      if (p.pos < 0) p.pos += 1;
+
+      // Drift inward with sine wave (breathes in and out from edge)
+      const driftAmount = Math.sin(time * p.speed + p.phase) * 0.5 + 0.5; // 0-1
+      const inward = driftAmount * p.drift;
+
+      let x, y;
+      if (p.edge === 0)      { x = p.pos * W; y = inward; }
+      else if (p.edge === 1) { x = p.pos * W; y = H - inward; }
+      else if (p.edge === 2) { x = inward; y = p.pos * H; }
+      else                   { x = W - inward; y = p.pos * H; }
+
+      p.obj.setPosition(x, y);
+
+      // Pulse size and alpha — brighter when closer to edge
+      const pulse = 0.6 + Math.sin(time * p.pulseSpeed + p.phase) * 0.4;
+      const edgeProximity = 1 - driftAmount; // 1 at edge, 0 at max drift
+      const alpha = p.maxAlpha * edgeProximity * pulse;
+
+      p.obj.setAlpha(alpha);
+      p.obj.setScale(pulse * (0.5 + edgeProximity * 0.5));
+    }
+
+    // Update wispy tendrils
+    for (const t of this._edgeTendrils) {
+      t.pos += t.slideSpeed * 0.016;
+      if (t.pos > 1.2) t.pos -= 1.4;
+      if (t.pos < -0.2) t.pos += 1.4;
+
+      const driftAmount = Math.sin(time * t.speed + t.phase) * 0.5 + 0.5;
+      const inward = driftAmount * t.drift;
+      const alpha = t.maxAlpha * (1 - driftAmount * 0.7);
+
+      t.gfx.clear();
+      t.gfx.lineStyle(t.width, t.color, alpha);
+      t.gfx.beginPath();
+
+      const segments = 10;
+      for (let s = 0; s <= segments; s++) {
+        const st = s / segments;
+        // Wave perpendicular to edge
+        const wave = Math.sin(st * t.waveFreq * Math.PI + time * 2 + t.phase) * t.waveAmp;
+
+        let x, y;
+        const along = (t.pos + st * t.length / (t.edge < 2 ? W : H));
+
+        if (t.edge === 0) {
+          x = along * W;
+          y = inward + wave;
+        } else if (t.edge === 1) {
+          x = along * W;
+          y = H - inward + wave;
+        } else if (t.edge === 2) {
+          x = inward + wave;
+          y = along * H;
+        } else {
+          x = W - inward + wave;
+          y = along * H;
+        }
+
+        if (s === 0) t.gfx.moveTo(x, y);
+        else t.gfx.lineTo(x, y);
+      }
+
+      t.gfx.strokePath();
+    }
+  }
+
   /**
    * Update amoeba blobs — called each frame for organic morphing movement.
    */
@@ -986,6 +1193,7 @@ export class GameScene extends Phaser.Scene {
 
     // Always animate amoeba blobs (even during intro/freeze)
     this._updateAmoebas(delta);
+    this._updateEdgeBarriers();
 
     // Always update thruster particles (even during intro)
     this.player.updateThrusterParticles(delta);

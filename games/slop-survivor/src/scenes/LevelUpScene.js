@@ -118,9 +118,13 @@ export function showLevelUpOverlay(scene, levelData) {
   const cards = [];
   let selectedIndex = 0;
   let confirmed = false;
+  let inputReady = false;
+
+  // Grace period — ignore space/enter for 400ms so frantic shooting doesn't auto-confirm
+  scene.time.delayedCall(400, () => { inputReady = true; });
 
   const confirmSelection = () => {
-    if (confirmed) return;
+    if (confirmed || !inputReady) return;
     confirmed = true;
     playClickSfx();
     eventBus.emit(Events.WEAPON_UPGRADE, { upgrade: options[selectedIndex] });
