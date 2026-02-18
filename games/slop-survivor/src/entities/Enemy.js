@@ -14,10 +14,10 @@ const TYPE_PALETTES = {
 
 // Per-type generation options: small critters are simple, bosses are large and complex
 const TYPE_GEN_OPTIONS = {
-  COPILOT: { rows: 7, halfW: 3 },                          // 7×7
-  PR: { rows: 9, halfW: 4, shading: true },                // 9×9
-  SUGGESTION: { rows: 11, halfW: 5, shading: true },       // 11×11
-  BOSS: { rows: 13, halfW: 6, shading: true },             // 13×13
+  COPILOT: { rows: 5, halfW: 2 },                          // 5×5
+  PR: { rows: 6, halfW: 3, shading: true },                // 6×7
+  SUGGESTION: { rows: 7, halfW: 3, shading: true },        // 7×7
+  BOSS: { rows: 9, halfW: 4, shading: true },              // 9×9
 };
 
 // Global counter for unique seeds — each enemy gets a distinct sprite
