@@ -55,6 +55,8 @@ export class GameScene extends Phaser.Scene {
 
   create() {
     gameState.reset();
+    // Ensure clean time scale on every session start (death slow-mo may have leaked)
+    this.time.timeScale = 1;
     this.cameras.main.setBackgroundColor(0x080808);
 
     // Mobile detection — prefer display config, fallback to device detection
@@ -157,6 +159,8 @@ export class GameScene extends Phaser.Scene {
 
     // Cleanup on shutdown
     this.events.on('shutdown', () => {
+      // Reset timeScale so it doesn't leak into the next scene or session
+      this.time.timeScale = 1;
       playStopEngine();
       eventBus.off(Events.ENEMY_KILLED, this.onEnemyKilled);
       eventBus.off(Events.WEAPON_UPGRADE, this.onWeaponUpgrade);
@@ -1830,6 +1834,17 @@ export class GameScene extends Phaser.Scene {
   triggerGameOver() {
     if (gameState.gameOver) return;
     gameState.gameOver = true;
+
+    // CRITICAL: Reset timeScale immediately — death slow-mo must not leak
+    // into the transition or into the next game session
+    this.time.timeScale = 1;
+
+    // If world was frozen (e.g. died during powerup dialog), unfreeze it
+    if (this._worldFrozen) {
+      this.unfreezeWorld();
+    }
+    this._powerupDialogActive = false;
+
     playStopEngine();
     gameState.saveBest();
     eventBus.emit(Events.GAME_OVER, {
@@ -1887,6 +1902,8 @@ export class GameScene extends Phaser.Scene {
     const goToGameOver = () => {
       if (this._deathTransitioning) return;
       this._deathTransitioning = true;
+      // Ensure timeScale is normal for the fade transition
+      this.time.timeScale = 1;
       deathAnchor.destroy();
       this.input.off('pointerdown', onTap);
       this.input.keyboard.off('keydown-SPACE', onTap);
@@ -1895,6 +1912,12 @@ export class GameScene extends Phaser.Scene {
       this.cameras.main.once('camerafadeoutcomplete', () => {
         this.scene.start('GameOverScene');
       });
+      // Safety fallback: if camerafadeoutcomplete never fires, force transition
+      setTimeout(() => {
+        if (this.scene.isActive()) {
+          this.scene.start('GameOverScene');
+        }
+      }, TRANSITION.FADE_DURATION + 500);
     };
     const onTap = () => goToGameOver();
 
