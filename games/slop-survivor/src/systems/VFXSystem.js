@@ -124,12 +124,6 @@ export class VFXSystem {
     // Bright white flash
     this.cameraFlash({ duration: 350, r: 255, g: 255, b: 255 });
 
-    // Slow-mo effect
-    this.scene.time.timeScale = VFX.DEATH_SLOWMO_SCALE;
-    this.scene.time.delayedCall(VFX.DEATH_SLOWMO_DURATION / VFX.DEATH_SLOWMO_SCALE, () => {
-      this.scene.time.timeScale = 1;
-    });
-
     // --- Big multi-phase explosion ---
 
     // Phase 1: Bright core flash (expanding circle)

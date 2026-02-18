@@ -511,8 +511,6 @@ export const VFX = {
   BOSS_WARN_FLASH_COLOR: { r: 255, g: 68, b: 68 }, // red
 
   // Death slow-mo
-  DEATH_SLOWMO_SCALE: 0.2,
-  DEATH_SLOWMO_DURATION: 600,
 
   // Floating damage numbers
   DAMAGE_NUM_DURATION: 600,
