@@ -8,7 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "clean": "rm -rf dist",
-    "deploy": "vite build && cd dist && vercel --prod --yes",
+    "deploy": "vite build && cd dist && vercel link --project slop-survivor --yes && vercel --prod --yes",
     "verify": "node scripts/verify-runtime.mjs",
     "iterate": "node scripts/iterate-client.js --url http://localhost:3000"
   },
