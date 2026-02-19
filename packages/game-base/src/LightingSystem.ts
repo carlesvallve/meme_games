@@ -31,6 +31,8 @@ export interface LightingConfig {
   maxLights?: number;
   /** Base ambient brightness 0–1 (default 0.75). Higher = brighter scene. */
   ambient?: number;
+  /** Ambient color as [r, g, b] with values 0–1 (default [1,1,1] = white/neutral). Combined with ambient brightness. */
+  ambientColor?: [number, number, number];
   /** Gradient texture resolution (default 128) */
   gradientSize?: number;
   /** Gradient falloff inner ring (fraction 0–1, default 0.3) */
@@ -50,6 +52,7 @@ export interface LightingConfig {
 const DEFAULTS: Required<LightingConfig> = {
   maxLights: 32,
   ambient: 0.75,
+  ambientColor: [1, 1, 1],
   gradientSize: 128,
   falloffInner: 0.3,
   falloffMid: 0.6,
@@ -68,7 +71,7 @@ const DEFAULTS: Required<LightingConfig> = {
  *
  * The light map is displayed as a MULTIPLY-blend overlay:
  * - White areas (lights) preserve the scene colors.
- * - Gray areas (ambient) darken the scene proportionally.
+ * - Dark ambient areas darken/tint the scene proportionally.
  *
  * Usage:
  *   const lighting = new LightingSystem(scene, { ambient: 0.8 });
@@ -179,6 +182,15 @@ export class LightingSystem {
     return this.config.ambient;
   }
 
+  /** Set the ambient color as [r, g, b] with values 0–1 */
+  setAmbientColor(r: number, g: number, b: number): void {
+    this.config.ambientColor = [
+      Math.max(0, Math.min(1, r)),
+      Math.max(0, Math.min(1, g)),
+      Math.max(0, Math.min(1, b)),
+    ];
+  }
+
   /** Enable/disable the lighting overlay */
   setActive(active: boolean): void {
     this._active = active;
@@ -202,9 +214,13 @@ export class LightingSystem {
     rt.setScale(1 / zoom);
     rt.setPosition(-this._pad / zoom, -this._pad / zoom);
 
-    // Clear with ambient color
-    const amb = Math.floor(this.config.ambient * 255);
-    rt.fill(amb, amb, amb);
+    // Clear with ambient color (brightness × color tint)
+    const [ar, ag, ab] = this.config.ambientColor;
+    const ambR = Math.floor(this.config.ambient * ar * 255);
+    const ambG = Math.floor(this.config.ambient * ag * 255);
+    const ambB = Math.floor(this.config.ambient * ab * 255);
+    const ambColor = (ambR << 16) | (ambG << 8) | ambB;
+    rt.fill(ambColor);
 
     if (this._lights.size === 0) return;
 
@@ -325,7 +341,8 @@ export class LightingSystem {
     this.scene.textures.addCanvas(this._gradientKey, canvas);
   }
 
-  /** Create the cone gradient texture for directional lights */
+  /** Create the cone gradient texture for directional lights.
+   *  Pixel-level rendering with smooth angular + radial falloff for a volumetric feel. */
   private _createConeTexture(): void {
     if (this.scene.textures.exists(this._coneKey)) return;
 
@@ -334,54 +351,71 @@ export class LightingSystem {
     canvas.width = size;
     canvas.height = size;
     const ctx = canvas.getContext('2d')!;
+    const imageData = ctx.createImageData(size, size);
+    const data = imageData.data;
 
     const cx = size / 2;
     const cy = size * 0.85; // origin near bottom
-
-    // Draw a cone-shaped gradient pointing upward from (cx, cy)
-    // Using a series of radial gradients clipped to a triangle path
-    ctx.save();
-
-    // Define the cone/triangle path — wider aperture
-    const spreadHalf = Math.PI / 4; // 45 degrees each side = 90 degree cone
     const coneLen = size * 0.9;
-    const leftX = cx + Math.sin(-spreadHalf) * coneLen;
-    const leftY = cy - Math.cos(-spreadHalf) * coneLen;
-    const rightX = cx + Math.sin(spreadHalf) * coneLen;
-    const rightY = cy - Math.cos(spreadHalf) * coneLen;
+    const spreadHalf = Math.PI / 4; // 45 degrees each side = 90 degree cone
 
-    ctx.beginPath();
-    ctx.moveTo(cx, cy);
-    ctx.lineTo(leftX, leftY);
-    // Arc across the top
-    ctx.arc(cx, cy, coneLen, -Math.PI / 2 - spreadHalf, -Math.PI / 2 + spreadHalf);
-    ctx.closePath();
-    ctx.clip();
+    // Soft edge zone: fraction of spreadHalf used for angular fade (wider = softer)
+    const edgeSoftness = 0.45;
 
-    // Radial gradient from origin outward
-    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, coneLen);
-    grad.addColorStop(0, 'rgba(255,255,255,1.0)');
-    grad.addColorStop(0.15, 'rgba(255,255,255,0.9)');
-    grad.addColorStop(0.4, 'rgba(255,255,255,0.6)');
-    grad.addColorStop(0.7, 'rgba(255,255,255,0.25)');
-    grad.addColorStop(1.0, 'rgba(255,255,255,0.0)');
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, size, size);
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const dx = x - cx;
+        const dy = cy - y; // flip Y so "up" is positive
+        const dist = Math.sqrt(dx * dx + dy * dy);
 
-    // Soften the edges — wide smooth angular falloff using destination-out
-    const angularGrad = ctx.createLinearGradient(leftX, leftY, rightX, rightY);
-    angularGrad.addColorStop(0, 'rgba(0,0,0,0.6)');
-    angularGrad.addColorStop(0.15, 'rgba(0,0,0,0.25)');
-    angularGrad.addColorStop(0.35, 'rgba(0,0,0,0.0)');
-    angularGrad.addColorStop(0.65, 'rgba(0,0,0,0.0)');
-    angularGrad.addColorStop(0.85, 'rgba(0,0,0,0.25)');
-    angularGrad.addColorStop(1.0, 'rgba(0,0,0,0.6)');
-    ctx.globalCompositeOperation = 'destination-out';
-    ctx.fillStyle = angularGrad;
-    ctx.fillRect(0, 0, size, size);
+        if (dist < 0.5) {
+          // At origin — full bright
+          const idx = (y * size + x) * 4;
+          data[idx] = 255;
+          data[idx + 1] = 255;
+          data[idx + 2] = 255;
+          data[idx + 3] = 255;
+          continue;
+        }
 
-    ctx.restore();
+        // Radial falloff (0–1, 0 = at origin, 1 = at coneLen)
+        const rNorm = Math.min(dist / coneLen, 1.0);
 
+        // Radial brightness curve — holds bright then fades smoothly
+        let radial: number;
+        if (rNorm < 0.2) radial = 1.0;
+        else if (rNorm < 0.45) radial = 1.0 - (rNorm - 0.2) * 0.8; // 1.0 → 0.8
+        else if (rNorm < 0.7) radial = 0.8 - (rNorm - 0.45) * 1.4; // 0.8 → 0.45
+        else if (rNorm < 0.9) radial = 0.45 - (rNorm - 0.7) * 2.0; // 0.45 → 0.05
+        else radial = 0.05 * (1.0 - (rNorm - 0.9) / 0.1); // 0.05 → 0.0
+
+        // Angle from origin (0 = straight up)
+        const angle = Math.abs(Math.atan2(dx, dy));
+
+        // Angular falloff — smooth cosine fade at edges
+        let angular: number;
+        if (angle < spreadHalf * (1.0 - edgeSoftness)) {
+          angular = 1.0; // fully inside cone
+        } else if (angle < spreadHalf * (1.0 + edgeSoftness)) {
+          // Smooth cosine fade through the edge zone
+          const edgeStart = spreadHalf * (1.0 - edgeSoftness);
+          const edgeEnd = spreadHalf * (1.0 + edgeSoftness);
+          const t = (angle - edgeStart) / (edgeEnd - edgeStart);
+          angular = 0.5 + 0.5 * Math.cos(t * Math.PI); // 1 → 0 smoothly
+        } else {
+          angular = 0.0; // outside cone
+        }
+
+        const alpha = Math.max(0, Math.min(1, radial * angular));
+        const idx = (y * size + x) * 4;
+        data[idx] = 255;
+        data[idx + 1] = 255;
+        data[idx + 2] = 255;
+        data[idx + 3] = Math.round(alpha * 255);
+      }
+    }
+
+    ctx.putImageData(imageData, 0, 0);
     this.scene.textures.addCanvas(this._coneKey, canvas);
   }
 }

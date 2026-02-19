@@ -4,6 +4,35 @@ const { DPR, PX, GAME } = createDisplayConfig();
 
 export { DPR, PX, GAME };
 
+// --- Lighting ---
+export const LIGHTING = {
+  // System config
+  AMBIENT: 1,              // Base brightness 0–1 (lower = darker unlit areas)
+  AMBIENT_COLOR: [0.08, 0.05, 0.15], // Deeper dark purple for unlit areas [r,g,b] 0–1
+  MAX_LIGHTS: 32,
+  GRADIENT_SIZE: 128,
+  FALLOFF_INNER: 0.35,     // Inner falloff ring — wide bright center
+  FALLOFF_MID: 0.65,       // Mid falloff ring — slow fade
+  INNER_ALPHA: 1.0,        // Alpha at inner ring (1.0 = full color reveal)
+  MID_ALPHA: 0.75,         // Alpha at mid ring — still mostly bright here
+
+  // Player radial light
+  PLAYER_RADIUS: 280,      // in PX units
+  PLAYER_INTENSITY: 1.0,
+  PLAYER_COLOR: [1.0, 1.0, 1.0],
+
+  // Headlight cone
+  CONE_LENGTH: 900,        // in PX units (longer reach)
+  CONE_ANGLE: Math.PI / 2.5, // spread angle in radians (wider beam)
+  CONE_INTENSITY: 1.0,
+  CONE_COLOR: [1.0, 1.0, 1.0],
+
+  // Death / intro radial light
+  DEATH_RADIUS: 350,       // in PX units (bigger so it's clearly visible alone)
+  DEATH_INTENSITY: 1.0,
+  DEATH_COLOR: [1.0, 0.95, 0.8],
+};
+
 // --- Pixel art render scale (each sprite pixel = this many screen pixels) ---
 export const PIXEL_SCALE = 2;
 
@@ -382,7 +411,7 @@ export const XP_GEM = {
 
 export const COLORS = {
   // Arena
-  BG_DARK: 0x0a0f0a,
+  BG_DARK: 0xffffff,
   BG_FLOOR: 0x0d1a0d,
   GRID_LINE: 0x1a3a1a,
 
