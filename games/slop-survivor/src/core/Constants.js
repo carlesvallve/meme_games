@@ -85,6 +85,20 @@ export const KNOCKBACK = {
   ENEMY_HIT: 80 * PX, // impulse applied to enemy when hit by projectile
 };
 
+// --- Elite enemies ---
+
+export const ELITE = {
+  UNLOCK_MINUTE: 0,        // elites from the very start
+  INITIAL_CHANCE: 0.10,    // 10% chance per spawn
+  CHANCE_PER_MIN: 0.04,    // +4% per minute
+  MAX_CHANCE: 0.30,        // cap at 30%
+  HP_MULT: 2.0,            // 2x base HP
+  SPEED_MULT: 1.3,         // 1.3x base speed
+  SIZE_MULT: 1.25,         // 1.25x visual size
+  SCORE_MULT: 3,           // 3x score
+  XP_MULT: 2,              // 2x xp drop
+};
+
 // --- Enemies ---
 
 export const ENEMY = {
@@ -123,7 +137,7 @@ export const ENEMY_TYPES = {
     height: 30 * PX,
     color: 0x9944ff,
     speed: 50 * PX,
-    health: 8,
+    health: 6,
     damage: 1,
     score: 50,
     xpDrop: 3, // large gem
@@ -136,15 +150,18 @@ export const BOSS = {
   height: 48 * PX,
   color: 0xff4444,
   speed: 40 * PX,
-  health: 30,
+  health: 20,
   damage: 2,
   score: 200,
   xpDrop: 10,
-  SPAWN_INTERVAL: 30000, // Every 30 seconds
+  SPAWN_INTERVAL: 45000, // Every 45 seconds (was 30s — less overwhelming early game)
+  MAX_SIMULTANEOUS: 3,   // hard cap on bosses alive at once
+  ESCORT_COUNT: 4,       // copilots spawned alongside boss
+  ESCORT_SPREAD: 80,     // px spread around boss spawn point
   // Boss behavior phases
-  CHARGE_SPEED: 220 * PX,       // speed during charge
+  CHARGE_SPEED: 260 * PX,       // speed during charge
   CHARGE_TELEGRAPH: 1200,       // ms telegraph before charge
-  CHARGE_DURATION: 800,         // ms of actual charge
+  CHARGE_DURATION: 900,         // ms of actual charge
   CHARGE_COOLDOWN: 5000,        // ms between charges
   ORBIT_SPEED: 1.2,             // radians/sec during orbit phase
   ORBIT_RADIUS: 180 * PX,       // orbit distance from player
@@ -157,12 +174,16 @@ export const BOSS = {
 // --- Waves ---
 
 export const WAVES = {
-  INITIAL_SPAWN_RATE: 2200, // ms between spawns
-  MIN_SPAWN_RATE: 400,      // fastest spawn rate
-  SPAWN_RATE_DECREASE: 40,  // ms decrease per wave
-  ENEMIES_PER_WAVE: 4,
+  INITIAL_SPAWN_RATE: 1400, // ms between spawns at start
+  MIN_SPAWN_RATE: 350,      // fastest spawn rate
+  SPAWN_RATE_DECREASE: 30,  // ms decrease per wave
+  ENEMIES_PER_WAVE: 5,
   WAVE_DURATION: 10000,     // ms per wave
-  MAX_ENEMIES: 25,          // starting cap on simultaneous enemies
+  MAX_ENEMIES: 20,          // starting cap on simultaneous enemies
+  // Minimum floor: if fewer than this, spawn catch-up enemies
+  MIN_ENEMIES: 4,
+  MIN_ENEMIES_MAX: 8,       // floor grows over time up to this
+  MIN_ENEMIES_RATE: 0.6,    // +0.6 per minute
 };
 
 // --- Difficulty scaling ---
@@ -170,8 +191,8 @@ export const WAVES = {
 
 export const DIFFICULTY = {
   // Enemy stat multipliers (multiply base stats by 1 + rate * minutes, capped)
-  HEALTH_SCALE_RATE: 0.15,     // +15% health per minute
-  HEALTH_SCALE_MAX: 3.0,       // cap at 3x base health
+  HEALTH_SCALE_RATE: 0.12,     // +12% health per minute
+  HEALTH_SCALE_MAX: 2.5,       // cap at 2.5x base health
   SPEED_SCALE_RATE: 0.05,      // +5% speed per minute
   SPEED_SCALE_MAX: 1.4,        // cap at 1.4x base speed
   DAMAGE_SCALE_RATE: 0.08,     // +8% damage per minute (rounded, so kicks in ~min 6+)
@@ -181,15 +202,21 @@ export const DIFFICULTY = {
   ENEMIES_PER_WAVE_RATE: 0.5,  // +0.5 enemies per wave per minute
   ENEMIES_PER_WAVE_MAX: 10,    // cap
   MAX_ENEMIES_RATE: 3,         // +3 max enemies per minute
-  MAX_ENEMIES_CAP: 50,         // hard cap
+  MAX_ENEMIES_CAP: 45,         // hard cap
 
   // Boss escalation (per boss number, not time)
-  BOSS_HEALTH_PER_SPAWN: 15,   // +15 HP per successive boss
-  BOSS_SPEED_PER_SPAWN: 5 * PX,  // +5 speed per successive boss
-  BOSS_CHARGE_CD_REDUCTION: 300,  // charge cooldown decreases by 300ms per boss
-  BOSS_CHARGE_CD_MIN: 2000,      // minimum charge cooldown
-  BOSS_CHARGE_DURATION_INCREASE: 200, // charge duration increases by 200ms per boss (longer dash)
-  BOSS_CHARGE_DURATION_MAX: 2000,     // cap on charge duration
+  BOSS_HEALTH_PER_SPAWN: 10,    // +10 HP per successive boss (20→30→40→50...)
+  BOSS_SPEED_PER_SPAWN: 3 * PX, // +3 speed per successive boss (gentler ramp)
+  BOSS_CHARGE_CD_REDUCTION: 200,  // charge cooldown decreases by 200ms per boss
+  BOSS_CHARGE_CD_MIN: 2500,       // minimum charge cooldown (more breathing room)
+  BOSS_CHARGE_DURATION_INCREASE: 200, // charge duration increases by 200ms per boss
+  BOSS_CHARGE_DURATION_MAX: 1800,     // cap on charge duration
+  BOSS_CHARGE_SPEED_INCREASE: 30 * PX, // charge speed increases per boss
+  BOSS_CHARGE_SPEED_MAX: 500 * PX,     // cap on charge speed
+  BOSS_CHARGE_KNOCKBACK: 450 * PX,     // extra knockback when hit during boss charge
+  BOSS_OVERLAP_START_MIN: 3,     // no multi-boss before this many minutes
+  BOSS_OVERLAP_CHANCE_PER_MIN: 0.08,  // +8% chance per minute (after start) to allow multi-boss
+  BOSS_OVERLAP_CHANCE_MAX: 0.6,       // cap at 60% chance
 
   // Powerup scarcity
   POWERUP_DROP_DECAY_RATE: 0.04,  // drop chance multiplier decreases by 4% per minute

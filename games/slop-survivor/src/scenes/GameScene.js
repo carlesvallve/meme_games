@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { GAME, PLAYER, CONTROLS_MODE, COLORS, PX, PIXEL_SCALE, TRANSITION, ARENA, POWERUP_TYPES, POWERUP_DROP, TOUCH, XP_GEM, INTRO, VFX, PARALLAX, WEAPONS, KNOCKBACK, UI, LIGHTING } from '../core/Constants.js';
+import { GAME, PLAYER, CONTROLS_MODE, COLORS, PX, PIXEL_SCALE, TRANSITION, ARENA, POWERUP_TYPES, POWERUP_DROP, TOUCH, XP_GEM, INTRO, VFX, PARALLAX, WEAPONS, KNOCKBACK, UI, LIGHTING, DIFFICULTY } from '../core/Constants.js';
 import { eventBus, Events } from '../core/EventBus.js';
 import { gameState } from '../core/GameState.js';
 import { Player } from '../entities/Player.js';
@@ -9,6 +9,7 @@ import { LevelSystem } from '../systems/LevelSystem.js';
 import { XPGem } from '../entities/XPGem.js';
 import { PowerUp } from '../entities/PowerUp.js';
 import { BlastPickup, BLAST_CONFIG } from '../entities/BlastPickup.js';
+import { HealthPickup } from '../entities/HealthPickup.js';
 import { VFXSystem } from '../systems/VFXSystem.js';
 // Pixel art imports kept for potential future use
 // import { renderPixelArt } from '../core/PixelRenderer.js';
@@ -119,6 +120,7 @@ export class GameScene extends Phaser.Scene {
     this.xpGems = [];
     this.powerUps = [];
     this.blastPickups = [];
+    this.healthPickups = [];
 
     // --- Enemy hazards (projectiles + mines from behavior variants) ---
     this.enemyProjectiles = [];
@@ -152,7 +154,8 @@ export class GameScene extends Phaser.Scene {
     this.onBossSpawn = this.handleBossSpawn.bind(this);
     this.onLevelUp = this.handleLevelUp.bind(this);
     this.onEnemySplit = this.handleEnemySplit.bind(this);
-    this.onWaveStart = this.handleWaveStart.bind(this);
+    // (wave labels replaced by time milestones — checked in update())
+    this.onBossKilled = this.handleBossKilled.bind(this);
 
     eventBus.on(Events.ENEMY_KILLED, this.onEnemyKilled);
     eventBus.on(Events.WEAPON_UPGRADE, this.onWeaponUpgrade);
@@ -161,7 +164,9 @@ export class GameScene extends Phaser.Scene {
     eventBus.on(Events.BOSS_SPAWN, this.onBossSpawn);
     eventBus.on(Events.LEVEL_UP, this.onLevelUp);
     eventBus.on(Events.ENEMY_SPLIT, this.onEnemySplit);
-    eventBus.on(Events.WAVE_START, this.onWaveStart);
+    // Time milestone tracker (replaces wave labels)
+    this._lastMilestoneMinute = 0;
+    eventBus.on(Events.BOSS_KILLED, this.onBossKilled);
 
     // --- Intro cutscene (handles audio init + menu music) ---
     this.introPlaying = true;
@@ -180,7 +185,8 @@ export class GameScene extends Phaser.Scene {
       eventBus.off(Events.BOSS_SPAWN, this.onBossSpawn);
       eventBus.off(Events.LEVEL_UP, this.onLevelUp);
       eventBus.off(Events.ENEMY_SPLIT, this.onEnemySplit);
-      eventBus.off(Events.WAVE_START, this.onWaveStart);
+      // (time milestones don't need cleanup — no event listener)
+      eventBus.off(Events.BOSS_KILLED, this.onBossKilled);
       // Clean up vortex
       if (this._vortexGfx) { this._vortexGfx.destroy(); this._vortexGfx = null; }
       this._vortexActive = false;
@@ -1561,6 +1567,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     this.waveSystem.update(px, py, delta);
+    this.checkTimeMilestone();
     this.weaponSystem.update(px, py, this.player.facingX, this.player.facingY, enemies, time, this.player.vx, this.player.vy);
 
     // --- First slop detection: speech bubble when first enemy starts chasing ---
@@ -1632,12 +1639,19 @@ export class GameScene extends Phaser.Scene {
       const dist = Math.sqrt(dx * dx + dy * dy);
       const hitDist = PLAYER.WIDTH * 0.4 + enemy.config.width * 0.4;
       if (dist < hitDist) {
-        // Knockback: push player away from enemy
+        // Knockback: push player away from enemy (extra for charging boss)
         if (dist > 0) {
-          const kx = (dx / dist) * PLAYER.HIT_KNOCKBACK;
-          const ky = (dy / dist) * PLAYER.HIT_KNOCKBACK;
+          const isCharging = enemy.isBoss && enemy.isCharging;
+          const kb = isCharging ? DIFFICULTY.BOSS_CHARGE_KNOCKBACK : PLAYER.HIT_KNOCKBACK;
+          const kx = (dx / dist) * kb;
+          const ky = (dy / dist) * kb;
           this.player.vx += kx;
           this.player.vy += ky;
+
+          if (isCharging) {
+            this.cameras.main.shake(300, 0.02);
+            this.cameras.main.flash(150, 255, 100, 50);
+          }
         }
 
         playEnemyHitSfx();
@@ -1765,6 +1779,22 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
+    // --- Update health pickups ---
+    for (let i = this.healthPickups.length - 1; i >= 0; i--) {
+      const hp = this.healthPickups[i];
+      if (hp.collected || !hp.sprite.active) {
+        this.healthPickups.splice(i, 1);
+        continue;
+      }
+      hp.update(px, py);
+      const dx2 = px - hp.sprite.x;
+      const dy2 = py - hp.sprite.y;
+      const dist2 = Math.sqrt(dx2 * dx2 + dy2 * dy2);
+      if (dist2 < PLAYER.WIDTH * 0.6 + 20 * PX) {
+        hp.collect();
+      }
+    }
+
     // --- Update Code Review vortex ---
     if (this._vortexActive) {
       this._vortexTimer += delta;
@@ -1864,14 +1894,18 @@ export class GameScene extends Phaser.Scene {
     for (const enemy of enemies) {
       if (enemy.dead) continue;
       if (enemy.isBoss) {
-        // Boss always gets a light — larger, red
+        // Boss light — color matches boss body
+        const bc = enemy.bossBodyColor || 0xff4444;
+        const br = ((bc >> 16) & 0xff) / 255;
+        const bg = ((bc >> 8) & 0xff) / 255;
+        const bb = (bc & 0xff) / 255;
         this.lighting.setLight(
           `enemy-${enemyIdx}`,
           enemy.sprite.x,
           enemy.sprite.y,
-          150 * PX,
-          0.7,
-          1.0, 0.3, 0.2 // red
+          120 * PX,
+          0.5,
+          br, bg, bb
         );
       } else if (this._enemyLightsEnabled && enemyIdx < maxEnemyLights) {
         const c = ENEMY_LIGHT_COLORS[enemy.typeName] || [0.3, 1.0, 0.3];
@@ -2238,10 +2272,16 @@ export class GameScene extends Phaser.Scene {
     this.waveSystem.spawnSplitChildren(x, y, count, speedMult, healthMult);
   }
 
-  /** Wave label — rendered in GameScene so lighting affects it */
-  handleWaveStart({ wave }) {
-    if (wave > 0 && wave % 5 === 0) {
-      const waveText = this.add.text(GAME.WIDTH / 2, GAME.HEIGHT / 2, `WAVE ${wave}`, {
+  /** Time milestone label — shows "1:00 SURVIVED" etc. every minute */
+  checkTimeMilestone() {
+    if (!this.waveSystem) return;
+    const elapsed = this.waveSystem.elapsed;
+    const minute = Math.floor(elapsed / 60000);
+    if (minute > this._lastMilestoneMinute && minute > 0) {
+      this._lastMilestoneMinute = minute;
+      const label = `${minute}:00 SURVIVED`;
+
+      const milestoneText = this.add.text(GAME.WIDTH / 2, GAME.HEIGHT / 2, label, {
         fontSize: Math.round(UI.BASE * UI.HEADING_RATIO * 0.8) + 'px',
         fontFamily: UI.FONT,
         color: '#44ff44',
@@ -2251,15 +2291,15 @@ export class GameScene extends Phaser.Scene {
       }).setOrigin(0.5).setScrollFactor(0).setDepth(997).setAlpha(0);
 
       this.tweens.add({
-        targets: waveText,
+        targets: milestoneText,
         alpha: 0.8,
         scaleX: 1.1,
         scaleY: 1.1,
         duration: 300,
         yoyo: true,
-        hold: 500,
+        hold: 800,
         ease: 'Quad.easeOut',
-        onComplete: () => waveText.destroy(),
+        onComplete: () => milestoneText.destroy(),
       });
     }
   }
@@ -2287,6 +2327,29 @@ export class GameScene extends Phaser.Scene {
         });
       }
     });
+  }
+
+  /**
+   * Boss killed: spawn health hearts scattered around the death location.
+   */
+  handleBossKilled({ x, y }) {
+    // One heart pickup
+    const angle = Math.random() * Math.PI * 2;
+    const dist = (20 + Math.random() * 30) * PX;
+    this.time.delayedCall(200, () => {
+      const hp = new HealthPickup(this, x + Math.cos(angle) * dist, y + Math.sin(angle) * dist);
+      this.healthPickups.push(hp);
+    });
+
+    // Extra XP gems scattered around
+    for (let i = 0; i < 4; i++) {
+      const a = (Math.PI * 2 * i) / 4 + (Math.random() - 0.5) * 0.5;
+      const d = (25 + Math.random() * 45) * PX;
+      this.time.delayedCall(100 + i * 80, () => {
+        const gem = new XPGem(this, x + Math.cos(a) * d, y + Math.sin(a) * d, 'MEDIUM');
+        this.xpGems.push(gem);
+      });
+    }
   }
 
   /**
@@ -2518,12 +2581,16 @@ export class GameScene extends Phaser.Scene {
       ease: 'Sine.easeInOut',
     });
 
-    // Remove all health bars from enemies
+    // Remove all health bars and eye graphics from enemies
     const activeEnemies = this.waveSystem.getActiveEnemies();
     for (const enemy of activeEnemies) {
       if (enemy.healthBar) {
         enemy.healthBar.destroy();
         enemy.healthBar = null;
+      }
+      if (enemy._eliteEyeGfx) {
+        enemy._eliteEyeGfx.destroy();
+        enemy._eliteEyeGfx = null;
       }
     }
 

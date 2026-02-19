@@ -189,8 +189,13 @@ export class UIScene extends Phaser.Scene {
       });
     };
 
+    this.onPlayerHeal = () => {
+      this.drawHearts();
+    };
+
     eventBus.on(Events.SCORE_CHANGED, this.onScoreChanged);
     eventBus.on(Events.PLAYER_HIT, this.onPlayerHit);
+    eventBus.on(Events.PLAYER_HEAL, this.onPlayerHeal);
     eventBus.on(Events.XP_CHANGED, this.onXPChanged);
     eventBus.on(Events.ENEMY_KILLED, this.onEnemyKilled);
     eventBus.on(Events.GAME_OVER, this.onGameOver);
@@ -210,6 +215,7 @@ export class UIScene extends Phaser.Scene {
     this.events.on('shutdown', () => {
       eventBus.off(Events.SCORE_CHANGED, this.onScoreChanged);
       eventBus.off(Events.PLAYER_HIT, this.onPlayerHit);
+      eventBus.off(Events.PLAYER_HEAL, this.onPlayerHeal);
       eventBus.off(Events.XP_CHANGED, this.onXPChanged);
       eventBus.off(Events.ENEMY_KILLED, this.onEnemyKilled);
       eventBus.off(Events.GAME_OVER, this.onGameOver);

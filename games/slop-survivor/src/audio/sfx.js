@@ -145,6 +145,167 @@ export function bossSpawnSfx() {
   osc2.stop(now + 0.8);
 }
 
+// Boss charge — aggressive swoosh with rising pitch
+export function bossChargeSfx() {
+  if (gameState.isMuted) return;
+  const ctx = getCtx();
+  const now = ctx.currentTime;
+
+  // Noise swoosh — bandpass sweep low→high
+  const buf = ctx.createBuffer(1, ctx.sampleRate * 0.5, ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+  const noise = ctx.createBufferSource();
+  noise.buffer = buf;
+
+  const bp = ctx.createBiquadFilter();
+  bp.type = 'bandpass';
+  bp.Q.setValueAtTime(3, now);
+  bp.frequency.setValueAtTime(200, now);
+  bp.frequency.exponentialRampToValueAtTime(2500, now + 0.25);
+  bp.frequency.exponentialRampToValueAtTime(800, now + 0.45);
+
+  const ng = ctx.createGain();
+  ng.gain.setValueAtTime(0, now);
+  ng.gain.linearRampToValueAtTime(0.12, now + 0.05);
+  ng.gain.setValueAtTime(0.12, now + 0.15);
+  ng.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
+
+  noise.connect(bp).connect(ng).connect(ctx.destination);
+  noise.start(now);
+  noise.stop(now + 0.5);
+
+  // Low rumble undertone
+  const osc = ctx.createOscillator();
+  osc.type = 'sawtooth';
+  osc.frequency.setValueAtTime(60, now);
+  osc.frequency.linearRampToValueAtTime(90, now + 0.3);
+  const og = ctx.createGain();
+  og.gain.setValueAtTime(0.08, now);
+  og.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+  const lp = ctx.createBiquadFilter();
+  lp.type = 'lowpass';
+  lp.frequency.setValueAtTime(200, now);
+  osc.connect(lp).connect(og).connect(ctx.destination);
+  osc.start(now);
+  osc.stop(now + 0.4);
+}
+
+// Boss killed — heavy satisfying explosion with victorious chime
+export function bossKillSfx() {
+  if (gameState.isMuted) return;
+  const ctx = getCtx();
+  const now = ctx.currentTime;
+
+  // Big boom — noise burst with deep lowpass sweep
+  const bufSize = Math.floor(ctx.sampleRate * 0.8);
+  const buf = ctx.createBuffer(1, bufSize, ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < bufSize; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / bufSize * 0.5);
+  const noise = ctx.createBufferSource();
+  noise.buffer = buf;
+  const ng = ctx.createGain();
+  ng.gain.setValueAtTime(0.35, now);
+  ng.gain.exponentialRampToValueAtTime(0.001, now + 0.7);
+  const lpf = ctx.createBiquadFilter();
+  lpf.type = 'lowpass';
+  lpf.frequency.setValueAtTime(2500, now);
+  lpf.frequency.exponentialRampToValueAtTime(150, now + 0.5);
+  noise.connect(lpf).connect(ng).connect(ctx.destination);
+  noise.start(now);
+  noise.stop(now + 0.8);
+
+  // Deep sub rumble
+  const sub = ctx.createOscillator();
+  sub.type = 'sine';
+  sub.frequency.setValueAtTime(80, now);
+  sub.frequency.exponentialRampToValueAtTime(25, now + 0.6);
+  const sg = ctx.createGain();
+  sg.gain.setValueAtTime(0.3, now);
+  sg.gain.exponentialRampToValueAtTime(0.001, now + 0.6);
+  sub.connect(sg).connect(ctx.destination);
+  sub.start(now);
+  sub.stop(now + 0.6);
+
+  // Victory chime — ascending notes after the boom
+  const chimeDelay = 0.25;
+  const notes = [523.25, 659.25, 783.99, 1046.5];
+  notes.forEach((freq, i) => {
+    const t = now + chimeDelay + i * 0.08;
+    const osc = ctx.createOscillator();
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(freq, t);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.12, t + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
+    const f = ctx.createBiquadFilter();
+    f.type = 'lowpass';
+    f.frequency.setValueAtTime(5000, t);
+    osc.connect(f).connect(g).connect(ctx.destination);
+    osc.start(t);
+    osc.stop(t + 0.25);
+  });
+}
+
+// Commit blast — punchy explosion with satisfying crunch
+export function blastSfx() {
+  if (gameState.isMuted) return;
+  const ctx = getCtx();
+  const now = ctx.currentTime;
+
+  // Big noise burst
+  const bufSize = Math.floor(ctx.sampleRate * 0.5);
+  const buf = ctx.createBuffer(1, bufSize, ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < bufSize; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / bufSize * 0.6);
+  const noise = ctx.createBufferSource();
+  noise.buffer = buf;
+  const ng = ctx.createGain();
+  ng.gain.setValueAtTime(0.3, now);
+  ng.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
+  const lpf = ctx.createBiquadFilter();
+  lpf.type = 'lowpass';
+  lpf.frequency.setValueAtTime(3000, now);
+  lpf.frequency.exponentialRampToValueAtTime(200, now + 0.3);
+  noise.connect(lpf).connect(ng).connect(ctx.destination);
+  noise.start(now);
+  noise.stop(now + 0.5);
+
+  // Sub thump
+  const sub = ctx.createOscillator();
+  sub.type = 'sine';
+  sub.frequency.setValueAtTime(90, now);
+  sub.frequency.exponentialRampToValueAtTime(30, now + 0.3);
+  const sg = ctx.createGain();
+  sg.gain.setValueAtTime(0.25, now);
+  sg.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+  sub.connect(sg).connect(ctx.destination);
+  sub.start(now);
+  sub.stop(now + 0.35);
+
+  // Metallic crunch
+  const crunch = ctx.createOscillator();
+  crunch.type = 'sawtooth';
+  crunch.frequency.setValueAtTime(350, now);
+  crunch.frequency.exponentialRampToValueAtTime(60, now + 0.15);
+  const cg = ctx.createGain();
+  cg.gain.setValueAtTime(0.15, now);
+  cg.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+  const cf = ctx.createBiquadFilter();
+  cf.type = 'lowpass';
+  cf.frequency.setValueAtTime(1800, now);
+  crunch.connect(cf).connect(cg).connect(ctx.destination);
+  crunch.start(now);
+  crunch.stop(now + 0.2);
+}
+
+// Health pickup — warm ascending chime
+export function healSfx() {
+  if (gameState.isMuted) return;
+  playNotes([440, 554.37, 659.25], 'sine', 0.1, 0.06, 0.18, 4000);
+}
+
 // Level up — triumphant fanfare
 export function levelUpSfx() {
   if (gameState.isMuted) return;

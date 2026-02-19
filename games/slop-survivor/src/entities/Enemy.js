@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { ENEMY_TYPES, BOSS, ENEMY, ARENA, PX, PIXEL_SCALE, ENEMY_BEHAVIORS } from '../core/Constants.js';
+import { ENEMY_TYPES, BOSS, ENEMY, ARENA, PX, PIXEL_SCALE, ENEMY_BEHAVIORS, ELITE } from '../core/Constants.js';
 import { eventBus, Events } from '../core/EventBus.js';
 import { gameState } from '../core/GameState.js';
 import { InvaderGenerator, INVADER_PALETTES } from '../sprites/InvaderGenerator.js';
@@ -11,6 +11,17 @@ const TYPE_PALETTES = {
   SUGGESTION: INVADER_PALETTES.PURPLE,
   BOSS: INVADER_PALETTES.RED,
 };
+
+// Boss palette pool — random color each spawn for variety
+const BOSS_PALETTE_POOL = [
+  INVADER_PALETTES.RED,
+  INVADER_PALETTES.ORANGE,
+  INVADER_PALETTES.PURPLE,
+  INVADER_PALETTES.CYAN,
+  INVADER_PALETTES.MAGENTA,
+  INVADER_PALETTES.YELLOW,
+  INVADER_PALETTES.WHITE,
+];
 
 // Per-type generation options: small critters are simple, bosses are large and complex
 const TYPE_GEN_OPTIONS = {
@@ -52,6 +63,7 @@ export class Enemy {
     this.scene = scene;
     this.typeName = typeName;
     this.isBoss = isBoss;
+    this.isElite = !!(scaledStats && scaledStats.isElite);
 
     const config = isBoss ? BOSS : ENEMY_TYPES[typeName];
     this.config = config;
@@ -61,8 +73,8 @@ export class Enemy {
     this.maxHealth = this.health;
     this.damage = scaledStats ? scaledStats.damage : config.damage;
     this.speed = scaledStats ? scaledStats.speed : config.speed;
-    this.scoreValue = config.score;
-    this.xpDrop = config.xpDrop;
+    this.scoreValue = this.isElite ? config.score * ELITE.SCORE_MULT : config.score;
+    this.xpDrop = this.isElite ? config.xpDrop * ELITE.XP_MULT : config.xpDrop;
     this.dead = false;
 
     // Behavior variant (set by WaveSystem after construction)
@@ -87,6 +99,8 @@ export class Enemy {
       this.bossChargeCooldown = chargeCd * 0.5;
       this.bossChargeCooldownBase = chargeCd;
       this.bossChargeDuration = scaledStats && scaledStats.chargeDuration ? scaledStats.chargeDuration : BOSS.CHARGE_DURATION;
+      this.bossChargeSpeed = scaledStats && scaledStats.chargeSpeed ? scaledStats.chargeSpeed : BOSS.CHARGE_SPEED;
+      this.isCharging = false; // true during CHARGE phase — for extra knockback
       this.chargeTargetX = 0;
       this.chargeTargetY = 0;
       this.orbitAngle = 0;
@@ -98,15 +112,21 @@ export class Enemy {
 
     // Generate unique procedural invader sprite
     const seed = _invaderSeedCounter++;
-    const texKey = `invader-${typeName}-${seed}`;
+    const texKey = `invader-${typeName}-${this.isElite ? 'elite-' : ''}${seed}`;
     const animKey = `${texKey}-anim`;
-    const palette = TYPE_PALETTES[isBoss ? 'BOSS' : typeName] || INVADER_PALETTES.GREEN;
+    const palette = isBoss
+      ? Phaser.Utils.Array.GetRandom(BOSS_PALETTE_POOL)
+      : (TYPE_PALETTES[typeName] || INVADER_PALETTES.GREEN);
+    // Store boss body color for lighting
+    if (isBoss) this.bossBodyColor = palette[1];
     const genOpts = isBoss ? TYPE_GEN_OPTIONS.BOSS : (TYPE_GEN_OPTIONS[typeName] || {});
 
     const gen = new InvaderGenerator(seed * 7 + typeName.length * 31);
     const { frame1, frame2, width: gridW, height: gridH } = gen.generate(genOpts);
 
-    const scale = PIXEL_SCALE;
+    // Consistent pixel size: every grid cell renders as PX×PX on canvas (matches COPILOT)
+    // sprScale then sizes the sprite to config.width
+    const scale = PX;
     const frameW = gridW * scale;
     const frameH = gridH * scale;
 
@@ -147,7 +167,8 @@ export class Enemy {
 
     this.sprite = scene.physics.add.sprite(x, y, texKey, 0);
     const renderedW = gridW * scale;
-    const sprScale = config.width / renderedW;
+    const sizeMult = this.isElite ? ELITE.SIZE_MULT : 1;
+    const sprScale = (config.width * sizeMult) / renderedW;
     this.spriteScale = sprScale;
     this.sprite.setScale(sprScale);
     this.sprite.play(animKey);
@@ -156,8 +177,37 @@ export class Enemy {
     this.sprite.body.setSize(renderedW * 0.8, gridH * scale * 0.8);
     this.sprite.entityRef = this;
 
-    // Health bar for tanky enemies
-    if (this.maxHealth > 2 || isBoss) {
+    // Glowing eyes + trail particles for elites and bosses
+    this._eliteEyeGfx = null;
+    this._eliteTrailTimer = 0;
+    this._eyeColor = 0; // 0 = no eyes
+    if (this.isElite || isBoss) {
+      this._eliteEyeGfx = scene.add.graphics();
+      this._eliteEyeGfx.setDepth(isBoss ? 7 : 6);
+
+      // If boss body color is near red, use white eyes for contrast
+      const useWhiteEyes = isBoss && this.bossBodyColor && (() => {
+        const r = (this.bossBodyColor >> 16) & 0xff;
+        const g = (this.bossBodyColor >> 8) & 0xff;
+        const b = this.bossBodyColor & 0xff;
+        return r > 180 && g < 120 && b < 120;
+      })();
+
+      if (useWhiteEyes) {
+        this._eyeColor = 0xffffff;
+        this._eyeGlowColor = 0xcccccc;
+        this._eyeCenterColor = 0xffffff;
+        this._trailColors = [0xffffff, 0xdddddd, 0xeeeeee, 0xcccccc];
+      } else {
+        this._eyeColor = 0xff2222;
+        this._eyeGlowColor = 0xff0000;
+        this._eyeCenterColor = 0xffdddd;
+        this._trailColors = [0xff4444, 0xff6622, 0xff2222, 0xffaa33];
+      }
+    }
+
+    // Health bar for tanky enemies and all elites
+    if (this.maxHealth > 2 || isBoss || this.isElite) {
       this.healthBar = scene.add.graphics();
       this.healthBar.setDepth(15);
       this.updateHealthBar();
@@ -260,6 +310,11 @@ export class Enemy {
 
     if (this.healthBar) {
       this.updateHealthBar();
+    }
+
+    // Glowing eyes + trail (elites and bosses)
+    if (this._eliteEyeGfx) {
+      this._updateGlowingEyes(delta);
     }
   }
 
@@ -536,14 +591,36 @@ export class Enemy {
         const cdist = Math.sqrt(cdx * cdx + cdy * cdy);
 
         if (cdist > 10 * PX && this.bossPhaseTimer > 0) {
-          const cvx = (cdx / cdist) * BOSS.CHARGE_SPEED;
-          const cvy = (cdy / cdist) * BOSS.CHARGE_SPEED;
+          const spd = this.bossChargeSpeed || BOSS.CHARGE_SPEED;
+          const cvx = (cdx / cdist) * spd;
+          const cvy = (cdy / cdist) * spd;
           this.sprite.body.setVelocity(cvx, cvy);
+
+          // Charge trail particles
+          this._chargeTrailTimer = (this._chargeTrailTimer || 0) + delta;
+          if (this._chargeTrailTimer >= 30) {
+            this._chargeTrailTimer = 0;
+            const trailColors = [0xff4444, 0xff6622, 0xffaa00, 0xff2222];
+            const sx = this.sprite.x + (Math.random() - 0.5) * this.config.width * 0.6;
+            const sy = this.sprite.y + (Math.random() - 0.5) * this.config.height * 0.4;
+            const size = (3 + Math.random() * 4) * PX;
+            const color = Phaser.Utils.Array.GetRandom(trailColors);
+            const trail = this.scene.add.circle(sx, sy, size, color, 0.8).setDepth(5);
+            this.scene.tweens.add({
+              targets: trail,
+              alpha: 0,
+              scale: 0.1,
+              duration: 300 + Math.random() * 200,
+              ease: 'Quad.easeOut',
+              onComplete: () => trail.destroy(),
+            });
+          }
         } else {
           this.sprite.body.setVelocity(0, 0);
           this.sprite.clearTint();
           this.sprite.setScale(this.spriteScale);
           this._clearTelegraph();
+          this.isCharging = false;
 
           this.scene.cameras.main.shake(200, 0.01);
 
@@ -605,9 +682,13 @@ export class Enemy {
     this.bossPhaseTimer = this.bossChargeDuration || BOSS.CHARGE_DURATION;
     this.chargeTargetX = playerX;
     this.chargeTargetY = playerY;
+    this.isCharging = true;
+    this._chargeTrailTimer = 0;
     this.sprite.clearTint();
     this.sprite.setScale(this.spriteScale * 1.1);
     this._clearTelegraph();
+
+    eventBus.emit(Events.BOSS_CHARGE, { x: this.sprite.x, y: this.sprite.y });
   }
 
   _drawTelegraphRing(progress) {
@@ -633,6 +714,70 @@ export class Enemy {
     if (this.telegraphGfx) {
       this.telegraphGfx.clear();
       this.telegraphGfx.setAlpha(0);
+    }
+  }
+
+  // ===================== ELITE VISUALS =====================
+
+  _updateGlowingEyes(delta) {
+    if (!this._eliteEyeGfx || !this.sprite.active) return;
+
+    const sx = this.sprite.x;
+    const sy = this.sprite.y;
+    const sizeMult = this.isElite ? ELITE.SIZE_MULT : 1;
+    const w = this.config.width * sizeMult;
+    const eyeSpacing = w * 0.22;
+    const eyeY = sy - w * 0.18;
+    const baseEyeSize = Math.max(3 * PX, w * 0.14);
+
+    // Pulsing animation — eyes grow/shrink rhythmically
+    const t = this.scene.time.now;
+    const breathe = 0.8 + Math.sin(t * 0.006) * 0.2; // slow breathe
+    const flicker = 1 + Math.sin(t * 0.025) * 0.08;  // fast subtle flicker
+    const eyePulse = breathe * flicker;
+    const eyeSize = baseEyeSize * eyePulse;
+
+    const glowMult = this.isBoss ? 2.2 : 2.5;
+    const glowSize = eyeSize * glowMult;
+    const glowAlpha = this.isBoss ? 0.12 : 0.10;
+    const pulse = 0.7 + Math.sin(t * 0.008) * 0.3;
+
+    this._eliteEyeGfx.clear();
+
+    // Large outer glow
+    this._eliteEyeGfx.fillStyle(this._eyeGlowColor, glowAlpha * pulse);
+    this._eliteEyeGfx.fillCircle(sx - eyeSpacing, eyeY, glowSize);
+    this._eliteEyeGfx.fillCircle(sx + eyeSpacing, eyeY, glowSize);
+
+    // Bright eyes
+    const eyeAlpha = 0.85 + breathe * 0.15;
+    this._eliteEyeGfx.fillStyle(this._eyeColor, eyeAlpha);
+    this._eliteEyeGfx.fillCircle(sx - eyeSpacing, eyeY, eyeSize);
+    this._eliteEyeGfx.fillCircle(sx + eyeSpacing, eyeY, eyeSize);
+
+    // Hot center
+    this._eliteEyeGfx.fillStyle(this._eyeCenterColor, 0.85 * pulse);
+    this._eliteEyeGfx.fillCircle(sx - eyeSpacing, eyeY, eyeSize * 0.45);
+    this._eliteEyeGfx.fillCircle(sx + eyeSpacing, eyeY, eyeSize * 0.45);
+
+    // Trail particles
+    this._eliteTrailTimer += delta;
+    if (this._eliteTrailTimer >= 60) {
+      this._eliteTrailTimer = 0;
+      const trailX = sx + (Math.random() - 0.5) * w * 0.5;
+      const trailY = sy + (Math.random() - 0.5) * w * 0.4;
+      const trailSize = (2.5 + Math.random() * 3) * PX;
+      const trailColor = Phaser.Utils.Array.GetRandom(this._trailColors);
+      const trail = this.scene.add.circle(trailX, trailY, trailSize, trailColor, 0.8).setDepth(4);
+      this.scene.tweens.add({
+        targets: trail,
+        alpha: 0,
+        scale: 0.15,
+        y: trailY - 12 * PX,
+        duration: 400 + Math.random() * 250,
+        ease: 'Quad.easeOut',
+        onComplete: () => trail.destroy(),
+      });
     }
   }
 
@@ -690,6 +835,7 @@ export class Enemy {
       y: this.sprite.y,
       type: this.typeName,
       isBoss: this.isBoss,
+      isElite: this.isElite,
       xpDrop: this.xpDrop,
       config: this.config,
       behavior: this.behavior,
@@ -712,6 +858,12 @@ export class Enemy {
       });
     }
 
+    // Clean up elite eye graphics
+    if (this._eliteEyeGfx) {
+      this._eliteEyeGfx.destroy();
+      this._eliteEyeGfx = null;
+    }
+
     // Quick death animation
     this.scene.tweens.add({
       targets: this.sprite,
@@ -729,6 +881,7 @@ export class Enemy {
   destroy() {
     if (this.healthBar) this.healthBar.destroy();
     if (this.telegraphGfx) this.telegraphGfx.destroy();
+    if (this._eliteEyeGfx) this._eliteEyeGfx.destroy();
     if (this.sprite && this.sprite.active) {
       this.sprite.destroy();
     }
