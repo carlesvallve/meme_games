@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { GAME, PLAYER, COLORS, PX, PIXEL_SCALE, TRANSITION, ARENA, POWERUP_TYPES, POWERUP_DROP, TOUCH, XP_GEM, INTRO, VFX, PARALLAX, WEAPONS, KNOCKBACK, UI } from '../core/Constants.js';
+import { GAME, PLAYER, COLORS, PX, PIXEL_SCALE, TRANSITION, ARENA, POWERUP_TYPES, POWERUP_DROP, TOUCH, XP_GEM, INTRO, VFX, PARALLAX, WEAPONS, KNOCKBACK, UI, LIGHTING } from '../core/Constants.js';
 import { eventBus, Events } from '../core/EventBus.js';
 import { gameState } from '../core/GameState.js';
 import { Player } from '../entities/Player.js';
@@ -87,10 +87,11 @@ export class GameScene extends Phaser.Scene {
     // --- Player ---
     this.player = new Player(this);
 
-    // --- Camera reset & follow ---
+    // --- Camera reset ---
     this.cameras.main.setZoom(GAME.MOBILE_SCALE);
     this.cameras.main.setAlpha(1);
-    this.cameras.main.startFollow(this.player.sprite, true, 0.08, 0.08);
+    // Don't start following player yet — intro will set up camera follow on the dev character.
+    // Camera follow + bounds are set after intro completes.
     this.cameras.main.setBounds(0, 0, ARENA.WIDTH, ARENA.HEIGHT);
 
     // --- Systems ---
@@ -103,13 +104,14 @@ export class GameScene extends Phaser.Scene {
     this.lighting = new LightingSystem(this, {
       width: GAME.WIDTH,
       height: GAME.HEIGHT,
-      ambient: 0.75,
-      maxLights: 32,
-      gradientSize: 128,
-      falloffInner: 0.3,
-      falloffMid: 0.6,
-      innerAlpha: 0.95,
-      midAlpha: 0.5,
+      ambient: LIGHTING.AMBIENT,
+      ambientColor: LIGHTING.AMBIENT_COLOR,
+      maxLights: LIGHTING.MAX_LIGHTS,
+      gradientSize: LIGHTING.GRADIENT_SIZE,
+      falloffInner: LIGHTING.FALLOFF_INNER,
+      falloffMid: LIGHTING.FALLOFF_MID,
+      innerAlpha: LIGHTING.INNER_ALPHA,
+      midAlpha: LIGHTING.MID_ALPHA,
     });
     this.lighting.setActive(true);
 
@@ -203,10 +205,10 @@ export class GameScene extends Phaser.Scene {
       scrollFactor: PARALLAX.FAR_FACTOR,
       cellSize: 80,
       lineColor: 0xffffff,
-      lineAlpha: 0.06,
+      lineAlpha: 0.18,
       lineWidth: 1,
       glowColor: 0xffffff,
-      glowAlpha: 0.02,
+      glowAlpha: 0.06,
     });
 
     // --- Mid layer (depth -20, scrollFactor 0.6): Nebula clouds (no grid lines) ---
@@ -217,8 +219,8 @@ export class GameScene extends Phaser.Scene {
       minRadius: 40 * PX,
       maxRadius: 120 * PX,
       color: 0xffffff,
-      minAlpha: 0.02,
-      maxAlpha: 0.06,
+      minAlpha: 0.08,
+      maxAlpha: 0.22,
     });
 
     // --- Grid layer (depth -12, scrollFactor 0.7): Created lazily at tier 2+ ---
@@ -232,8 +234,8 @@ export class GameScene extends Phaser.Scene {
       minRadius: 15 * PX,
       maxRadius: 60 * PX,
       color: 0xffffff,
-      minAlpha: 0.05,
-      maxAlpha: 0.14,
+      minAlpha: 0.15,
+      maxAlpha: 0.38,
     });
     // Store a dummy for tint fading (we tint circles directly)
     this._parallaxNear = null;
@@ -696,10 +698,8 @@ export class GameScene extends Phaser.Scene {
 
     this.introDialog = new DialogBubble(this);
 
-    // Stop camera follow during intro so we can position freely
+    // Stop default follow — we'll follow the dev character throughout intro
     this.cameras.main.stopFollow();
-    // Center camera slightly above intro elements so they appear in lower half of screen
-    this.cameras.main.centerOn(ARENA.CENTER_X, ARENA.CENTER_Y - 35 * PX);
 
     // Place ship at parked position (will be adjusted to floor after floorY is computed)
     this.player.sprite.setPosition(SHIP_PARK_X, SHIP_PARK_Y);
@@ -722,7 +722,7 @@ export class GameScene extends Phaser.Scene {
 
     // Floor line (thick, matching character blue)
     const floorLine = this.add.graphics();
-    floorLine.lineStyle(10 * PX, 0x5588ff, 0.35);
+    floorLine.lineStyle(12 * PX, 0x5588ff, 0.35);
     floorLine.lineBetween(
       ARENA.CENTER_X - 280 * PX, floorY,
       ARENA.CENTER_X + 280 * PX, floorY
@@ -744,6 +744,13 @@ export class GameScene extends Phaser.Scene {
     dev.setDepth(12);
     dev.setAlpha(0);
     this._introDev = dev; // store ref so update loop can track it for lighting
+
+    // Camera follows an invisible anchor above the dev — offset tweens to 0 on liftoff
+    this._introCamOffsetY = -60 * PX;
+    this._introCamTarget = this.add.rectangle(dev.x, dev.y + this._introCamOffsetY, 1, 1, 0, 0);
+    this.cameras.main.useBounds = false;
+    this.cameras.main.centerOn(this._introCamTarget.x, this._introCamTarget.y);
+    this.cameras.main.startFollow(this._introCamTarget, true, 0.05, 0.05);
 
     // --- Step 1: Wake up (appear at bed) ---
     await this._tweenPromise({
@@ -788,6 +795,14 @@ export class GameScene extends Phaser.Scene {
     eventBus.emit(Events.MUSIC_STOP);
 
     // --- Step 5: Walk from standing position to ship ---
+    // Smoothly tween camera offset to 0 (centered) during walk
+    this.tweens.add({
+      targets: this,
+      _introCamOffsetY: 0,
+      duration: WALK_DURATION,
+      ease: 'Sine.easeInOut',
+    });
+
     if (this.anims.exists('player-walk')) {
       dev.play('player-walk');
     }
@@ -851,10 +866,21 @@ export class GameScene extends Phaser.Scene {
       });
     }
 
-    // Reset ship origin back to center for gameplay
+    // Reset ship origin back to center for gameplay and restore original Y
     this.player.sprite.setOrigin(0.5, 0.5);
+    this.player.sprite.setY(SHIP_PARK_Y);
 
-    // Re-enable camera follow for gameplay
+    // Clean up intro camera target
+    if (this._introCamTarget) {
+      this._introCamTarget.destroy();
+      this._introCamTarget = null;
+    }
+    this._introCamOffsetY = 0;
+
+    // Re-enable camera follow for gameplay, restore bounds
+    this.cameras.main.useBounds = true;
+    this.cameras.main.setBounds(0, 0, ARENA.WIDTH, ARENA.HEIGHT);
+    this.cameras.main.setFollowOffset(0, 0);
     this.cameras.main.startFollow(this.player.sprite, true, 0.08, 0.08);
 
     // --- Ship is NOW controllable — no scripted liftoff ---
@@ -1321,7 +1347,7 @@ export class GameScene extends Phaser.Scene {
 
   update(time, delta) {
     if (gameState.gameOver) {
-      // Keep lighting alive after death — same as intro dev character.
+      // Keep lighting alive after death — large radius so game over UI is readable.
       // Divide radius by current zoom so the on-screen light size stays
       // constant regardless of the death-zoom tween (LightingSystem already
       // multiplies radius × zoom internally).
@@ -1331,9 +1357,9 @@ export class GameScene extends Phaser.Scene {
           'player',
           this.player.sprite.x,
           this.player.sprite.y,
-          200 * PX / zoom,
-          0.8,
-          1.0, 0.95, 0.8
+          GAME.HEIGHT * (GAME.IS_MOBILE ? 0.35 : 0.5) / zoom,
+          1.0,
+          1.0, 1.0, 1.0
         );
         this.lighting.update();
       }
@@ -1347,20 +1373,28 @@ export class GameScene extends Phaser.Scene {
     // Always update thruster particles (even during intro)
     this.player.updateThrusterParticles(delta);
 
-    // During intro, update lighting on the dev character and return early
+    // During intro, update camera target + lighting on the dev character and return early
     if (this.introPlaying) {
+      // Keep camera anchor synced with dev + offset
+      if (this._introCamTarget && this._introDev) {
+        this._introCamTarget.setPosition(
+          this._introDev.x,
+          this._introDev.y + (this._introCamOffsetY || 0)
+        );
+      }
       if (this.player.isThrusting) {
         this.player.emitThrusterParticles();
       }
-      // Keep lighting active during intro — follow the dev sprite
+      // Keep lighting active during intro — divide by zoom so coverage is consistent across devices
       if (this.lighting && this.lighting.active && this._introDev) {
+        const zoom = this.cameras.main.zoom;
         this.lighting.setLight(
           'player',
           this._introDev.x,
           this._introDev.y,
-          200 * PX,
-          0.8,
-          1.0, 0.95, 0.8
+          GAME.HEIGHT * (GAME.IS_MOBILE ? 0.35 : 0.5) / zoom,
+          1.0,
+          1.0, 1.0, 1.0
         );
         this.lighting.update();
       }
@@ -1728,13 +1762,13 @@ export class GameScene extends Phaser.Scene {
   _updateLighting(enemies) {
     if (!this.lighting || !this.lighting.active) return;
 
-    // Player glow — dimmer ambient glow so headlight stands out
+    // Player glow — bright radial light around the ship
     this.lighting.setLight(
       'player',
       this.player.sprite.x,
       this.player.sprite.y,
-      180 * PX,
-      0.6,
+      320 * PX,
+      1.0,
       1.0, 1.0, 1.0
     );
 
@@ -1745,8 +1779,8 @@ export class GameScene extends Phaser.Scene {
       this.player.sprite.x,
       this.player.sprite.y,
       facing,
-      500 * PX,
-      Math.PI / 3.5,
+      700 * PX,
+      Math.PI / 3,
       1.0,
       1.0, 1.0, 1.0
     );
@@ -2378,7 +2412,7 @@ export class GameScene extends Phaser.Scene {
         this.lighting.removeLight(`enemy_${enemy.id}`);
       }
       // Brighten ambient so game over UI is readable
-      this.lighting.setAmbient(0.9);
+      this.lighting.setAmbientColor(0.25, 0.2, 0.35);
     }
 
     gameState.saveBest();
@@ -2456,12 +2490,13 @@ export class GameScene extends Phaser.Scene {
       // Pan camera downward so ship sits in upper area, game over UI below
       this.tweens.add({
         targets: cam,
-        scrollY: cam.scrollY + 60 * PX,
-        duration: 1500,
-        ease: 'Sine.easeInOut',
+        scrollY: cam.scrollY + 35 * PX,
+        duration: 600,
+        delay: 150,
+        ease: 'Sine.easeOut',
       });
 
-      // Show game over overlay in GameScene (for lighting)
+      // Show game over overlay simultaneously with camera pan
       showGameOverOverlay(this, {
         score: gameState.score,
         enemiesKilled: gameState.enemiesKilled,
