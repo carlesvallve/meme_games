@@ -4,6 +4,7 @@ import { GAME, DPR, PX } from './core/Constants.js';
 import { eventBus, Events } from './core/EventBus.js';
 import { gameState } from './core/GameState.js';
 import { initAudioBridge } from './audio/AudioBridge.js';
+import { initPlayFun } from './playfun.js';
 
 // Debug: log display config values so we can compare real device vs simulator
 console.log('[Display]', JSON.stringify({
@@ -24,6 +25,9 @@ console.log('[Display]', JSON.stringify({
 initAudioBridge();
 
 const game = new Phaser.Game(GameConfig);
+
+// Initialize Play.fun SDK (non-blocking — game works without it)
+initPlayFun().catch(err => console.warn('[PlayFun] init failed:', err));
 
 // Expose for Playwright testing
 window.__GAME__ = game;
