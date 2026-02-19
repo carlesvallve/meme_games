@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { PLAYER, GAME, ARENA, PX, VFX } from '../core/Constants.js';
+import { PLAYER, CONTROLS_MODE, GAME, ARENA, PX, VFX } from '../core/Constants.js';
 import { eventBus, Events } from '../core/EventBus.js';
 import { gameState } from '../core/GameState.js';
 
@@ -59,6 +59,61 @@ export class Player {
       this.vy -= this.facingY * reverseForce * dt;
     }
 
+    this._applyPhysics(delta);
+  }
+
+  /** Direct control mode: ship turns toward input direction and auto-thrusts */
+  updateDirect(dirX, dirY, magnitude, delta, turnSpeed) {
+    const dt = delta / 1000;
+    const tSpeed = turnSpeed || PLAYER.TURN_SPEED;
+
+    if (magnitude > 0.01) {
+      // Target angle from input direction
+      const targetAngle = Math.atan2(dirY, dirX);
+
+      // Shortest rotation to target
+      let rotDiff = targetAngle - this.angle;
+      while (rotDiff > Math.PI) rotDiff -= Math.PI * 2;
+      while (rotDiff < -Math.PI) rotDiff += Math.PI * 2;
+
+      const absDiff = Math.abs(rotDiff);
+
+      // Snap if very close, otherwise turn quickly
+      if (absDiff < 0.05) {
+        this.angle = targetAngle;
+      } else {
+        this.angle += Math.sign(rotDiff) * Math.min(absDiff, tSpeed * dt);
+      }
+
+      // Facing direction from current angle
+      this.facingX = Math.cos(this.angle);
+      this.facingY = Math.sin(this.angle);
+
+      // Only thrust when roughly aligned with target (< ~45°)
+      // Scale thrust down as angle difference increases
+      const alignFactor = Math.max(0, 1 - absDiff / (Math.PI / 3));
+      if (alignFactor > 0) {
+        this.isThrusting = true;
+        this.isReversing = false;
+        this.vx += this.facingX * PLAYER.THRUST_FORCE * magnitude * alignFactor * dt;
+        this.vy += this.facingY * PLAYER.THRUST_FORCE * magnitude * alignFactor * dt;
+      } else {
+        this.isThrusting = false;
+        this.isReversing = false;
+      }
+    } else {
+      // No input — coast
+      this.facingX = Math.cos(this.angle);
+      this.facingY = Math.sin(this.angle);
+      this.isThrusting = false;
+      this.isReversing = false;
+    }
+
+    this._applyPhysics(delta);
+  }
+
+  /** Shared physics: drag, speed cap, velocity apply, visuals, wrapping, particles */
+  _applyPhysics(delta) {
     // Drag (frame-rate independent)
     const dragFactor = Math.pow(PLAYER.DRAG, delta / 16.67);
     this.vx *= dragFactor;

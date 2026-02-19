@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { GAME, PLAYER, COLORS, PX, PIXEL_SCALE, TRANSITION, ARENA, POWERUP_TYPES, POWERUP_DROP, TOUCH, XP_GEM, INTRO, VFX, PARALLAX, WEAPONS, KNOCKBACK, UI, LIGHTING } from '../core/Constants.js';
+import { GAME, PLAYER, CONTROLS_MODE, COLORS, PX, PIXEL_SCALE, TRANSITION, ARENA, POWERUP_TYPES, POWERUP_DROP, TOUCH, XP_GEM, INTRO, VFX, PARALLAX, WEAPONS, KNOCKBACK, UI, LIGHTING } from '../core/Constants.js';
 import { eventBus, Events } from '../core/EventBus.js';
 import { gameState } from '../core/GameState.js';
 import { Player } from '../entities/Player.js';
@@ -1334,6 +1334,7 @@ export class GameScene extends Phaser.Scene {
     if (this.isMobile) {
       this.input.addPointer(2);
       this.joystick = new VirtualJoystick(this);
+      this.joystick.setPlayer(this.player.sprite);
     }
   }
 
@@ -1406,58 +1407,80 @@ export class GameScene extends Phaser.Scene {
     gameState.timeSurvived = Math.floor(this.gameTimer / 1000);
 
     // --- Input ---
-    let rotateInput = 0;
-    let thrustInput = 0;
     let fireInput = false;
-
-    // Keyboard
-    if (this.cursors.left.isDown || this.wasd.left.isDown) rotateInput -= 1;
-    if (this.cursors.right.isDown || this.wasd.right.isDown) rotateInput += 1;
-    if (this.cursors.up.isDown || this.wasd.up.isDown) thrustInput = 1;
-    if (this.cursors.down.isDown || this.wasd.down.isDown) thrustInput = -1; // reverse thrust
     if (this.spaceKey.isDown) fireInput = true;
 
-    // Mobile: dynamic joystick for direct movement
-    // Merged with keyboard so Chrome DevTools mobile sim still works
-    if (this.isMobile && this.joystick) {
-      const joyInput = this.joystick.getInput();
-      if (joyInput.magnitude > 0.01) {
-        // Convert joystick direction into rotation + thrust for the ship
-        const targetAngle = Math.atan2(joyInput.moveY, joyInput.moveX);
-        let rotDiff = targetAngle - this.player.angle;
-        while (rotDiff > Math.PI) rotDiff -= Math.PI * 2;
-        while (rotDiff < -Math.PI) rotDiff += Math.PI * 2;
-        rotateInput = Math.max(-1, Math.min(1, rotDiff * 3));
+    if (CONTROLS_MODE === 'direct') {
+      // --- Direct mode: input direction = movement direction, auto-thrust ---
+      let dirX = 0;
+      let dirY = 0;
 
-        // Detect circular motion: if joystick angle changes fast, user is rotating not thrusting
-        if (this._prevJoyAngle !== undefined) {
-          let angleDelta = targetAngle - this._prevJoyAngle;
-          while (angleDelta > Math.PI) angleDelta -= Math.PI * 2;
-          while (angleDelta < -Math.PI) angleDelta += Math.PI * 2;
-          // Angular velocity (radians per frame) — high = spinning the stick
-          const angularSpeed = Math.abs(angleDelta) / (delta / 1000);
-          // Scale thrust down when spinning (>2 rad/s = mostly rotating)
-          const spinFactor = Math.max(0, 1 - angularSpeed / 4);
-          this._joyThrustScale = spinFactor;
-        } else {
-          this._joyThrustScale = 1;
-        }
-        this._prevJoyAngle = targetAngle;
+      // Keyboard: 8-way direction
+      if (this.cursors.left.isDown || this.wasd.left.isDown) dirX -= 1;
+      if (this.cursors.right.isDown || this.wasd.right.isDown) dirX += 1;
+      if (this.cursors.up.isDown || this.wasd.up.isDown) dirY -= 1;
+      if (this.cursors.down.isDown || this.wasd.down.isDown) dirY += 1;
 
-        // If joystick points mostly opposite to facing, reverse while still rotating
-        const absDiff = Math.abs(rotDiff);
-        if (absDiff > Math.PI * 0.65) {
-          thrustInput = -joyInput.magnitude * this._joyThrustScale; // reverse
-        } else {
-          thrustInput = joyInput.magnitude * this._joyThrustScale;
+      // Normalize diagonal keyboard input
+      let magnitude = Math.sqrt(dirX * dirX + dirY * dirY);
+      if (magnitude > 1) { dirX /= magnitude; dirY /= magnitude; magnitude = 1; }
+
+      // Mobile joystick (merged with keyboard)
+      if (this.isMobile && this.joystick) {
+        const joyInput = this.joystick.getInput();
+        if (joyInput.magnitude > 0.01) {
+          dirX = joyInput.moveX;
+          dirY = joyInput.moveY;
+          magnitude = joyInput.magnitude;
         }
-      } else {
-        this._prevJoyAngle = undefined;
       }
-    }
 
-    // --- Update systems ---
-    this.player.update(rotateInput, thrustInput, delta);
+      const turnSpeed = this.isMobile ? PLAYER.TURN_SPEED : PLAYER.TURN_SPEED_DESKTOP;
+      this.player.updateDirect(dirX, dirY, magnitude, delta, turnSpeed);
+    } else {
+      // --- Classic mode: rotate + thrust ---
+      let rotateInput = 0;
+      let thrustInput = 0;
+
+      if (this.cursors.left.isDown || this.wasd.left.isDown) rotateInput -= 1;
+      if (this.cursors.right.isDown || this.wasd.right.isDown) rotateInput += 1;
+      if (this.cursors.up.isDown || this.wasd.up.isDown) thrustInput = 1;
+      if (this.cursors.down.isDown || this.wasd.down.isDown) thrustInput = -1;
+
+      // Mobile joystick → rotation + thrust (classic)
+      if (this.isMobile && this.joystick) {
+        const joyInput = this.joystick.getInput();
+        if (joyInput.magnitude > 0.01) {
+          const targetAngle = Math.atan2(joyInput.moveY, joyInput.moveX);
+          let rotDiff = targetAngle - this.player.angle;
+          while (rotDiff > Math.PI) rotDiff -= Math.PI * 2;
+          while (rotDiff < -Math.PI) rotDiff += Math.PI * 2;
+          rotateInput = Math.max(-1, Math.min(1, rotDiff * 3));
+
+          if (this._prevJoyAngle !== undefined) {
+            let angleDelta = targetAngle - this._prevJoyAngle;
+            while (angleDelta > Math.PI) angleDelta -= Math.PI * 2;
+            while (angleDelta < -Math.PI) angleDelta += Math.PI * 2;
+            const angularSpeed = Math.abs(angleDelta) / (delta / 1000);
+            this._joyThrustScale = Math.max(0, 1 - angularSpeed / 4);
+          } else {
+            this._joyThrustScale = 1;
+          }
+          this._prevJoyAngle = targetAngle;
+
+          const absDiff = Math.abs(rotDiff);
+          if (absDiff > Math.PI * 0.65) {
+            thrustInput = -joyInput.magnitude * this._joyThrustScale;
+          } else {
+            thrustInput = joyInput.magnitude * this._joyThrustScale;
+          }
+        } else {
+          this._prevJoyAngle = undefined;
+        }
+      }
+
+      this.player.update(rotateInput, thrustInput, delta);
+    }
 
     // Engine sound — always-on hum, pitch/volume scale with velocity
     const speed = Math.sqrt(this.player.vx * this.player.vx + this.player.vy * this.player.vy);
@@ -1465,7 +1488,7 @@ export class GameScene extends Phaser.Scene {
     playUpdateEngine(speedRatio);
 
     // First thrust after boarding triggers a liftoff speech bubble
-    if (this._waitingForFirstThrust && thrustInput > 0) {
+    if (this._waitingForFirstThrust && this.player.isThrusting) {
       this._waitingForFirstThrust = false;
       const line = Phaser.Utils.Array.GetRandom(DEV_QUOTES.LIFTOFF);
       SpeechBubble.show(this, this.player.sprite, line, { duration: 2500, ...BUBBLE_COLORS.DEV });
@@ -1476,9 +1499,54 @@ export class GameScene extends Phaser.Scene {
     const enemies = this.waveSystem.getActiveEnemies();
 
     // --- Laser fire: space bar on desktop, tap-to-shoot on mobile ---
-    if (this.isMobile && this.joystick && this.joystick.tapped) {
+    // Suppress all firing until first thrust input after liftoff
+    if (this._waitingForFirstThrust) {
+      if (this.joystick) this.joystick.tapped = false;
+      fireInput = false;
+    } else if (this.isMobile && this.joystick && this.joystick.tapped) {
       this.joystick.tapped = false;
-      fireInput = true;
+      // In direct mode, quick-turn toward tap then fire
+      if (CONTROLS_MODE === 'direct' && this.joystick.tapDirX != null) {
+        const targetAngle = Math.atan2(this.joystick.tapDirY, this.joystick.tapDirX);
+        this.joystick.tapDirX = null;
+        this.joystick.tapDirY = null;
+        // Compute shortest rotation
+        let diff = targetAngle - this.player.angle;
+        while (diff > Math.PI) diff -= Math.PI * 2;
+        while (diff < -Math.PI) diff += Math.PI * 2;
+        const startAngle = this.player.angle;
+        const endAngle = startAngle + diff;
+        // Duration proportional to rotation amount, capped
+        const duration = Math.min(120, Math.abs(diff) * 40);
+        if (duration < 5) {
+          // Already facing — fire immediately
+          fireInput = true;
+        } else {
+          this.tweens.add({
+            targets: this.player,
+            angle: endAngle,
+            duration,
+            ease: 'Sine.easeOut',
+            onUpdate: () => {
+              this.player.facingX = Math.cos(this.player.angle);
+              this.player.facingY = Math.sin(this.player.angle);
+              this.player.sprite.setRotation(this.player.angle + Math.PI / 2);
+            },
+            onComplete: () => {
+              this.player.facingX = Math.cos(this.player.angle);
+              this.player.facingY = Math.sin(this.player.angle);
+              this.player.sprite.setRotation(this.player.angle + Math.PI / 2);
+              const enemies2 = this.waveSystem.getActiveEnemies();
+              this.weaponSystem.fireLaser(
+                this.player.sprite.x, this.player.sprite.y,
+                this.player.facingX, this.player.facingY, time, enemies2
+              );
+            },
+          });
+        }
+      } else {
+        fireInput = true;
+      }
     }
     if (fireInput) {
       this.weaponSystem.fireLaser(
