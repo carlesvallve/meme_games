@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { WAVES, ENEMY_TYPES, BOSS, ARENA, GAME, PX, DIFFICULTY, ENEMY_BEHAVIORS } from '../core/Constants.js';
+import { WAVES, ENEMY_TYPES, BOSS, ARENA, GAME, PX, DIFFICULTY, ENEMY_BEHAVIORS, ELITE } from '../core/Constants.js';
 import { eventBus, Events } from '../core/EventBus.js';
 import { Enemy } from '../entities/Enemy.js';
 
@@ -14,6 +14,7 @@ export class WaveSystem {
     this.elapsed = 0;
     this.lastBossTime = 0;
     this.bossesSpawned = 0; // tracks how many bosses have spawned for escalation
+    this._catchupAccumulator = 0; // ms accumulator for catch-up spawns
   }
 
   /** Elapsed minutes since game start — drives difficulty scaling */
@@ -59,14 +60,25 @@ export class WaveSystem {
     );
   }
 
+  /**
+   * Get minimum enemy floor — if fewer than this, spawn catch-up enemies.
+   */
+  getMinEnemies() {
+    return Math.min(
+      WAVES.MIN_ENEMIES_MAX,
+      Math.floor(WAVES.MIN_ENEMIES + WAVES.MIN_ENEMIES_RATE * this.elapsedMinutes)
+    );
+  }
+
   start() {
     this.waveNumber = 0;
     this.spawnRate = WAVES.INITIAL_SPAWN_RATE;
     this.elapsed = 0;
     this.lastBossTime = 0;
     this.bossesSpawned = 0;
+    this._catchupAccumulator = 0;
 
-    // Start spawning
+    // Start spawning waves
     this.scheduleNextSpawn();
 
     // Boss timer
@@ -80,7 +92,6 @@ export class WaveSystem {
   scheduleNextSpawn() {
     this.spawnTimer = this.scene.time.delayedCall(this.spawnRate, () => {
       this.spawnWave();
-      // Gradually increase difficulty
       this.waveNumber++;
       this.spawnRate = Math.max(
         WAVES.MIN_SPAWN_RATE,
@@ -105,12 +116,44 @@ export class WaveSystem {
     eventBus.emit(Events.WAVE_START, { wave: this.waveNumber });
   }
 
+  /**
+   * Catch-up spawning — if enemy count drops below the minimum floor,
+   * spawn one enemy every ~300ms to refill without big bursts.
+   */
+  tickCatchup(delta) {
+    const maxEnemies = this.getMaxEnemies();
+    const minEnemies = this.getMinEnemies();
+    const activeCount = this.enemies.filter(e => !e.dead).length;
+
+    if (activeCount >= minEnemies || activeCount >= maxEnemies) {
+      this._catchupAccumulator = 0;
+      return;
+    }
+
+    this._catchupAccumulator += delta;
+    if (this._catchupAccumulator >= 300) {
+      this._catchupAccumulator = 0;
+      this.spawnEnemy();
+    }
+  }
+
   spawnEnemy() {
     const pos = this.getSpawnPosition();
     const typeName = this.pickEnemyType();
 
     // Calculate difficulty-scaled stats for this enemy
     const scaledStats = this.getScaledEnemyStats(typeName);
+
+    // Roll for elite variant — generous chance that ramps with time
+    if (this.elapsedMinutes >= ELITE.UNLOCK_MINUTE) {
+      const minutesPast = this.elapsedMinutes - ELITE.UNLOCK_MINUTE;
+      const eliteChance = Math.min(ELITE.MAX_CHANCE, ELITE.INITIAL_CHANCE + ELITE.CHANCE_PER_MIN * minutesPast);
+      if (Math.random() < eliteChance) {
+        scaledStats.health = Math.max(1, Math.round(scaledStats.health * ELITE.HP_MULT));
+        scaledStats.speed *= ELITE.SPEED_MULT;
+        scaledStats.isElite = true;
+      }
+    }
 
     const enemy = new Enemy(this.scene, pos.x, pos.y, typeName, false, scaledStats);
 
@@ -150,6 +193,20 @@ export class WaveSystem {
   }
 
   spawnBoss() {
+    // Limit simultaneous bosses — early game: almost never overlap, late game: more likely
+    const activeBosses = this.enemies.filter(e => !e.dead && e.isBoss && e.sprite.active);
+    if (activeBosses.length >= (BOSS.MAX_SIMULTANEOUS || 1)) return null;
+    if (activeBosses.length > 0) {
+      const minutes = this.elapsedMinutes;
+      const startMin = DIFFICULTY.BOSS_OVERLAP_START_MIN || 3;
+      if (minutes < startMin) return null; // no overlap in early game
+      const overlapChance = Math.min(
+        DIFFICULTY.BOSS_OVERLAP_CHANCE_MAX,
+        (minutes - startMin) * DIFFICULTY.BOSS_OVERLAP_CHANCE_PER_MIN
+      );
+      if (Math.random() > overlapChance) return null; // roll failed, skip spawn
+    }
+
     this.bossesSpawned++;
     const pos = this.getSpawnPosition();
 
@@ -167,11 +224,30 @@ export class WaveSystem {
         DIFFICULTY.BOSS_CHARGE_DURATION_MAX,
         BOSS.CHARGE_DURATION + DIFFICULTY.BOSS_CHARGE_DURATION_INCREASE * (bossNum - 1)
       ),
+      chargeSpeed: Math.min(
+        DIFFICULTY.BOSS_CHARGE_SPEED_MAX,
+        BOSS.CHARGE_SPEED + DIFFICULTY.BOSS_CHARGE_SPEED_INCREASE * (bossNum - 1)
+      ),
     };
 
     const enemy = new Enemy(this.scene, pos.x, pos.y, 'COPILOT', true, scaledBossStats);
     this.enemies.push(enemy);
     eventBus.emit(Events.BOSS_SPAWN, { x: pos.x, y: pos.y });
+
+    // Spawn escort enemies (random types) around the boss
+    const escortCount = BOSS.ESCORT_COUNT || 4;
+    const spread = BOSS.ESCORT_SPREAD || 80;
+    for (let i = 0; i < escortCount; i++) {
+      const angle = (Math.PI * 2 * i) / escortCount + (Math.random() - 0.5) * 0.5;
+      const dist = spread * PX * (0.6 + Math.random() * 0.4);
+      const ex = pos.x + Math.cos(angle) * dist;
+      const ey = pos.y + Math.sin(angle) * dist;
+      const escortType = this.pickEnemyType();
+      const escortStats = this.getScaledEnemyStats(escortType);
+      const escort = new Enemy(this.scene, ex, ey, escortType, false, escortStats);
+      this.enemies.push(escort);
+    }
+
     return enemy;
   }
 
@@ -191,8 +267,16 @@ export class WaveSystem {
     );
     const speedVariance = 1 + (Math.random() * 2 - 1) * varianceRange;
 
+    // Randomize HP for copilots and PRs between their base values
+    let baseHealth = base.health;
+    if (typeName === 'COPILOT' || typeName === 'PR') {
+      const lo = ENEMY_TYPES.COPILOT.health;
+      const hi = ENEMY_TYPES.PR.health;
+      baseHealth = lo + Math.floor(Math.random() * (hi - lo + 1));
+    }
+
     return {
-      health: Math.max(1, Math.round(base.health * healthMult)),
+      health: Math.max(1, Math.round(baseHealth * healthMult)),
       speed: base.speed * speedMult * speedVariance,
       damage: Math.max(1, Math.round(base.damage * damageMult)),
     };
@@ -203,8 +287,8 @@ export class WaveSystem {
     const r = Math.random();
     const waveBonus = Math.min(this.waveNumber * 0.02, 0.4);
 
-    if (r < 0.6 - waveBonus) return 'COPILOT';
-    if (r < 0.85 - waveBonus * 0.5) return 'PR';
+    if (r < 0.72 - waveBonus * 0.5) return 'COPILOT';
+    if (r < 0.90 - waveBonus * 0.3) return 'PR';
     return 'SUGGESTION';
   }
 
@@ -247,6 +331,9 @@ export class WaveSystem {
   update(playerX, playerY, delta) {
     // Track elapsed time for difficulty scaling
     this.elapsed += delta;
+
+    // Catch-up spawning if enemy count drops too low
+    this.tickCatchup(delta);
 
     // Find active bosses for rally mechanic
     let hasBoss = false;

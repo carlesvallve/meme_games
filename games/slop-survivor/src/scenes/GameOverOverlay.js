@@ -6,6 +6,7 @@ import { playClickSfx } from '../audio/AudioBridge.js';
 /**
  * Shows a game over overlay in GameScene (for lighting).
  * Uses scrollFactor(0) so elements stay fixed on screen despite camera scroll/zoom.
+ * Layout: GAME OVER title on top, stats row below, best score + prompt at bottom.
  */
 export function showGameOverOverlay(scene, stats, onRestart) {
   const w = GAME.WIDTH;
@@ -21,7 +22,6 @@ export function showGameOverOverlay(scene, stats, onRestart) {
   // Semi-transparent overlay — covers full screen via scrollFactor(0)
   const overlay = scene.add.graphics();
   overlay.fillStyle(0x000000, 0.12);
-  // Draw large enough to cover viewport at any zoom
   overlay.fillRect(-w, -h, w * 3, h * 3);
   overlay.setScrollFactor(0).setAlpha(0).setDepth(DEPTH);
   add(overlay);
@@ -32,44 +32,45 @@ export function showGameOverOverlay(scene, stats, onRestart) {
     duration: 300,
   });
 
-  // "GAME OVER" title — center layout
-  const titleSize = Math.round(UI.BASE * UI.HEADING_RATIO * 1.2);
-  const lift = 30 * PX; // compensate for camera pan downward on game over
-  const titleY = cy + UI.BASE * 0.18 - lift;
-  const title = add(scene.add.text(cx, titleY, 'GAME OVER', {
-    fontSize: titleSize + 'px',
-    fontFamily: UI.FONT,
-    color: '#44ff44',
-    fontStyle: 'bold',
-    shadow: { offsetX: 0, offsetY: 3, color: 'rgba(0,80,0,0.5)', blur: 8, fill: true },
-  }).setOrigin(0.5).setScrollFactor(0).setAlpha(0).setDepth(DEPTH));
-
   // Disable roundPixels so slow float tweens aren't choppy
   scene.cameras.main.roundPixels = false;
 
-  scene.tweens.add({
-    targets: title,
-    alpha: 1,
-    y: titleY - 4 * PX,
-    duration: 400,
-    delay: 100,
-    ease: 'Quad.easeOut',
-  });
+  // --- Layout: centered vertically ---
+  const titleSize = Math.round(UI.BASE * UI.HEADING_RATIO * 1.2);
+  const titleY = cy - UI.BASE * 0.08;
 
-  // Float — match title overlay: 6*PX over 2000ms
-  scene.tweens.add({
-    targets: title,
-    y: titleY - 6 * PX,
-    duration: 2000,
-    delay: 500,
-    yoyo: true,
-    repeat: -1,
-    ease: 'Sine.easeInOut',
-  });
+  // // "GAME OVER" title
+  // const title = add(scene.add.text(cx, titleY, 'GAME OVER', {
+  //   fontSize: titleSize + 'px',
+  //   fontFamily: UI.FONT,
+  //   color: '#44ff44',
+  //   fontStyle: 'bold',
+  //   shadow: { offsetX: 0, offsetY: 3, color: 'rgba(0,80,0,0.5)', blur: 8, fill: true },
+  // }).setOrigin(0.5).setScrollFactor(0).setAlpha(0).setDepth(DEPTH));
 
-  // --- Single-row compact stats ---
+  // scene.tweens.add({
+  //   targets: title,
+  //   alpha: 1,
+  //   y: titleY - 4 * PX,
+  //   duration: 400,
+  //   delay: 100,
+  //   ease: 'Quad.easeOut',
+  // });
+
+  // // Float
+  // scene.tweens.add({
+  //   targets: title,
+  //   y: titleY - 6 * PX,
+  //   duration: 2000,
+  //   delay: 500,
+  //   yoyo: true,
+  //   repeat: -1,
+  //   ease: 'Sine.easeInOut',
+  // });
+
+  // --- Stats row below title ---
   const isMobile = GAME.IS_MOBILE;
-  const statY = cy + UI.BASE * 0.06 - lift;
+  const statY = titleY + UI.BASE * 0.12;
   const labelSize = Math.round(UI.BASE * UI.SMALL_RATIO * 0.7);
   const valueSize = Math.round(UI.BASE * UI.SMALL_RATIO * 1.1);
   const separator = '·';
@@ -85,7 +86,7 @@ export function showGameOverOverlay(scene, stats, onRestart) {
     { value: `${stats.level}`, label: 'LV', color: '#9944ff' },
   ];
 
-  const itemGap = isMobile ? 24 * PX : 36 * PX;
+  const itemGap = isMobile ? 16 * PX : 24 * PX;
 
   // Build stat cells
   const cells = [];
@@ -170,7 +171,7 @@ export function showGameOverOverlay(scene, stats, onRestart) {
     });
   });
 
-  // Best score
+  // Best score below stats
   const bestSize = Math.round(UI.BASE * UI.SMALL_RATIO * 0.75);
   const bestText = add(scene.add.text(cx, statY + 30 * PX, `BEST: ${stats.bestScore}`, {
     fontSize: bestSize + 'px',

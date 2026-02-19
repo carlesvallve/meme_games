@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
-import { POWERUP_DROP, PX, PIXEL_SCALE, GAME, UI } from '../core/Constants.js';
+import { POWERUP_DROP, PX, PIXEL_SCALE, GAME, UI, VFX } from '../core/Constants.js';
 import { eventBus, Events } from '../core/EventBus.js';
+import { blastSfx } from '../audio/sfx.js';
 
 /**
  * Instant blast pickup — red glowing orb on the ground.
@@ -92,32 +93,94 @@ export class BlastPickup {
     if (this.collected) return;
     this.collected = true;
 
+    blastSfx();
+
     const px = this.sprite.x;
     const py = this.sprite.y;
 
-    // Visual blast effect — expanding red ring
-    const blast = this.scene.add.graphics();
-    blast.setPosition(px, py);
-    blast.fillStyle(BLAST.COLOR, 0.25);
-    blast.fillCircle(0, 0, BLAST.RADIUS);
-    blast.lineStyle(4 * PX, BLAST.COLOR, 0.9);
-    blast.strokeCircle(0, 0, BLAST.RADIUS);
-    blast.lineStyle(2 * PX, 0xffffff, 0.4);
-    blast.strokeCircle(0, 0, BLAST.RADIUS * 0.6);
+    // --- Multi-phase explosion VFX ---
 
+    // Camera flash + shake
+    this.scene.cameras.main.flash(200, 255, 80, 50);
+    this.scene.cameras.main.shake(300, VFX.SHAKE_BOSS_INTENSITY);
+
+    // Phase 1: Bright white core flash
+    const coreFlash = this.scene.add.circle(px, py, 10 * PX, 0xffffff, 1).setDepth(30);
     this.scene.tweens.add({
-      targets: blast,
+      targets: coreFlash,
+      scaleX: 5,
+      scaleY: 5,
       alpha: 0,
-      scaleX: 1.8,
-      scaleY: 1.8,
-      duration: 500,
+      duration: 350,
       ease: 'Quad.easeOut',
-      onComplete: () => blast.destroy(),
+      onComplete: () => coreFlash.destroy(),
     });
 
-    // Camera flash
-    this.scene.cameras.main.flash(120, 255, 60, 60);
-    this.scene.cameras.main.shake(200, 0.01);
+    // Phase 2: Expanding shockwave ring showing blast radius
+    const ring = this.scene.add.graphics().setDepth(28);
+    let ringRadius = 15 * PX;
+    const ringMax = BLAST.RADIUS;
+    const ringTimer = this.scene.time.addEvent({
+      delay: 16,
+      repeat: 20,
+      callback: () => {
+        ringRadius += (ringMax - ringRadius) * 0.18;
+        const alpha = 1 - ringRadius / ringMax;
+        ring.clear();
+        ring.lineStyle(3 * PX * alpha, BLAST.COLOR, alpha * 0.9);
+        ring.strokeCircle(px, py, ringRadius);
+        ring.lineStyle(1.5 * PX * alpha, 0xffaa44, alpha * 0.5);
+        ring.strokeCircle(px, py, ringRadius * 0.65);
+      },
+    });
+    this.scene.time.delayedCall(400, () => {
+      ringTimer.destroy();
+      ring.destroy();
+    });
+
+    // Phase 3: Fire particles
+    const fireColors = [0xff3333, 0xff6633, 0xffcc00, 0xff8833, 0xffff66];
+    for (let i = 0; i < 24; i++) {
+      const angle = (Math.PI * 2 * i) / 24 + (Math.random() - 0.5) * 0.5;
+      const vel = (60 + Math.random() * 100) * PX;
+      const size = (2 + Math.random() * 4) * PX;
+      const color = Phaser.Utils.Array.GetRandom(fireColors);
+      const particle = this.scene.add.circle(px, py, size, color, 1).setDepth(26);
+      this.scene.tweens.add({
+        targets: particle,
+        x: px + Math.cos(angle) * vel,
+        y: py + Math.sin(angle) * vel,
+        alpha: 0,
+        scale: 0.1,
+        duration: 400 + Math.random() * 300,
+        ease: 'Quad.easeOut',
+        onComplete: () => particle.destroy(),
+      });
+    }
+
+    // Phase 4: Delayed smoke wisps
+    this.scene.time.delayedCall(120, () => {
+      for (let i = 0; i < 5; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const dist = Math.random() * 20 * PX;
+        const smoke = this.scene.add.circle(
+          px + Math.cos(angle) * dist,
+          py + Math.sin(angle) * dist,
+          (4 + Math.random() * 7) * PX,
+          0x333333, 0.3
+        ).setDepth(25);
+        this.scene.tweens.add({
+          targets: smoke,
+          y: smoke.y - (20 + Math.random() * 30) * PX,
+          alpha: 0,
+          scaleX: 2,
+          scaleY: 2,
+          duration: 600 + Math.random() * 300,
+          ease: 'Sine.easeOut',
+          onComplete: () => smoke.destroy(),
+        });
+      }
+    });
 
     // Damage all enemies in range
     for (const enemy of enemies) {

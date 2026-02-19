@@ -10,10 +10,13 @@ import {
   laserSfx,
   enemyDeathSfx,
   enemyHitSfx,
+  bossKillSfx,
+  healSfx,
   xpPickupSfx,
   powerUpSfx,
   playerHitSfx,
   bossSpawnSfx,
+  bossChargeSfx,
   levelUpSfx,
   clickSfx,
   explosionSfx,
@@ -88,6 +91,21 @@ export function initAudioBridge() {
   // Boss spawn — deep horn
   eventBus.on(Events.BOSS_SPAWN, () => {
     bossSpawnSfx();
+  });
+
+  // Boss charge — aggressive swoosh
+  eventBus.on(Events.BOSS_CHARGE, () => {
+    bossChargeSfx();
+  });
+
+  // Boss killed — big boom + victory chime
+  eventBus.on(Events.BOSS_KILLED, () => {
+    bossKillSfx();
+  });
+
+  // Player healed — warm chime
+  eventBus.on(Events.PLAYER_HEAL, () => {
+    healSfx();
   });
 
   // Level up — fanfare

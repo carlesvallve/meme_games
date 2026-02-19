@@ -27,6 +27,7 @@ export class VFXSystem {
     this._onBossSpawn = this.handleBossSpawn.bind(this);
     this._onLevelUp = this.handleLevelUp.bind(this);
     this._onPlayerDied = this.handlePlayerDied.bind(this);
+    this._onBossKilled = this.handleBossKilled.bind(this);
 
     // Subscribe
     eventBus.on(Events.SLOP_SPLATTER, this._onSlopSplatter);
@@ -43,6 +44,7 @@ export class VFXSystem {
     eventBus.on(Events.BOSS_SPAWN, this._onBossSpawn);
     eventBus.on(Events.LEVEL_UP, this._onLevelUp);
     eventBus.on(Events.PLAYER_DIED, this._onPlayerDied);
+    eventBus.on(Events.BOSS_KILLED, this._onBossKilled);
   }
 
   // --- High-level event handlers ---
@@ -98,6 +100,140 @@ export class VFXSystem {
       hold: 400,
       ease: 'Quad.easeOut',
       onComplete: () => warnText.destroy(),
+    });
+  }
+
+  handleBossKilled({ x, y }) {
+    // Heavy screen shake
+    this.screenShake({
+      intensity: VFX.SHAKE_BOSS_INTENSITY * 1.5,
+      duration: VFX.SHAKE_BOSS_DURATION,
+    });
+
+    // White + red flash
+    this.cameraFlash({ duration: 250, r: 255, g: 100, b: 80 });
+
+    // Phase 1: Bright core flash (expanding circle)
+    const coreFlash = this.scene.add.circle(x, y, 10 * PX, 0xffffff, 1).setDepth(30);
+    this.scene.tweens.add({
+      targets: coreFlash,
+      scaleX: 5,
+      scaleY: 5,
+      alpha: 0,
+      duration: 350,
+      ease: 'Quad.easeOut',
+      onComplete: () => coreFlash.destroy(),
+    });
+
+    // Phase 2: Expanding shockwave ring
+    const ring = this.scene.add.graphics().setDepth(28);
+    let ringRadius = 12 * PX;
+    const ringMax = 140 * PX;
+    const ringTimer = this.scene.time.addEvent({
+      delay: 16,
+      repeat: 25,
+      callback: () => {
+        ringRadius += (ringMax - ringRadius) * 0.15;
+        const alpha = 1 - ringRadius / ringMax;
+        ring.clear();
+        ring.lineStyle(3 * PX * alpha, 0xff4444, alpha * 0.8);
+        ring.strokeCircle(x, y, ringRadius);
+        ring.lineStyle(1.5 * PX * alpha, 0xffcc00, alpha * 0.5);
+        ring.strokeCircle(x, y, ringRadius * 0.7);
+      },
+    });
+    this.scene.time.delayedCall(500, () => {
+      ringTimer.destroy();
+      ring.destroy();
+    });
+
+    // Phase 3: Fiery explosion particles (lots of them)
+    const fireColors = [0xff4444, 0xff6633, 0xffcc00, 0xff8833, 0xffff66, 0xff2222];
+    for (let i = 0; i < 32; i++) {
+      const angle = (Math.PI * 2 * i) / 32 + (Math.random() - 0.5) * 0.5;
+      const vel = (80 + Math.random() * 140) * PX;
+      const size = (3 + Math.random() * 5) * PX;
+      const color = Phaser.Utils.Array.GetRandom(fireColors);
+      const particle = this.scene.add.circle(x, y, size, color, 1).setDepth(26);
+      this.scene.tweens.add({
+        targets: particle,
+        x: x + Math.cos(angle) * vel,
+        y: y + Math.sin(angle) * vel,
+        alpha: 0,
+        scale: 0.1,
+        duration: 500 + Math.random() * 400,
+        ease: 'Quad.easeOut',
+        onComplete: () => particle.destroy(),
+      });
+    }
+
+    // Phase 4: Boss debris (red fragments)
+    const debrisColors = [0xff4444, 0xcc2222, 0xff6644, 0xffaa44];
+    for (let i = 0; i < 10; i++) {
+      const angle = (Math.PI * 2 * i) / 10 + (Math.random() - 0.5) * 0.3;
+      const vel = (30 + Math.random() * 60) * PX;
+      const size = (2 + Math.random() * 3) * PX;
+      const color = Phaser.Utils.Array.GetRandom(debrisColors);
+      const shard = this.scene.add.rectangle(
+        x, y, size, size * (1 + Math.random()), color, 1
+      ).setDepth(27).setRotation(Math.random() * Math.PI * 2);
+      this.scene.tweens.add({
+        targets: shard,
+        x: x + Math.cos(angle) * vel,
+        y: y + Math.sin(angle) * vel + 15 * PX,
+        alpha: 0,
+        rotation: shard.rotation + (Math.random() - 0.5) * 6,
+        scale: 0.2,
+        duration: 700 + Math.random() * 400,
+        ease: 'Quad.easeOut',
+        onComplete: () => shard.destroy(),
+      });
+    }
+
+    // Phase 5: Delayed smoke
+    this.scene.time.delayedCall(150, () => {
+      for (let i = 0; i < 6; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const dist = Math.random() * 25 * PX;
+        const smoke = this.scene.add.circle(
+          x + Math.cos(angle) * dist,
+          y + Math.sin(angle) * dist,
+          (5 + Math.random() * 8) * PX,
+          0x333333, 0.3
+        ).setDepth(25);
+        this.scene.tweens.add({
+          targets: smoke,
+          y: smoke.y - (25 + Math.random() * 35) * PX,
+          alpha: 0,
+          scaleX: 2,
+          scaleY: 2,
+          duration: 700 + Math.random() * 300,
+          ease: 'Sine.easeOut',
+          onComplete: () => smoke.destroy(),
+        });
+      }
+    });
+
+    // "BOSS DEFEATED!" text
+    const defeatText = this.scene.add.text(GAME.WIDTH / 2, GAME.HEIGHT / 2, 'BOSS DEFEATED!', {
+      fontSize: Math.round(UI.BASE * UI.HEADING_RATIO) + 'px',
+      fontFamily: UI.FONT,
+      color: '#ffcc00',
+      fontStyle: 'bold',
+      stroke: '#000000',
+      strokeThickness: 4 * PX,
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(1100).setAlpha(0);
+
+    this.scene.tweens.add({
+      targets: defeatText,
+      alpha: 1,
+      scaleX: 1.3,
+      scaleY: 1.3,
+      duration: 300,
+      yoyo: true,
+      hold: 600,
+      ease: 'Quad.easeOut',
+      onComplete: () => defeatText.destroy(),
     });
   }
 
@@ -437,6 +573,7 @@ export class VFXSystem {
     eventBus.off(Events.BOSS_SPAWN, this._onBossSpawn);
     eventBus.off(Events.LEVEL_UP, this._onLevelUp);
     eventBus.off(Events.PLAYER_DIED, this._onPlayerDied);
+    eventBus.off(Events.BOSS_KILLED, this._onBossKilled);
     if (this.vignetteGfx) this.vignetteGfx.destroy();
   }
 }
