@@ -49,6 +49,9 @@ export const ARENA = {
 
 // --- Player ---
 
+// Controls mode: 'classic' = rotate+thrust, 'direct' = move in input direction (auto-thrust)
+export const CONTROLS_MODE = 'direct';
+
 export const PLAYER = {
   START_X: ARENA.CENTER_X,
   START_Y: ARENA.CENTER_Y,
@@ -62,12 +65,14 @@ export const PLAYER = {
   MAGNET_RANGE: 120 * PX,
   MAGNET_SPEED: 120 * PX,
   // Ship physics
-  ROTATION_SPEED: 4.5, // radians per second
-  THRUST_FORCE: 400 * PX, // acceleration per second
-  MAX_SPEED: 220 * PX, // max velocity magnitude
-  DRAG: 0.965, // velocity multiplier per frame (at 60fps) — moderate friction
+  ROTATION_SPEED: 4.5, // radians per second (classic mode)
+  TURN_SPEED: 18, // radians per second (direct mode mobile — fast snap)
+  TURN_SPEED_DESKTOP: 8, // radians per second (direct mode desktop — smoother)
+  THRUST_FORCE: 550 * PX, // acceleration per second
+  MAX_SPEED: 300 * PX, // max velocity magnitude
+  DRAG: 0.97, // velocity multiplier per frame (at 60fps) — higher friction
   DEAD_STOP: 2 * PX, // snap to 0 below this speed
-  REVERSE_RATIO: 0.6, // reverse thrust is 75% of forward thrust
+  REVERSE_RATIO: 0.6, // reverse thrust is 60% of forward thrust
   // Aiming cone preference
   AIM_CONE_HALF: Math.PI / 3, // 60 degrees = 120 degree cone
   AIM_CONE_WEIGHT: 0.5, // enemies in cone scored at half distance
@@ -145,7 +150,7 @@ export const BOSS = {
   ORBIT_RADIUS: 180 * PX,       // orbit distance from player
   ORBIT_DURATION: 4000,         // ms of orbiting
   RALLY_RANGE: 400 * PX,        // nearby slops get enraged within this range
-  RALLY_SPEED_MULT: 1.3,        // speed multiplier for rallied slops (was 1.8 — too deadly)
+  RALLY_SPEED_MULT: 1.15,       // speed multiplier for rallied slops (subtle boost)
   RALLY_TRACK_RANGE: 450 * PX,  // rallied slops track from further away
 };
 
@@ -167,8 +172,8 @@ export const DIFFICULTY = {
   // Enemy stat multipliers (multiply base stats by 1 + rate * minutes, capped)
   HEALTH_SCALE_RATE: 0.15,     // +15% health per minute
   HEALTH_SCALE_MAX: 3.0,       // cap at 3x base health
-  SPEED_SCALE_RATE: 0.06,      // +6% speed per minute
-  SPEED_SCALE_MAX: 1.6,        // cap at 1.6x base speed
+  SPEED_SCALE_RATE: 0.05,      // +5% speed per minute
+  SPEED_SCALE_MAX: 1.4,        // cap at 1.4x base speed
   DAMAGE_SCALE_RATE: 0.08,     // +8% damage per minute (rounded, so kicks in ~min 6+)
   DAMAGE_SCALE_MAX: 3.0,       // cap at 3x damage
 

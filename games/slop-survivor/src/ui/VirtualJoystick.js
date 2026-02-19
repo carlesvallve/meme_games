@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { GAME, PX } from '../core/Constants.js';
+import { GAME, PX, CONTROLS_MODE } from '../core/Constants.js';
 
 const JOYSTICK = {
   BASE_RADIUS: 50 * PX,
@@ -36,6 +36,7 @@ export class VirtualJoystick {
     this._joyPointerId = null;
     this._baseX = 0;
     this._baseY = 0;
+    this._playerSprite = null; // set via setPlayer() for direct mode
 
     const zoom = scene.cameras.main.zoom || 1;
     this._zoom = zoom;
@@ -58,6 +59,23 @@ export class VirtualJoystick {
     scene.input.on('pointermove', this._onMove, this);
     scene.input.on('pointerup', this._onUp, this);
     scene.input.on('pointerupoutside', this._onUp, this);
+  }
+
+  /** Set the player sprite reference for direct mode (direction = player → finger) */
+  setPlayer(sprite) {
+    this._playerSprite = sprite;
+  }
+
+  /** Get direction from player to a pointer in world space (immune to DPR/zoom/aspect issues) */
+  _getDirectionToPointer(pointer) {
+    if (!this._playerSprite) return null;
+    const cam = this.scene.cameras.main;
+    const worldPt = cam.getWorldPoint(pointer.x, pointer.y);
+    const dx = worldPt.x - this._playerSprite.x;
+    const dy = worldPt.y - this._playerSprite.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < 1) return null;
+    return { dx: dx / dist, dy: dy / dist, dist };
   }
 
   // --- Drawing ---
@@ -92,19 +110,36 @@ export class VirtualJoystick {
     // Second finger while joystick is active = fire
     if (this._joyPointerId !== null && pointer.id !== this._joyPointerId) {
       this.tapped = true;
+      const dir = this._getDirectionToPointer(pointer);
+      if (dir) {
+        this.tapDirX = dir.dx;
+        this.tapDirY = dir.dy;
+      }
       return;
     }
     if (this._joyPointerId !== null) return;
 
     const pt = this._screenToObj(pointer);
     this._joyPointerId = pointer.id;
-    this._baseX = pt.x;
-    this._baseY = pt.y;
     this._downTime = pointer.downTime;
     this._downX = pointer.x;
     this._downY = pointer.y;
     this._dragged = false;
     this.active = true;
+
+    // Joystick base always appears at touch point (visual)
+    this._baseX = pt.x;
+    this._baseY = pt.y;
+
+    // In direct mode, compute initial direction from player to touch point (world space)
+    if (CONTROLS_MODE === 'direct') {
+      const dir = this._getDirectionToPointer(pointer);
+      if (dir) {
+        this._dx = dir.dx;
+        this._dy = dir.dy;
+        this._magnitude = 1;
+      }
+    }
 
     this.baseGfx.setVisible(true);
     this.knobGfx.setVisible(true);
@@ -125,7 +160,22 @@ export class VirtualJoystick {
     }
 
     const pt = this._screenToObj(pointer);
-    this._updateJoystick(pt);
+
+    if (CONTROLS_MODE === 'direct') {
+      // Check if drag from base is significant enough to override initial direction
+      const dx = pt.x - this._baseX;
+      const dy = pt.y - this._baseY;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const deadZone = JOYSTICK.DEAD_ZONE / this._zoom;
+      if (dist > deadZone) {
+        // Drag is significant — use normal joystick direction (base → finger)
+        this._updateJoystick(pt);
+      }
+      // Otherwise keep the initial player→finger direction from _onDown
+      this._updateJoystickVisual(pt);
+    } else {
+      this._updateJoystick(pt);
+    }
   }
 
   _onUp(pointer) {
@@ -135,6 +185,12 @@ export class VirtualJoystick {
     const elapsed = pointer.upTime - this._downTime;
     if (elapsed < 250 && !this._dragged) {
       this.tapped = true; // consumed by GameScene
+      // Store tap direction (player → tap point) for direct mode turn-then-fire
+      const dir = this._getDirectionToPointer(pointer);
+      if (dir) {
+        this.tapDirX = dir.dx;
+        this.tapDirY = dir.dy;
+      }
     }
 
     this._joyPointerId = null;
@@ -169,6 +225,19 @@ export class VirtualJoystick {
     this._dx = dx / this.maxDist;
     this._dy = dy / this.maxDist;
     this._magnitude = dist / this.maxDist;
+    this._drawKnob(this._baseX + dx, this._baseY + dy);
+  }
+
+  /** Update only the knob visual (direct mode — input is computed separately) */
+  _updateJoystickVisual(pt) {
+    let dx = pt.x - this._baseX;
+    let dy = pt.y - this._baseY;
+    let dist = Math.sqrt(dx * dx + dy * dy);
+
+    if (dist > this.maxDist) {
+      dx = (dx / dist) * this.maxDist;
+      dy = (dy / dist) * this.maxDist;
+    }
 
     this._drawKnob(this._baseX + dx, this._baseY + dy);
   }
