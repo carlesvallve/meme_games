@@ -33,7 +33,7 @@ export class AudioManager {
       const origError = console.error;
       const origLog = console.log;
       const strudelFilter = (s) =>
-        typeof s === 'string' && (s.includes('AudioWorklet') || s.includes('getTrigger') || s.includes('audioworklet'));
+        typeof s === 'string' && (s.includes('AudioWorklet') || s.includes('getTrigger') || s.includes('audioworklet') || s.includes('[cyclist]'));
       console.warn = (...args) => { if (!strudelFilter(args[0])) origWarn.apply(console, args); };
       console.error = (...args) => { if (!strudelFilter(args[0])) origError.apply(console, args); };
       console.log = (...args) => { if (!strudelFilter(args[0])) origLog.apply(console, args); };

@@ -651,7 +651,9 @@ export class Enemy {
 
         if (this.orbitTimer <= 0) {
           this.bossPhase = BOSS_PHASE.CHASE;
-          this.bossChargeCooldown = this.bossChargeCooldownBase || BOSS.CHARGE_COOLDOWN;
+          // Randomize cooldown ±40% for unpredictable attack rhythm
+          const baseCd = this.bossChargeCooldownBase || BOSS.CHARGE_COOLDOWN;
+          this.bossChargeCooldown = baseCd * (0.6 + Math.random() * 0.8);
         }
         break;
       }
