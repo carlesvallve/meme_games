@@ -160,12 +160,12 @@ export const BOSS = {
   ESCORT_SPREAD: 80,     // px spread around boss spawn point
   // Boss behavior phases
   CHARGE_SPEED: 260 * PX,       // speed during charge
-  CHARGE_TELEGRAPH: 1200,       // ms telegraph before charge
+  CHARGE_TELEGRAPH: 900,        // ms telegraph before charge
   CHARGE_DURATION: 900,         // ms of actual charge
-  CHARGE_COOLDOWN: 5000,        // ms between charges
-  ORBIT_SPEED: 1.2,             // radians/sec during orbit phase
-  ORBIT_RADIUS: 180 * PX,       // orbit distance from player
-  ORBIT_DURATION: 4000,         // ms of orbiting
+  CHARGE_COOLDOWN: 3000,        // base ms between charges (randomized ±40%)
+  ORBIT_SPEED: 1.4,             // radians/sec during orbit phase
+  ORBIT_RADIUS: 160 * PX,       // orbit distance from player
+  ORBIT_DURATION: 2500,         // ms of orbiting
   RALLY_RANGE: 400 * PX,        // nearby slops get enraged within this range
   RALLY_SPEED_MULT: 1.15,       // speed multiplier for rallied slops (subtle boost)
   RALLY_TRACK_RANGE: 450 * PX,  // rallied slops track from further away
