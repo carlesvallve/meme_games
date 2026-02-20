@@ -1,5 +1,22 @@
 // Play.fun (OpenGameProtocol) integration
-// Wires game events to Play.fun points tracking
+// Wires game events to Play.fun points tracking.
+//
+// Points flow:
+//   SCORE_CHANGED -> sdk.addPoints(delta)  (cached locally, no modal)
+//   GAME_OVER     -> sdk.savePoints()      (persists to server, may show modal)
+//   beforeunload  -> sdk.savePoints()      (silent fallback)
+//
+// Keyboard focus workaround (watchFocus):
+//   The Play.fun SDK renders UI via iframes/overlays that steal keyboard focus
+//   from the Phaser canvas. When a modal closes, focus lands on document.body
+//   and Phaser stops receiving keyboard input. On the Play.fun dashboard this is
+//   handled by their iframe wrapper, but when the game runs standalone (its own
+//   page), we must recover focus ourselves.
+//
+//   Solution: listen for `focusout` on the canvas — when focus is "orphaned"
+//   (activeElement is body/documentElement), refocus the canvas and re-enable
+//   Phaser's keyboard plugin. Also refocus on `mouseenter` so hovering back
+//   over the game area restores input immediately.
 
 import { eventBus, Events } from './core/EventBus.js';
 
@@ -32,38 +49,28 @@ export async function initPlayFun() {
 // Re-focus game canvas and Phaser keyboard after Play.fun modals steal focus
 function watchFocus() {
   const canvas = document.querySelector('canvas');
+  if (!canvas) return;
+  canvas.setAttribute('tabindex', '0');
 
   const refocus = () => {
-    if (canvas) canvas.focus();
+    canvas.focus({ preventScroll: true });
     const game = window.__GAME__;
-    if (game) {
-      game.input.keyboard.enabled = true;
-      game.input.keyboard.resetKeys();
-    }
+    if (game?.input?.keyboard) game.input.keyboard.enabled = true;
   };
 
-  // Clicking anywhere on the page reclaims focus
-  document.addEventListener('click', refocus);
-  // Pointer down on canvas (catches touch too)
-  document.addEventListener('pointerdown', refocus);
-  // Mouse entering the game area reclaims focus (desktop)
-  if (canvas) canvas.addEventListener('mouseenter', refocus);
-  // Window regaining focus
-  window.addEventListener('focus', refocus);
-
-  // Detect orphaned focus (on body/html = nothing has focus)
-  // Poll briefly after DOM changes since SDK widget hides asynchronously
-  const observer = new MutationObserver(() => {
-    for (const delay of [50, 150, 300]) {
-      setTimeout(() => {
-        const active = document.activeElement;
-        if (!active || active === document.body || active === document.documentElement) {
-          refocus();
-        }
-      }, delay);
-    }
+  // When focus leaves canvas (SDK widget/iframe steals it), reclaim after a short delay
+  // The delay lets the SDK modal open; once it closes, focus returns here
+  canvas.addEventListener('focusout', () => {
+    setTimeout(() => {
+      const active = document.activeElement;
+      if (active === document.body || active === document.documentElement) {
+        refocus();
+      }
+    }, 200);
   });
-  observer.observe(document.body, { childList: true, subtree: true });
+
+  // Mouse entering game area reclaims focus (covers modal-close-then-hover)
+  canvas.addEventListener('mouseenter', refocus);
 }
 
 function wireEvents() {
