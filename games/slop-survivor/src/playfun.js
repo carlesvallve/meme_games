@@ -26,6 +26,44 @@ export async function initPlayFun() {
   console.log('[PlayFun] SDK initialized');
 
   wireEvents();
+  watchFocus();
+}
+
+// Re-focus game canvas and Phaser keyboard after Play.fun modals steal focus
+function watchFocus() {
+  const canvas = document.querySelector('canvas');
+
+  const refocus = () => {
+    if (canvas) canvas.focus();
+    const game = window.__GAME__;
+    if (game) {
+      game.input.keyboard.enabled = true;
+      game.input.keyboard.resetKeys();
+    }
+  };
+
+  // Clicking anywhere on the page reclaims focus
+  document.addEventListener('click', refocus);
+  // Pointer down on canvas (catches touch too)
+  document.addEventListener('pointerdown', refocus);
+  // Mouse entering the game area reclaims focus (desktop)
+  if (canvas) canvas.addEventListener('mouseenter', refocus);
+  // Window regaining focus
+  window.addEventListener('focus', refocus);
+
+  // Detect orphaned focus (on body/html = nothing has focus)
+  // Poll briefly after DOM changes since SDK widget hides asynchronously
+  const observer = new MutationObserver(() => {
+    for (const delay of [50, 150, 300]) {
+      setTimeout(() => {
+        const active = document.activeElement;
+        if (!active || active === document.body || active === document.documentElement) {
+          refocus();
+        }
+      }, delay);
+    }
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
 }
 
 function wireEvents() {
@@ -51,14 +89,7 @@ function wireEvents() {
     lastScore = 0;
   });
 
-  // Auto-save every 30 seconds
-  setInterval(() => {
-    if (sdk && initialized) {
-      sdk.savePoints();
-    }
-  }, 30000);
-
-  // Save on page unload
+  // Save on page unload (silent fallback)
   window.addEventListener('beforeunload', () => {
     if (sdk && initialized) {
       sdk.savePoints();
