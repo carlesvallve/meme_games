@@ -146,49 +146,96 @@ export function bossSpawnSfx() {
 }
 
 // Boss charge — aggressive swoosh with rising pitch
+// --- Boss charge engine (continuous roar during charge) ---
+let _bossChargeNoise = null;
+let _bossChargeGain = null;
+let _bossChargeOsc = null;
+let _bossChargeOscGain = null;
+let _bossChargeRunning = false;
+
+export function startBossCharge() {
+  if (gameState.isMuted || _bossChargeRunning) return;
+  const ctx = getCtx();
+  const now = ctx.currentTime;
+  _bossChargeRunning = true;
+
+  // Noise layer — aggressive rumble
+  const bufSize = ctx.sampleRate * 2;
+  const buf = ctx.createBuffer(1, bufSize, ctx.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < bufSize; i++) d[i] = Math.random() * 2 - 1;
+  _bossChargeNoise = ctx.createBufferSource();
+  _bossChargeNoise.buffer = buf;
+  _bossChargeNoise.loop = true;
+
+  const hpf = ctx.createBiquadFilter();
+  hpf.type = 'highpass';
+  hpf.frequency.setValueAtTime(150, now);
+
+  const lpf = ctx.createBiquadFilter();
+  lpf.type = 'lowpass';
+  lpf.frequency.setValueAtTime(1800, now);
+  lpf.Q.setValueAtTime(2, now);
+
+  _bossChargeGain = ctx.createGain();
+  _bossChargeGain.gain.setValueAtTime(0, now);
+  _bossChargeGain.gain.linearRampToValueAtTime(0.08, now + 0.15);
+
+  _bossChargeNoise.connect(hpf).connect(lpf).connect(_bossChargeGain).connect(ctx.destination);
+  _bossChargeNoise.start();
+
+  // Low rumble oscillator
+  _bossChargeOsc = ctx.createOscillator();
+  _bossChargeOsc.type = 'sawtooth';
+  _bossChargeOsc.frequency.setValueAtTime(55, now);
+
+  _bossChargeOscGain = ctx.createGain();
+  _bossChargeOscGain.gain.setValueAtTime(0, now);
+  _bossChargeOscGain.gain.linearRampToValueAtTime(0.055, now + 0.15);
+
+  _bossChargeOsc.connect(_bossChargeOscGain).connect(ctx.destination);
+  _bossChargeOsc.start();
+}
+
+export function stopBossCharge() {
+  if (!_bossChargeRunning) return;
+  _bossChargeRunning = false;
+  const ctx = getCtx();
+  const now = ctx.currentTime;
+
+  if (_bossChargeGain) _bossChargeGain.gain.setTargetAtTime(0, now, 0.1);
+  if (_bossChargeOscGain) _bossChargeOscGain.gain.setTargetAtTime(0, now, 0.1);
+  setTimeout(() => {
+    try { if (_bossChargeNoise) _bossChargeNoise.stop(); } catch (e) { /* */ }
+    try { if (_bossChargeOsc) _bossChargeOsc.stop(); } catch (e) { /* */ }
+    _bossChargeNoise = null;
+    _bossChargeGain = null;
+    _bossChargeOsc = null;
+    _bossChargeOscGain = null;
+  }, 300);
+}
+
+// One-shot swoosh (legacy, kept for initial charge impact)
 export function bossChargeSfx() {
   if (gameState.isMuted) return;
   const ctx = getCtx();
   const now = ctx.currentTime;
-
-  // Noise swoosh — bandpass sweep low→high
-  const buf = ctx.createBuffer(1, ctx.sampleRate * 0.5, ctx.sampleRate);
+  const buf = ctx.createBuffer(1, ctx.sampleRate * 0.3, ctx.sampleRate);
   const data = buf.getChannelData(0);
   for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
   const noise = ctx.createBufferSource();
   noise.buffer = buf;
-
   const bp = ctx.createBiquadFilter();
   bp.type = 'bandpass';
   bp.Q.setValueAtTime(3, now);
-  bp.frequency.setValueAtTime(200, now);
-  bp.frequency.exponentialRampToValueAtTime(2500, now + 0.25);
-  bp.frequency.exponentialRampToValueAtTime(800, now + 0.45);
-
+  bp.frequency.setValueAtTime(300, now);
+  bp.frequency.exponentialRampToValueAtTime(3000, now + 0.15);
   const ng = ctx.createGain();
-  ng.gain.setValueAtTime(0, now);
-  ng.gain.linearRampToValueAtTime(0.12, now + 0.05);
-  ng.gain.setValueAtTime(0.12, now + 0.15);
-  ng.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
-
+  ng.gain.setValueAtTime(0.15, now);
+  ng.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
   noise.connect(bp).connect(ng).connect(ctx.destination);
   noise.start(now);
-  noise.stop(now + 0.5);
-
-  // Low rumble undertone
-  const osc = ctx.createOscillator();
-  osc.type = 'sawtooth';
-  osc.frequency.setValueAtTime(60, now);
-  osc.frequency.linearRampToValueAtTime(90, now + 0.3);
-  const og = ctx.createGain();
-  og.gain.setValueAtTime(0.08, now);
-  og.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
-  const lp = ctx.createBiquadFilter();
-  lp.type = 'lowpass';
-  lp.frequency.setValueAtTime(200, now);
-  osc.connect(lp).connect(og).connect(ctx.destination);
-  osc.start(now);
-  osc.stop(now + 0.4);
+  noise.stop(now + 0.3);
 }
 
 // Boss killed — heavy satisfying explosion with victorious chime

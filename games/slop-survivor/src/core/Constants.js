@@ -160,8 +160,10 @@ export const BOSS = {
   ESCORT_SPREAD: 80,     // px spread around boss spawn point
   // Boss behavior phases
   CHARGE_SPEED: 260 * PX,       // speed during charge
-  CHARGE_TELEGRAPH: 900,        // ms telegraph before charge
-  CHARGE_DURATION: 900,         // ms of actual charge
+  CHARGE_TELEGRAPH: 900,        // ms building charge power
+  CHARGE_MIN_RANGE: 160 * PX,   // approach until within this range, then charge
+  CHARGE_APPROACH_SPEED: 1.8,   // speed multiplier during approach (relative to base speed)
+  CHARGE_OVERSHOOT: 80 * PX,    // keep charging this far past the target
   CHARGE_COOLDOWN: 3000,        // base ms between charges (randomized ±40%)
   ORBIT_SPEED: 1.4,             // radians/sec during orbit phase
   ORBIT_RADIUS: 160 * PX,       // orbit distance from player
@@ -208,12 +210,16 @@ export const DIFFICULTY = {
   BOSS_HEALTH_PER_SPAWN: 10,    // +10 HP per successive boss (20→30→40→50...)
   BOSS_SPEED_PER_SPAWN: 3 * PX, // +3 speed per successive boss (gentler ramp)
   BOSS_CHARGE_CD_REDUCTION: 200,  // charge cooldown decreases by 200ms per boss
-  BOSS_CHARGE_CD_MIN: 2500,       // minimum charge cooldown (more breathing room)
-  BOSS_CHARGE_DURATION_INCREASE: 200, // charge duration increases by 200ms per boss
-  BOSS_CHARGE_DURATION_MAX: 1800,     // cap on charge duration
+  BOSS_CHARGE_CD_MIN: 1500,       // minimum charge cooldown
   BOSS_CHARGE_SPEED_INCREASE: 30 * PX, // charge speed increases per boss
   BOSS_CHARGE_SPEED_MAX: 500 * PX,     // cap on charge speed
   BOSS_CHARGE_KNOCKBACK: 450 * PX,     // extra knockback when hit during boss charge
+  BOSS_ESCORT_INCREASE: 1,       // +1 escort per successive boss
+  BOSS_ESCORT_MAX: 10,           // cap on escorts
+  BOSS_APPROACH_SPEED_INCREASE: 0.15, // approach speed mult increases per boss
+  BOSS_APPROACH_SPEED_MAX: 3.0,  // cap on approach speed multiplier
+  BOSS_MIN_RANGE_REDUCTION: 10 * PX, // charge range gets tighter per boss
+  BOSS_MIN_RANGE_MIN: 80 * PX,  // minimum charge range
   BOSS_OVERLAP_START_MIN: 3,     // no multi-boss before this many minutes
   BOSS_OVERLAP_CHANCE_PER_MIN: 0.08,  // +8% chance per minute (after start) to allow multi-boss
   BOSS_OVERLAP_CHANCE_MAX: 0.6,       // cap at 60% chance
