@@ -26,6 +26,12 @@ initAudioBridge();
 
 const game = new Phaser.Game(GameConfig);
 
+// Remove loading spinner once Phaser renders first frame
+game.events.once('ready', () => {
+  const loader = document.getElementById('loader');
+  if (loader) loader.remove();
+});
+
 // Initialize Play.fun SDK (non-blocking — game works without it)
 initPlayFun().catch(err => console.warn('[PlayFun] init failed:', err));
 
