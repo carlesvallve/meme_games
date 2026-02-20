@@ -37,8 +37,9 @@ let _invaderSeedCounter = 0;
 // Boss AI phases
 const BOSS_PHASE = {
   CHASE: 'chase',        // standard pursuit
-  TELEGRAPH: 'telegraph', // winding up a charge (flashing, growing)
-  CHARGE: 'charge',       // fast dash toward player's last position
+  TELEGRAPH: 'telegraph', // building charge power (flashing, growing)
+  APPROACH: 'approach',   // fully charged, closing distance to min charge range
+  CHARGE: 'charge',       // bull-rush in locked direction through player
   ORBIT: 'orbit',         // circle-strafe around the player
 };
 
@@ -95,11 +96,12 @@ export class Enemy {
     if (isBoss) {
       this.bossPhase = BOSS_PHASE.CHASE;
       this.bossPhaseTimer = 0;
-      const chargeCd = scaledStats && scaledStats.chargeCooldown ? scaledStats.chargeCooldown : BOSS.CHARGE_COOLDOWN;
+      const chargeCd = scaledStats?.chargeCooldown || BOSS.CHARGE_COOLDOWN;
       this.bossChargeCooldown = chargeCd * 0.5;
       this.bossChargeCooldownBase = chargeCd;
-      this.bossChargeDuration = scaledStats && scaledStats.chargeDuration ? scaledStats.chargeDuration : BOSS.CHARGE_DURATION;
-      this.bossChargeSpeed = scaledStats && scaledStats.chargeSpeed ? scaledStats.chargeSpeed : BOSS.CHARGE_SPEED;
+      this.bossChargeSpeed = scaledStats?.chargeSpeed || BOSS.CHARGE_SPEED;
+      this.bossApproachSpeedMult = scaledStats?.approachSpeedMult || BOSS.CHARGE_APPROACH_SPEED || 1.8;
+      this.bossChargeMinRange = scaledStats?.chargeMinRange || BOSS.CHARGE_MIN_RANGE;
       this.isCharging = false; // true during CHARGE phase — for extra knockback
       this.chargeTargetX = 0;
       this.chargeTargetY = 0;
@@ -563,9 +565,14 @@ export class Enemy {
         break;
       }
 
+      // --- TELEGRAPH: build charge power (stationary, flashing, growing) ---
       case BOSS_PHASE.TELEGRAPH: {
         this.sprite.body.setVelocity(0, 0);
         this.bossPhaseTimer -= delta;
+
+        // Track player so aiming line updates in real-time
+        this.chargeTargetX = playerX;
+        this.chargeTargetY = playerY;
 
         const flashRate = Math.max(60, 200 - (BOSS.CHARGE_TELEGRAPH - this.bossPhaseTimer) * 0.15);
         if (Math.floor(this.scene.time.now / flashRate) % 2 === 0) {
@@ -579,43 +586,90 @@ export class Enemy {
         this._drawTelegraphRing(progress);
 
         if (this.bossPhaseTimer <= 0) {
-          this._startCharge(playerX, playerY);
+          // Fully charged — transition to approach
+          this.bossPhase = BOSS_PHASE.APPROACH;
+          this.sprite.setTint(0xff4444);
         }
         break;
       }
 
+      // --- APPROACH: fully charged, closing distance to min charge range ---
+      case BOSS_PHASE.APPROACH: {
+        const adx = playerX - this.sprite.x;
+        const ady = playerY - this.sprite.y;
+        const adist = Math.sqrt(adx * adx + ady * ady);
+        const minRange = this.bossChargeMinRange;
+
+        // Track player position in real-time so direction line follows them
+        this.chargeTargetX = playerX;
+        this.chargeTargetY = playerY;
+
+        // Maintain charged-up visuals (pulsing + telegraph ring with aiming line)
+        const pulse = 1 + Math.sin(this.scene.time.now * 0.012) * 0.08;
+        this.sprite.setScale(this.spriteScale * 1.3 * pulse);
+        this._drawTelegraphRing(1.0);
+
+        if (adist <= minRange) {
+          // In range — unleash the charge
+          this._startCharge(playerX, playerY);
+        } else {
+          // Move toward player at boosted speed
+          const approachSpeed = this.speed * this.bossApproachSpeedMult;
+          const vx = (adx / adist) * approachSpeed;
+          const vy = (ady / adist) * approachSpeed;
+          this._applyBossVelocity(vx, vy, 0.15);
+        }
+        break;
+      }
+
+      // --- CHARGE: bull-rush in locked direction through player ---
       case BOSS_PHASE.CHARGE: {
-        this.bossPhaseTimer -= delta;
-        const cdx = this.chargeTargetX - this.sprite.x;
-        const cdy = this.chargeTargetY - this.sprite.y;
-        const cdist = Math.sqrt(cdx * cdx + cdy * cdy);
+        // Check if boss has passed through the target (dot product flips sign)
+        const toTargetX = this.chargeTargetX - this.sprite.x;
+        const toTargetY = this.chargeTargetY - this.sprite.y;
+        const dot = toTargetX * this._chargeDirX + toTargetY * this._chargeDirY;
+        if (dot < 0) this._chargePastTarget = true;
 
-        if (cdist > 10 * PX && this.bossPhaseTimer > 0) {
+        // Stop after overshooting past the target by CHARGE_OVERSHOOT distance
+        const pastTargetDist = Math.sqrt(toTargetX * toTargetX + toTargetY * toTargetY);
+        const overshoot = BOSS.CHARGE_OVERSHOOT || 150 * PX;
+        const shouldStop = this._chargePastTarget && pastTargetDist > overshoot;
+
+        if (!shouldStop) {
           const spd = this.bossChargeSpeed || BOSS.CHARGE_SPEED;
-          const cvx = (cdx / cdist) * spd;
-          const cvy = (cdy / cdist) * spd;
-          this.sprite.body.setVelocity(cvx, cvy);
+          this.sprite.body.setVelocity(this._chargeDirX * spd, this._chargeDirY * spd);
 
-          // Charge trail particles
+          // Big charge trail particles — offset behind the boss
           this._chargeTrailTimer = (this._chargeTrailTimer || 0) + delta;
-          if (this._chargeTrailTimer >= 30) {
+          if (this._chargeTrailTimer >= 20) {
             this._chargeTrailTimer = 0;
-            const trailColors = [0xff4444, 0xff6622, 0xffaa00, 0xff2222];
-            const sx = this.sprite.x + (Math.random() - 0.5) * this.config.width * 0.6;
-            const sy = this.sprite.y + (Math.random() - 0.5) * this.config.height * 0.4;
-            const size = (3 + Math.random() * 4) * PX;
-            const color = Phaser.Utils.Array.GetRandom(trailColors);
-            const trail = this.scene.add.circle(sx, sy, size, color, 0.8).setDepth(5);
-            this.scene.tweens.add({
-              targets: trail,
-              alpha: 0,
-              scale: 0.1,
-              duration: 300 + Math.random() * 200,
-              ease: 'Quad.easeOut',
-              onComplete: () => trail.destroy(),
-            });
+            const trailColors = [0xff4444, 0xff6622, 0xffaa00, 0xff2222, 0xffcc00];
+            const w = this.config.width;
+            // Perpendicular to charge direction for spread
+            const perpX = -this._chargeDirY;
+            const perpY = this._chargeDirX;
+            // Spawn 2-3 particles behind the boss body
+            const count = 2 + Math.floor(Math.random() * 2);
+            for (let i = 0; i < count; i++) {
+              const behind = (0.4 + Math.random() * 0.6) * w; // offset behind
+              const spread = (Math.random() - 0.5) * w * 0.8; // lateral spread
+              const sx = this.sprite.x - this._chargeDirX * behind + perpX * spread;
+              const sy = this.sprite.y - this._chargeDirY * behind + perpY * spread;
+              const size = (5 + Math.random() * 8) * PX;
+              const color = Phaser.Utils.Array.GetRandom(trailColors);
+              const trail = this.scene.add.circle(sx, sy, size, color, 0.9).setDepth(5);
+              this.scene.tweens.add({
+                targets: trail,
+                alpha: 0,
+                scale: 0.05,
+                duration: 400 + Math.random() * 300,
+                ease: 'Quad.easeOut',
+                onComplete: () => trail.destroy(),
+              });
+            }
           }
         } else {
+          // Charge complete — slam stop
           this.sprite.body.setVelocity(0, 0);
           this.sprite.clearTint();
           this.sprite.setScale(this.spriteScale);
@@ -623,6 +677,7 @@ export class Enemy {
           this.isCharging = false;
 
           this.scene.cameras.main.shake(200, 0.01);
+          eventBus.emit(Events.BOSS_CHARGE_END);
 
           this.bossPhase = BOSS_PHASE.ORBIT;
           this.orbitAngle = Math.atan2(
@@ -681,13 +736,19 @@ export class Enemy {
 
   _startCharge(playerX, playerY) {
     this.bossPhase = BOSS_PHASE.CHARGE;
-    this.bossPhaseTimer = this.bossChargeDuration || BOSS.CHARGE_DURATION;
     this.chargeTargetX = playerX;
     this.chargeTargetY = playerY;
     this.isCharging = true;
     this._chargeTrailTimer = 0;
-    this.sprite.clearTint();
-    this.sprite.setScale(this.spriteScale * 1.1);
+    this._chargePastTarget = false;
+    // Lock charge direction at start (bull-rush: fixed direction, no homing)
+    const dx = playerX - this.sprite.x;
+    const dy = playerY - this.sprite.y;
+    const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+    this._chargeDirX = dx / dist;
+    this._chargeDirY = dy / dist;
+    this.sprite.setTint(0xff2222);
+    this.sprite.setScale(this.spriteScale * 1.15);
     this._clearTelegraph();
 
     eventBus.emit(Events.BOSS_CHARGE, { x: this.sprite.x, y: this.sprite.y });
@@ -824,6 +885,10 @@ export class Enemy {
     this.dead = true;
     this.sprite.body.setVelocity(0, 0);
     this._clearTelegraph();
+    if (this.isCharging) {
+      this.isCharging = false;
+      eventBus.emit(Events.BOSS_CHARGE_END);
+    }
     if (this.telegraphGfx) {
       this.telegraphGfx.destroy();
       this.telegraphGfx = null;

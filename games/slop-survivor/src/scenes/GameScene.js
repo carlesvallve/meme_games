@@ -1637,7 +1637,11 @@ export class GameScene extends Phaser.Scene {
       const dx = px - enemy.sprite.x;
       const dy = py - enemy.sprite.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
-      const hitDist = PLAYER.WIDTH * 0.4 + enemy.config.width * 0.4;
+      // Collision radius scales with visual size (elites 1.25x, bosses larger, charging even more)
+      let enemyRadius = enemy.config.width * 0.5;
+      if (enemy.isElite) enemyRadius *= 1.25;
+      if (enemy.isCharging) enemyRadius *= 1.1;
+      const hitDist = PLAYER.WIDTH * 0.4 + enemyRadius;
       if (dist < hitDist) {
         // Knockback: push player away from enemy (extra for charging boss)
         if (dist > 0) {
@@ -2333,17 +2337,33 @@ export class GameScene extends Phaser.Scene {
    * Boss killed: spawn health hearts scattered around the death location.
    */
   handleBossKilled({ x, y }) {
-    // One heart pickup
-    const angle = Math.random() * Math.PI * 2;
-    const dist = (20 + Math.random() * 30) * PX;
-    this.time.delayedCall(200, () => {
-      const hp = new HealthPickup(this, x + Math.cos(angle) * dist, y + Math.sin(angle) * dist);
-      this.healthPickups.push(hp);
-    });
+    // Random reward tier based on player health
+    const healthRatio = gameState.health / gameState.maxHealth;
+    const isLowHP = healthRatio < 0.5;
 
-    // Extra XP gems scattered around
-    for (let i = 0; i < 4; i++) {
-      const a = (Math.PI * 2 * i) / 4 + (Math.random() - 0.5) * 0.5;
+    // Reward roll: heart (only if low HP), power-up choice, or XP burst
+    const roll = Math.random();
+    if (isLowHP && roll < 0.4) {
+      // Heart pickup — only when player actually needs it
+      const angle = Math.random() * Math.PI * 2;
+      const dist = (20 + Math.random() * 30) * PX;
+      this.time.delayedCall(200, () => {
+        const hp = new HealthPickup(this, x + Math.cos(angle) * dist, y + Math.sin(angle) * dist);
+        this.healthPickups.push(hp);
+      });
+    } else if (roll < 0.55) {
+      // Power-up drop
+      this.time.delayedCall(200, () => {
+        const pu = new PowerUp(this, x, y);
+        this.powerUps.push(pu);
+      });
+    }
+    // else: XP burst only (always given below)
+
+    // XP gems scattered around (always)
+    const gemCount = 4 + Math.floor(Math.random() * 3); // 4-6 gems
+    for (let i = 0; i < gemCount; i++) {
+      const a = (Math.PI * 2 * i) / gemCount + (Math.random() - 0.5) * 0.5;
       const d = (25 + Math.random() * 45) * PX;
       this.time.delayedCall(100 + i * 80, () => {
         const gem = new XPGem(this, x + Math.cos(a) * d, y + Math.sin(a) * d, 'MEDIUM');

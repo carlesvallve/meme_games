@@ -17,6 +17,8 @@ import {
   playerHitSfx,
   bossSpawnSfx,
   bossChargeSfx,
+  startBossCharge,
+  stopBossCharge,
   levelUpSfx,
   clickSfx,
   explosionSfx,
@@ -83,6 +85,7 @@ export function initAudioBridge() {
 
   // Player died — explosion boom, then ominous descending tones
   eventBus.on(Events.PLAYER_DIED, () => {
+    stopBossCharge();
     explosionSfx();
     // Delay the ominous notes to play after the explosion
     setTimeout(() => deathSfx(), 500);
@@ -93,13 +96,20 @@ export function initAudioBridge() {
     bossSpawnSfx();
   });
 
-  // Boss charge — aggressive swoosh
+  // Boss charge — initial swoosh + continuous engine roar
   eventBus.on(Events.BOSS_CHARGE, () => {
     bossChargeSfx();
+    startBossCharge();
   });
 
-  // Boss killed — big boom + victory chime
+  // Boss charge ends — stop roar
+  eventBus.on(Events.BOSS_CHARGE_END, () => {
+    stopBossCharge();
+  });
+
+  // Boss killed — stop charge roar + big boom + victory chime
   eventBus.on(Events.BOSS_KILLED, () => {
+    stopBossCharge();
     bossKillSfx();
   });
 

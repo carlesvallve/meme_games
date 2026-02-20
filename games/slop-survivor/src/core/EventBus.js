@@ -33,6 +33,7 @@ export const Events = {
   BOSS_SPAWN: 'boss:spawn',
   BOSS_KILLED: 'boss:killed',
   BOSS_CHARGE: 'boss:charge',
+  BOSS_CHARGE_END: 'boss:charge_end',
 
   // Enemy behaviors
   ENEMY_SPLIT: 'enemy:split',

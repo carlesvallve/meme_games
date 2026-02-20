@@ -122,7 +122,14 @@ export class WaveSystem {
    */
   tickCatchup(delta) {
     const maxEnemies = this.getMaxEnemies();
-    const minEnemies = this.getMinEnemies();
+    let minEnemies = this.getMinEnemies();
+
+    // While a boss is alive, ensure the screen stays populated
+    const hasBoss = this.enemies.some(e => !e.dead && e.isBoss && e.sprite.active);
+    if (hasBoss) {
+      minEnemies = Math.max(minEnemies, BOSS.ESCORT_COUNT + 4);
+    }
+
     const activeCount = this.enemies.filter(e => !e.dead).length;
 
     if (activeCount >= minEnemies || activeCount >= maxEnemies) {
@@ -130,8 +137,10 @@ export class WaveSystem {
       return;
     }
 
+    // Faster catch-up during boss fights (200ms vs 300ms)
+    const catchupInterval = hasBoss ? 200 : 300;
     this._catchupAccumulator += delta;
-    if (this._catchupAccumulator >= 300) {
+    if (this._catchupAccumulator >= catchupInterval) {
       this._catchupAccumulator = 0;
       this.spawnEnemy();
     }
@@ -208,25 +217,31 @@ export class WaveSystem {
     }
 
     this.bossesSpawned++;
-    const pos = this.getSpawnPosition();
+    // Spawn boss just barely off-screen so it appears almost immediately
+    const pos = this.getSpawnPosition(20 * PX);
 
-    // Boss escalation: each successive boss is harder
+    // Boss escalation: each successive boss is harder across all dimensions
     const bossNum = this.bossesSpawned;
+    const n = bossNum - 1; // 0-indexed for scaling
     const scaledBossStats = {
-      health: BOSS.health + DIFFICULTY.BOSS_HEALTH_PER_SPAWN * (bossNum - 1),
-      speed: BOSS.speed + DIFFICULTY.BOSS_SPEED_PER_SPAWN * (bossNum - 1),
+      health: BOSS.health + DIFFICULTY.BOSS_HEALTH_PER_SPAWN * n,
+      speed: BOSS.speed + DIFFICULTY.BOSS_SPEED_PER_SPAWN * n,
       damage: Math.max(BOSS.damage, Math.floor(BOSS.damage * this.getStatScale(DIFFICULTY.DAMAGE_SCALE_RATE, DIFFICULTY.DAMAGE_SCALE_MAX))),
       chargeCooldown: Math.max(
         DIFFICULTY.BOSS_CHARGE_CD_MIN,
-        BOSS.CHARGE_COOLDOWN - DIFFICULTY.BOSS_CHARGE_CD_REDUCTION * (bossNum - 1)
-      ),
-      chargeDuration: Math.min(
-        DIFFICULTY.BOSS_CHARGE_DURATION_MAX,
-        BOSS.CHARGE_DURATION + DIFFICULTY.BOSS_CHARGE_DURATION_INCREASE * (bossNum - 1)
+        BOSS.CHARGE_COOLDOWN - DIFFICULTY.BOSS_CHARGE_CD_REDUCTION * n
       ),
       chargeSpeed: Math.min(
         DIFFICULTY.BOSS_CHARGE_SPEED_MAX,
-        BOSS.CHARGE_SPEED + DIFFICULTY.BOSS_CHARGE_SPEED_INCREASE * (bossNum - 1)
+        BOSS.CHARGE_SPEED + DIFFICULTY.BOSS_CHARGE_SPEED_INCREASE * n
+      ),
+      approachSpeedMult: Math.min(
+        DIFFICULTY.BOSS_APPROACH_SPEED_MAX,
+        (BOSS.CHARGE_APPROACH_SPEED || 1.8) + DIFFICULTY.BOSS_APPROACH_SPEED_INCREASE * n
+      ),
+      chargeMinRange: Math.max(
+        DIFFICULTY.BOSS_MIN_RANGE_MIN,
+        BOSS.CHARGE_MIN_RANGE - DIFFICULTY.BOSS_MIN_RANGE_REDUCTION * n
       ),
     };
 
@@ -234,8 +249,11 @@ export class WaveSystem {
     this.enemies.push(enemy);
     eventBus.emit(Events.BOSS_SPAWN, { x: pos.x, y: pos.y });
 
-    // Spawn escort enemies (random types) around the boss
-    const escortCount = BOSS.ESCORT_COUNT || 4;
+    // Spawn escort enemies — count scales with boss number
+    const escortCount = Math.min(
+      DIFFICULTY.BOSS_ESCORT_MAX,
+      (BOSS.ESCORT_COUNT || 4) + DIFFICULTY.BOSS_ESCORT_INCREASE * n
+    );
     const spread = BOSS.ESCORT_SPREAD || 80;
     for (let i = 0; i < escortCount; i++) {
       const angle = (Math.PI * 2 * i) / escortCount + (Math.random() - 0.5) * 0.5;
@@ -292,12 +310,12 @@ export class WaveSystem {
     return 'SUGGESTION';
   }
 
-  getSpawnPosition() {
+  getSpawnPosition(marginOverride) {
     // Spawn just outside the visible camera rect
     const cam = this.scene.cameras.main;
     const camX = cam.scrollX;
     const camY = cam.scrollY;
-    const margin = ARENA.SPAWN_MARGIN;
+    const margin = marginOverride !== undefined ? marginOverride : ARENA.SPAWN_MARGIN;
 
     const side = Math.floor(Math.random() * 4);
     let x, y;
