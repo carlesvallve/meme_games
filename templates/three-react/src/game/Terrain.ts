@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { Entity, Layer } from './Entity';
+import { NavGrid } from './NavGrid';
 
 const CELL = 1;
 const HALF = 0.5;
@@ -169,6 +170,13 @@ export class Terrain {
     }
   }
 
+  /** Build a NavGrid from current debris for A* pathfinding */
+  buildNavGrid(stepHeight: number, capsuleRadius: number, cellSize = 0.5): NavGrid {
+    const grid = new NavGrid(this.groundSize, this.groundSize, cellSize);
+    grid.build(this.debris, stepHeight, capsuleRadius);
+    return grid;
+  }
+
   /** Expose debris AABBs for camera collision */
   getDebris(): ReadonlyArray<Readonly<DebrisBox>> {
     return this.debris;
@@ -297,14 +305,28 @@ export class Terrain {
     this.debrisEntities.length = 0;
   }
 
-  getRandomPosition(margin = 3): THREE.Vector3 {
+  /** Check if any taller debris box overlaps within `clearance` of (x, z) at surfaceY */
+  private hasClearance(x: number, z: number, surfaceY: number, clearance: number): boolean {
+    for (const box of this.debris) {
+      if (box.height <= surfaceY + 0.01) continue; // same height or shorter — no obstruction
+      if (
+        Math.abs(x - box.x) < box.halfW + clearance &&
+        Math.abs(z - box.z) < box.halfD + clearance
+      ) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  getRandomPosition(margin = 3, clearance = 0.6): THREE.Vector3 {
     const half = this.groundSize / 2 - margin;
     for (let attempt = 0; attempt < 50; attempt++) {
       const x = snapPos((Math.random() - 0.5) * half * 2, 0);
       const z = snapPos((Math.random() - 0.5) * half * 2, 0);
       const y = this.getTerrainY(x, z);
-      // Accept ground level, or fully on top of a box (not on an edge)
-      if (y === 0 || this.isOnBoxSurface(x, z)) {
+      // Accept ground level, or fully on top of a box (not on an edge), with clearance from taller walls
+      if ((y === 0 || this.isOnBoxSurface(x, z)) && this.hasClearance(x, z, y, clearance)) {
         return new THREE.Vector3(x, y, z);
       }
     }

@@ -44,7 +44,7 @@ export class Camera {
   private lastTwoFingerY: number | null = null;
 
   // Collision
-  collisionLayers = Layer.Architecture;
+  collisionLayers: number = Layer.None;
   private raycaster = new THREE.Raycaster();
   private _dir = new THREE.Vector3();
   private _hitPos = new THREE.Vector3();

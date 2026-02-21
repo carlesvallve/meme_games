@@ -1,8 +1,8 @@
 import { useState, useRef, useEffect } from 'react';
-import { useGameStore, type PlayerParams, type CameraParams } from '../store';
+import { useGameStore, type PlayerParams, type CameraParams, type TorchParams, type LightPreset } from '../store';
 import { Layer } from '../game/Entity';
 
-type ActivePanel = 'player' | 'camera' | null;
+type ActivePanel = 'player' | 'camera' | 'light' | null;
 
 interface SliderDef<K> {
   key: K;
@@ -20,6 +20,17 @@ const PLAYER_PARAMS: SliderDef<keyof PlayerParams>[] = [
   { key: 'magnetRadius', label: 'Magnet Radius', min: 0, max: 10, step: 0.5 },
   { key: 'magnetSpeed', label: 'Magnet Speed', min: 1, max: 32, step: 1 },
 ];
+
+const TORCH_PARAMS: SliderDef<keyof TorchParams>[] = [
+  { key: 'intensity', label: 'Intensity', min: 0, max: 8, step: 0.1 },
+  { key: 'distance', label: 'Distance', min: 1, max: 20, step: 0.5 },
+  { key: 'offsetForward', label: 'Fwd Offset', min: -1, max: 2, step: 0.05 },
+  { key: 'offsetRight', label: 'Right Offset', min: -1, max: 1, step: 0.05 },
+  { key: 'offsetUp', label: 'Up Offset', min: 0.1, max: 5, step: 0.1 },
+  { key: 'flicker', label: 'Flicker', min: 0, max: 1, step: 0.05 },
+];
+
+const LIGHT_PRESETS: LightPreset[] = ['default', 'bright', 'dark', 'none'];
 
 const CAMERA_PARAMS: SliderDef<keyof CameraParams>[] = [
   { key: 'minDistance', label: 'Zoom Min', min: 2, max: 15, step: 0.5 },
@@ -155,10 +166,16 @@ export function SettingsPanel() {
   const [active, setActive] = useState<ActivePanel>(null);
   const playerParams = useGameStore((s) => s.playerParams);
   const cameraParams = useGameStore((s) => s.cameraParams);
+  const torchParams = useGameStore((s) => s.torchParams);
+  const torchEnabled = useGameStore((s) => s.torchEnabled);
+  const lightPreset = useGameStore((s) => s.lightPreset);
   const setPlayerParam = useGameStore((s) => s.setPlayerParam);
   const setCameraParam = useGameStore((s) => s.setCameraParam);
+  const setTorchParam = useGameStore((s) => s.setTorchParam);
+  const toggleTorch = useGameStore((s) => s.toggleTorch);
+  const setLightPreset = useGameStore((s) => s.setLightPreset);
 
-  const toggle = (panel: 'player' | 'camera') =>
+  const toggle = (panel: ActivePanel) =>
     setActive((cur) => (cur === panel ? null : panel));
 
   const decimals = (step: number) => (step < 0.01 ? 3 : step < 0.1 ? 2 : 1);
@@ -221,6 +238,78 @@ export function SettingsPanel() {
         </div>
       )}
 
+      {active === 'light' && (
+        <div style={{ ...panelStyle, marginBottom: 4 }}>
+          {/* ── Scene ── */}
+          <div style={{ color: '#6af', fontSize: 10, fontWeight: 700, letterSpacing: 1.5, marginBottom: 2 }}>SCENE</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+            <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Preset</span>
+            <div style={{ display: 'flex', gap: 3, flex: 1 }}>
+              {LIGHT_PRESETS.map((p) => (
+                <button
+                  key={p}
+                  onClick={() => setLightPreset(p)}
+                  style={{
+                    ...btnStyle(lightPreset === p),
+                    flex: 1,
+                    textTransform: 'capitalize',
+                  }}
+                >
+                  {p}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* ── Torch ── */}
+          <div style={{ borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: 6, marginTop: 2 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+              <span style={{ color: '#fa4', fontSize: 10, fontWeight: 700, letterSpacing: 1.5 }}>TORCH</span>
+              <button
+                onClick={toggleTorch}
+                style={{
+                  ...btnStyle(torchEnabled),
+                  fontSize: 10,
+                  padding: '2px 8px',
+                  background: torchEnabled ? 'rgba(255,170,68,0.25)' : 'rgba(0,0,0,0.4)',
+                  borderColor: torchEnabled ? 'rgba(255,170,68,0.5)' : 'rgba(255,255,255,0.15)',
+                  color: torchEnabled ? '#fa4' : '#666',
+                }}
+              >
+                {torchEnabled ? 'ON' : 'OFF'}
+              </button>
+            </div>
+            {torchEnabled && (<>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Color</span>
+                <input
+                  type="color"
+                  value={torchParams.color}
+                  onChange={(e) => setTorchParam('color', e.target.value)}
+                  style={{ width: 32, height: 20, border: 'none', background: 'none', cursor: 'pointer' }}
+                />
+                <span style={{ color: '#fff', fontSize: 11 }}>{torchParams.color}</span>
+              </div>
+              {TORCH_PARAMS.map(({ key, label, min, max, step }) => (
+                <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>{label}</span>
+                  <input
+                    type="range"
+                    min={min} max={max} step={step}
+                    value={torchParams[key] as number}
+                    onChange={(e) => setTorchParam(key, parseFloat(e.target.value))}
+                    style={{ flex: 1, height: 14, accentColor: '#fa4' }}
+                  />
+                  <span style={{ color: '#fff', width: 36, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                    {(torchParams[key] as number).toFixed(step < 0.1 ? 2 : 1)}
+                  </span>
+                </div>
+              ))}
+            </>)}
+          </div>
+        </div>
+      )}
+
       {/* Buttons */}
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 4 }}>
         <button onClick={() => toggle('player')} style={btnStyle(active === 'player')}>
@@ -228,6 +317,9 @@ export function SettingsPanel() {
         </button>
         <button onClick={() => toggle('camera')} style={btnStyle(active === 'camera')}>
           Camera
+        </button>
+        <button onClick={() => toggle('light')} style={btnStyle(active === 'light')}>
+          Light
         </button>
       </div>
     </div>

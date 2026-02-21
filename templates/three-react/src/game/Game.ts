@@ -2,25 +2,21 @@ import * as THREE from 'three';
 import { useGameStore } from '../store';
 import { Input } from './Input';
 import { Camera } from './Camera';
-import { createScene } from './Scene';
+import { createScene, applyLightPreset } from './Scene';
+import type { LightPreset } from '../store';
 import { Terrain } from './Terrain';
 import { CollectibleSystem } from './Collectible';
+import { ChestSystem } from './Chest';
+import { LootSystem } from './Loot';
 import { SpeechBubbleSystem } from './SpeechBubble';
-import { createCharacterMesh } from './characters';
-import { Entity, Layer } from './Entity';
+import { Player } from './Player';
+import { NPC } from './NPC';
 import { createDustMotes, createRainEffect, createDebrisEffect } from '../utils/particles';
 import type { ParticleToggles } from '../store';
 import type { ParticleSystem } from '../types';
 import { audioSystem } from '../utils/AudioSystem';
 import type { GameInstance } from '../types';
 import type { CharacterType } from './characters';
-
-function lerpAngle(current: number, target: number, t: number): number {
-  let diff = target - current;
-  while (diff > Math.PI) diff -= Math.PI * 2;
-  while (diff < -Math.PI) diff += Math.PI * 2;
-  return current + diff * t;
-}
 
 export function createGame(canvas: HTMLCanvasElement): GameInstance {
   // Renderer
@@ -31,7 +27,9 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
   // Scene
-  const scene = createScene();
+  const { scene, lights: sceneLights } = createScene();
+  let currentLightPreset: LightPreset = useGameStore.getState().lightPreset;
+  applyLightPreset(sceneLights, currentLightPreset);
 
   // Camera
   const cam = new Camera(window.innerWidth / window.innerHeight, canvas, {
@@ -46,8 +44,15 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   // Terrain
   const terrain = new Terrain(scene);
 
+  // Navigation grid for NPC pathfinding
+  const navGrid = terrain.buildNavGrid(0.5, 0.25);
+
   // Collectibles
   const collectibles = new CollectibleSystem(scene, terrain);
+
+  // Loot + Chests
+  const lootSystem = new LootSystem(scene, terrain);
+  const chestSystem = new ChestSystem(scene, terrain, lootSystem);
 
   // Speech bubbles
   const speechSystem = new SpeechBubbleSystem();
@@ -103,52 +108,30 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   // Initialize with default toggles
   syncParticles(useGameStore.getState().particleToggles);
 
-  // Player state
-  let playerMesh: THREE.Mesh | null = null;
-  let playerEntity: Entity | null = null;
-  let playerLight: THREE.PointLight | null = null;
-  let playerLightEntity: Entity | null = null;
-  let playerY = 0;
-  let playerFacing = 0;
-  let moveTime = 0;
-  let lastHopHalf = 0; // track which half of the sin cycle we're in for step sfx
-  const hopFrequency = 4; // hop cycles per second (spaced out steps)
-
-  // Character selection listener
+  // Player
+  let player: Player | null = null;
   let lastSelectedCharacter: CharacterType | null = null;
 
+  // NPCs
+  const allCharacterTypes: CharacterType[] = ['boy', 'girl', 'robot', 'dog'];
+  let npcs: NPC[] = [];
+
+  function spawnNPCs(excludeType: CharacterType): void {
+    for (const npc of npcs) npc.dispose();
+    const npcTypes = allCharacterTypes.filter((t) => t !== excludeType);
+    npcs = npcTypes.map((type) => {
+      const pos = terrain.getRandomPosition();
+      return new NPC(scene, terrain, navGrid, type, pos);
+    });
+  }
+
   function spawnPlayer(type: CharacterType): void {
-    // Remove existing
-    if (playerEntity) { playerEntity.destroy(); playerEntity = null; }
-    if (playerMesh) {
-      scene.remove(playerMesh);
-      (playerMesh.material as THREE.Material).dispose();
-    }
-    if (playerLightEntity) { playerLightEntity.destroy(); playerLightEntity = null; }
-    if (playerLight) {
-      scene.remove(playerLight);
-    }
-
-    playerMesh = createCharacterMesh(type);
-    playerMesh.position.set(0, 0, 0);
-    scene.add(playerMesh);
-    playerEntity = new Entity(playerMesh, { layer: Layer.Character, radius: 0.25 });
-
-    // Point light above player
-    playerLight = new THREE.PointLight(0xffcc88, 1.5, 10);
-    playerLight.position.set(0, 3, 0);
-    playerLight.castShadow = false;
-    scene.add(playerLight);
-    playerLightEntity = new Entity(playerLight, { layer: Layer.Light, radius: 5 });
-
+    player?.dispose();
+    player = new Player(scene, terrain, type, new THREE.Vector3(0, 0, 0));
     speechSystem.setCharacter(type);
-    speechSystem.setPlayerMesh(playerMesh);
-
-    playerY = 0;
-    playerFacing = 0;
-    moveTime = 0;
-
+    speechSystem.setPlayerMesh(player.mesh);
     useGameStore.getState().setCollectibles(0);
+    spawnNPCs(type);
   }
 
   // Store callbacks
@@ -193,86 +176,53 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       spawnPlayer(selected);
     }
 
-    if (phase === 'playing' && playerMesh) {
-      // Camera-relative movement
-      const cameraAngleY = cam.getAngleY();
-      let mx = 0;
-      let mz = 0;
+    if (phase === 'playing' && player) {
+      // Player movement, hop, torch
+      player.update(dt, state, cam.getAngleY(), params);
 
-      if (state.forward) { mx -= Math.sin(cameraAngleY); mz -= Math.cos(cameraAngleY); }
-      if (state.backward) { mx += Math.sin(cameraAngleY); mz += Math.cos(cameraAngleY); }
-      if (state.left) { mx -= Math.cos(cameraAngleY); mz += Math.sin(cameraAngleY); }
-      if (state.right) { mx += Math.cos(cameraAngleY); mz -= Math.sin(cameraAngleY); }
+      // Update audio listener position for spatial SFX
+      const pp = player.getPosition();
+      audioSystem.setPlayerPosition(pp.x, pp.z);
 
-      const moveLen = Math.sqrt(mx * mx + mz * mz);
-      if (moveLen > 0.001) {
-        mx /= moveLen;
-        mz /= moveLen;
-
-        const newX = playerMesh.position.x + mx * params.speed * dt;
-        const newZ = playerMesh.position.z + mz * params.speed * dt;
-
-        // Capsule collider: move then resolve penetration
-        const resolved = terrain.resolveMovement(newX, newZ, playerY, params.stepHeight, params.capsuleRadius);
-        playerMesh.position.x = resolved.x;
-        playerMesh.position.z = resolved.z;
-        playerY = resolved.y;
-
-        // Face movement direction (add PI because voxel model front is -Z)
-        const targetAngle = Math.atan2(mx, mz) + Math.PI;
-        playerFacing = lerpAngle(playerFacing, targetAngle, 1 - Math.exp(-12 * dt));
-        playerMesh.rotation.y = playerFacing;
-
-        // Hop animation — sinusoidal arc like Ziggurat
-        moveTime += dt * hopFrequency;
-        const hopSin = Math.sin(moveTime * Math.PI);
-        const hop = Math.abs(hopSin) * params.hopHeight;
-
-        // Step SFX on each half-cycle (foot lands)
-        const currentHopHalf = Math.floor(moveTime) % 2;
-        if (currentHopHalf !== lastHopHalf) {
-          lastHopHalf = currentHopHalf;
-          audioSystem.sfx('step');
-        }
-
-        playerMesh.position.y = playerY + hop;
-      } else {
-        if (moveTime > 0) {
-          // Was moving, now stopped — snap to ground
-          moveTime = 0;
-          lastHopHalf = 0;
-        }
-        playerMesh.position.y = THREE.MathUtils.lerp(
-          playerMesh.position.y,
-          playerY,
-          1 - Math.exp(-15 * dt),
-        );
+      // Sync light preset
+      const preset = useGameStore.getState().lightPreset;
+      if (preset !== currentLightPreset) {
+        currentLightPreset = preset;
+        applyLightPreset(sceneLights, preset);
       }
 
-      // Update player light position
-      if (playerLight) {
-        playerLight.position.set(
-          playerMesh.position.x,
-          playerMesh.position.y + 3,
-          playerMesh.position.z,
-        );
-      }
-
-      // Camera follows player — use terrain Y, not mesh Y (ignores hop)
-      cam.setTarget(
-        playerMesh.position.x,
-        playerY + 0.5,
-        playerMesh.position.z,
-      );
+      // Camera follows player
+      const target = player.getCameraTarget();
+      cam.setTarget(target.x, target.y, target.z);
 
       // Collectibles
-      const pickedUp = collectibles.update(dt, playerMesh.position);
+      const playerPos = player.getPosition();
+      const pickedUp = collectibles.update(dt, playerPos);
       if (pickedUp > 0) {
         const total = collectibles.getTotalCollected();
         useGameStore.getState().setCollectibles(total);
         useGameStore.getState().setScore(total);
         audioSystem.sfx('pickup');
       }
+
+      // Chests
+      const chestsOpened = chestSystem.update(dt, playerPos, params.stepHeight);
+      if (chestsOpened > 0) audioSystem.sfx('chest');
+
+      // Loot
+      const loot = lootSystem.update(dt, playerPos);
+      if (loot.coins > 0) {
+        useGameStore.getState().addCoins(loot.coins);
+        useGameStore.getState().setScore(useGameStore.getState().score + loot.coins);
+        audioSystem.sfx('coin');
+      }
+      if (loot.potions > 0) {
+        useGameStore.getState().addPotions(loot.potions);
+        audioSystem.sfx('potion');
+      }
+
+      // NPCs
+      for (const npc of npcs) npc.update(dt);
 
       // Speech bubbles
       speechSystem.update(dt);
@@ -317,10 +267,12 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       for (const sys of Object.values(particleSystems)) {
         if (sys) sys.dispose();
       }
-      if (playerEntity) playerEntity.destroy();
-      if (playerLightEntity) playerLightEntity.destroy();
+      player?.dispose();
+      for (const npc of npcs) npc.dispose();
       terrain.dispose();
       collectibles.dispose();
+      chestSystem.dispose();
+      lootSystem.dispose();
       speechSystem.dispose();
       renderer.dispose();
     },
