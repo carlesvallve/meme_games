@@ -9,8 +9,7 @@ import { CollectibleSystem } from './Collectible';
 import { ChestSystem } from './Chest';
 import { LootSystem } from './Loot';
 import { SpeechBubbleSystem } from './SpeechBubble';
-import { Player } from './Player';
-import { NPC } from './NPC';
+import { Character } from './Character';
 import { createDustMotes, createRainEffect, createDebrisEffect } from '../utils/particles';
 import type { ParticleToggles } from '../store';
 import type { ParticleSystem } from '../types';
@@ -67,14 +66,11 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
 
   /** Wipe terrain + all dependent systems and rebuild from current store settings */
   function regenerateScene(): void {
-    // Clear NPC selection
-    selectedNPC = null;
+    activeCharacter = null;
 
     // Dispose old systems
-    for (const npc of npcs) npc.dispose();
-    npcs = [];
-    player?.dispose();
-    player = null;
+    for (const char of characters) char.dispose();
+    characters = [];
     chestSystem.dispose();
     lootSystem.dispose();
     collectibles.dispose();
@@ -91,9 +87,9 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     lootSystem = new LootSystem(scene, terrain);
     chestSystem = new ChestSystem(scene, terrain, lootSystem);
 
-    // Re-spawn player + NPCs if a character was selected
+    // Re-spawn characters if a character was selected
     if (lastSelectedCharacter) {
-      spawnPlayer(lastSelectedCharacter);
+      spawnCharacters(lastSelectedCharacter);
     }
   }
 
@@ -136,22 +132,21 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   // Initialize with default toggles
   syncParticles(useGameStore.getState().particleToggles);
 
-  // Player
-  let player: Player | null = null;
+  // ── Unified character system ──────────────────────────────────────
+  const allCharacterTypes: CharacterType[] = ['boy', 'girl', 'robot', 'dog'];
+  let characters: Character[] = [];
+  let activeCharacter: Character | null = null;
   let lastSelectedCharacter: CharacterType | null = null;
 
-  // NPCs
-  const allCharacterTypes: CharacterType[] = ['boy', 'girl', 'robot', 'dog'];
-  let npcs: NPC[] = [];
-  let selectedNPC: NPC | null = null;
+  // Cached input state for PlayerControl deps
+  let cachedInputState = input.update();
 
-  // Per-character inventory: key is CharacterType name, stores collectibles/coins/potions
+  // Per-character inventory
   interface CharInventory { collectibles: number; coins: number; potions: number; }
   const inventories = new Map<string, CharInventory>();
 
   function getInventoryKey(): string {
-    if (selectedNPC) return `npc:${selectedNPC.characterType}`;
-    return `player:${lastSelectedCharacter ?? 'unknown'}`;
+    return activeCharacter ? `char:${activeCharacter.characterType}` : 'unknown';
   }
 
   function getInventory(): CharInventory {
@@ -160,7 +155,6 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     return inventories.get(key)!;
   }
 
-  /** Save current store stats into the active character's inventory */
   function saveActiveInventory(): void {
     const inv = getInventory();
     const s = useGameStore.getState();
@@ -169,27 +163,25 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     inv.potions = s.potions;
   }
 
-  /** Load a character's inventory into the store */
   function loadActiveInventory(): void {
     const inv = getInventory();
     useGameStore.getState().setCollectibles(inv.collectibles);
     useGameStore.setState({ coins: inv.coins, potions: inv.potions });
   }
 
-  function updateActiveCharacter(): void {
-    const type = selectedNPC ? selectedNPC.characterType : lastSelectedCharacter;
-    if (type) {
-      useGameStore.getState().setActiveCharacter(type, CHARACTER_TEAM_COLORS[type]);
+  function updateActiveCharacterUI(): void {
+    if (activeCharacter) {
+      useGameStore.getState().setActiveCharacter(activeCharacter.characterType, CHARACTER_TEAM_COLORS[activeCharacter.characterType]);
     }
   }
 
-  // Raycasting for NPC selection & terrain clicks
+  // Raycasting for character selection & terrain clicks
   const raycaster = new THREE.Raycaster();
   const pointerNDC = new THREE.Vector2();
   const _planeHit = new THREE.Vector3();
 
   // Click marker (visual feedback on terrain click)
-  const markerGeo = new THREE.RingGeometry(0.15, 0.3, 16);
+  const markerGeo = new THREE.RingGeometry(0.08, 0.2, 16);
   markerGeo.rotateX(-Math.PI / 2);
   const markerMat = new THREE.MeshBasicMaterial({ color: 0x00ffaa, transparent: true, opacity: 0.8, side: THREE.DoubleSide });
   const clickMarker = new THREE.Mesh(markerGeo, markerMat);
@@ -197,18 +189,75 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   scene.add(clickMarker);
   let markerLife = 0;
 
-  function selectNPC(npc: NPC | null): void {
-    // Save current character's inventory before switching
-    saveActiveInventory();
-    if (selectedNPC) selectedNPC.deselect();
-    selectedNPC = npc;
-    if (npc) npc.select();
-    // Load new character's inventory
-    loadActiveInventory();
-    updateActiveCharacter();
+  /** PlayerControl dependency injection — reads from cached per-frame state */
+  function makePlayerControlDeps() {
+    return {
+      getInput: () => cachedInputState,
+      getCameraAngleY: () => cam.getAngleY(),
+      getParams: () => useGameStore.getState().playerParams,
+    };
   }
 
-  /** Handle a click (non-drag) at screen coordinates */
+  function selectCharacter(char: Character | null): void {
+    if (char === activeCharacter) return;
+
+    // Save current character's inventory before switching
+    saveActiveInventory();
+
+    // Revert old active to AI
+    if (activeCharacter) {
+      activeCharacter.setAIControlled();
+    }
+
+    activeCharacter = char;
+
+    // Set new one to player-controlled
+    if (char) {
+      char.setPlayerControlled(makePlayerControlDeps());
+      speechSystem.setCharacter(char.characterType);
+      speechSystem.setPlayerMesh(char.mesh);
+    }
+
+    // Load new character's inventory
+    loadActiveInventory();
+    updateActiveCharacterUI();
+  }
+
+  /** Raycast terrain at screen coords, return snapped world position or null */
+  function raycastTerrain(clientX: number, clientY: number): { x: number; z: number; y: number } | null {
+    pointerNDC.x = (clientX / window.innerWidth) * 2 - 1;
+    pointerNDC.y = -(clientY / window.innerHeight) * 2 + 1;
+    raycaster.setFromCamera(pointerNDC, cam.camera);
+
+    const terrainMesh = terrain.getTerrainMesh();
+    let hitPoint: THREE.Vector3 | null = null;
+
+    if (terrainMesh) {
+      const hits = raycaster.intersectObject(terrainMesh, false);
+      if (hits.length > 0) hitPoint = hits[0].point;
+    }
+
+    if (!hitPoint) {
+      const flatPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+      if (raycaster.ray.intersectPlane(flatPlane, _planeHit)) {
+        hitPoint = _planeHit;
+      }
+    }
+
+    if (!hitPoint) return null;
+    const snapped = navGrid.snapToGrid(hitPoint.x, hitPoint.z);
+    return { x: snapped.x, z: snapped.z, y: terrain.getTerrainY(snapped.x, snapped.z) };
+  }
+
+  /** Send the active character to a terrain position and show click marker */
+  function sendActiveCharTo(tx: number, tz: number, ty: number): void {
+    if (!activeCharacter) return;
+    activeCharacter.goTo(tx, tz);
+    clickMarker.position.set(tx, ty + 0.05, tz);
+    clickMarker.visible = true;
+    markerLife = 0.6;
+  }
+
   function handleClick(clientX: number, clientY: number): void {
     if (useGameStore.getState().phase !== 'playing') return;
 
@@ -216,75 +265,32 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     pointerNDC.y = -(clientY / window.innerHeight) * 2 + 1;
     raycaster.setFromCamera(pointerNDC, cam.camera);
 
-    // 1) Check NPC meshes first
-    const npcMeshes = npcs.map(n => n.mesh);
-    const npcHits = raycaster.intersectObjects(npcMeshes, true);
-    if (npcHits.length > 0) {
-      // Find which NPC owns this mesh
-      const hitObj = npcHits[0].object;
-      const npc = npcs.find(n => n.mesh === hitObj || hitObj.parent === n.mesh || n.mesh === hitObj.parent);
-      if (npc) {
-        if (npc === selectedNPC) {
-          // Click same NPC again — deselect
-          selectNPC(null);
-        } else {
-          selectNPC(npc);
-        }
+    // 1) Check character meshes (exclude active character)
+    const otherChars = characters.filter(c => c !== activeCharacter);
+    const charMeshes = otherChars.map(c => c.mesh);
+    const charHits = raycaster.intersectObjects(charMeshes, true);
+    if (charHits.length > 0) {
+      const hitObj = charHits[0].object;
+      const char = otherChars.find(c => c.mesh === hitObj || hitObj.parent === c.mesh || c.mesh === hitObj.parent);
+      if (char) {
+        selectCharacter(char);
         return;
       }
     }
 
-    // 2) If an NPC is selected, clicking terrain sets movement goal.
-    //    Raycast directly against the terrain mesh for accurate hit position.
-    if (selectedNPC) {
-      const terrainMesh = terrain.getTerrainMesh();
-      let hitPoint: THREE.Vector3 | null = null;
-
-      if (terrainMesh) {
-        const hits = raycaster.intersectObject(terrainMesh, false);
-        if (hits.length > 0) hitPoint = hits[0].point;
-      }
-
-      // Fallback: flat ground plane at y=0 (for non-heightmap presets)
-      if (!hitPoint) {
-        const flatPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-        if (raycaster.ray.intersectPlane(flatPlane, _planeHit)) {
-          hitPoint = _planeHit;
-        }
-      }
-
-      if (hitPoint) {
-        const snapped = navGrid.snapToGrid(hitPoint.x, hitPoint.z);
-        const tx = snapped.x;
-        const tz = snapped.z;
-        const ty = terrain.getTerrainY(tx, tz);
-        selectedNPC.goTo(tx, tz);
-
-        // Show click marker at terrain surface
-        clickMarker.position.set(tx, ty + 0.05, tz);
-        clickMarker.visible = true;
-        markerLife = 0.6;
-        return;
-      }
-    }
-
-    // 3) Click on empty space — deselect
-    if (selectedNPC) {
-      selectNPC(null);
+    // 2) Clicking terrain sends the active character there (click-to-move)
+    const hit = raycastTerrain(clientX, clientY);
+    if (hit) {
+      sendActiveCharTo(hit.x, hit.z, hit.y);
     }
   }
 
-  // Cycle selected character with left/right arrows.
-  // Order: player (null) → npc[0] → npc[1] → … → npc[last] → player
+  // Cycle selected character with left/right arrows
   function cycleCharacter(dir: 1 | -1): void {
-    if (npcs.length === 0) return;
-    // Current index: -1 = player, 0..n-1 = NPC
-    const curIdx = selectedNPC ? npcs.indexOf(selectedNPC) : -1;
-    const total = npcs.length + 1; // +1 for player
-    // Step: player is slot 0, NPCs are slots 1..n
-    const curSlot = curIdx + 1;
-    const nextSlot = ((curSlot + dir) % total + total) % total;
-    selectNPC(nextSlot === 0 ? null : npcs[nextSlot - 1]);
+    if (characters.length === 0) return;
+    const curIdx = activeCharacter ? characters.indexOf(activeCharacter) : -1;
+    const nextIdx = ((curIdx + dir) % characters.length + characters.length) % characters.length;
+    selectCharacter(characters[nextIdx]);
   }
 
   const onCycleKey = (e: KeyboardEvent) => {
@@ -294,36 +300,97 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   };
   window.addEventListener('keydown', onCycleKey);
 
-  // Listen for pointerup on canvas to detect clicks (non-drags).
-  // Canvas listener fires before Camera's window listener resets dragConfirmed,
-  // so we can read wasDrag() synchronously here.
+  // Pointer drag for continuous click-to-move: hold and drag to update path
+  const DRAG_REPATH_ENABLED = false;
+  let pointerDragActive = false;
+  let lastDragX = 0;
+  let lastDragZ = 0;
+  const DRAG_REPATH_DIST = 0.5; // min world distance between repath updates
+
+  const onPointerDown = (e: PointerEvent) => {
+    if (e.button !== 0) return;
+    pointerDragActive = false; // reset, will be set true on first drag move
+  };
+  canvas.addEventListener('pointerdown', onPointerDown);
+
+  const onPointerMove = (e: PointerEvent) => {
+    if (!DRAG_REPATH_ENABLED) return;
+    if (!(e.buttons & 1)) { pointerDragActive = false; return; }
+    if (useGameStore.getState().phase !== 'playing') return;
+    if (!activeCharacter) return;
+
+    // Only start drag-pathing once camera confirms a drag (not just a click)
+    if (!cam.wasDrag()) return;
+
+    const hit = raycastTerrain(e.clientX, e.clientY);
+    if (!hit) return;
+
+    // Throttle: only repath if target moved enough
+    if (pointerDragActive) {
+      const dx = hit.x - lastDragX;
+      const dz = hit.z - lastDragZ;
+      if (dx * dx + dz * dz < DRAG_REPATH_DIST * DRAG_REPATH_DIST) return;
+    }
+
+    pointerDragActive = true;
+    lastDragX = hit.x;
+    lastDragZ = hit.z;
+    sendActiveCharTo(hit.x, hit.z, hit.y);
+  };
+  canvas.addEventListener('pointermove', onPointerMove);
+
   const onPointerUp = (e: PointerEvent) => {
     if (e.button !== 0) return;
-    if (!cam.wasDrag()) {
+    if (pointerDragActive) {
+      // Final path update on release
+      const hit = raycastTerrain(e.clientX, e.clientY);
+      if (hit) sendActiveCharTo(hit.x, hit.z, hit.y);
+      pointerDragActive = false;
+    } else if (!cam.wasDrag()) {
       handleClick(e.clientX, e.clientY);
     }
   };
   canvas.addEventListener('pointerup', onPointerUp);
 
-  function spawnNPCs(excludeType: CharacterType): void {
-    for (const npc of npcs) npc.dispose();
-    const npcTypes = allCharacterTypes.filter((t) => t !== excludeType);
-    npcs = npcTypes.map((type) => {
-      const pos = terrain.getRandomPosition();
-      return new NPC(scene, terrain, navGrid, type, pos);
-    });
-  }
+  function spawnCharacters(controlledType: CharacterType): void {
+    // Dispose old characters
+    for (const char of characters) char.dispose();
+    characters = [];
+    activeCharacter = null;
+    inventories.clear();
 
-  function spawnPlayer(type: CharacterType): void {
-    player?.dispose();
-    const spawnY = terrain.getTerrainY(0, 0);
-    player = new Player(scene, terrain, type, new THREE.Vector3(0, spawnY, 0));
-    speechSystem.setCharacter(type);
-    speechSystem.setPlayerMesh(player.mesh);
-    useGameStore.getState().setCollectibles(0);
-    useGameStore.getState().setActiveCharacter(type, CHARACTER_TEAM_COLORS[type]);
-    inventories.clear(); // Reset all inventories on respawn
-    spawnNPCs(type);
+    const ladderDefs = terrain.getLadderDefs();
+
+    for (const type of allCharacterTypes) {
+      // Spawn position: validate (0,0) for the controlled character, random for others
+      let pos: THREE.Vector3;
+      if (type === controlledType) {
+        // Use (0,0) if walkable, otherwise fallback to random
+        const spawnY = terrain.getTerrainY(0, 0);
+        if (navGrid.isWalkable(0, 0)) {
+          pos = new THREE.Vector3(0, spawnY, 0);
+        } else {
+          pos = terrain.getRandomPosition();
+        }
+      } else {
+        pos = terrain.getRandomPosition();
+      }
+
+      const char = new Character(scene, terrain, navGrid, type, pos, ladderDefs);
+      characters.push(char);
+
+      if (type === controlledType) {
+        char.setPlayerControlled(makePlayerControlDeps());
+        activeCharacter = char;
+      }
+    }
+
+    if (activeCharacter) {
+      speechSystem.setCharacter(controlledType);
+      speechSystem.setPlayerMesh(activeCharacter.mesh);
+      useGameStore.getState().setCollectibles(0);
+      useGameStore.getState().setActiveCharacter(controlledType, CHARACTER_TEAM_COLORS[controlledType]);
+    }
   }
 
   // Store callbacks
@@ -360,29 +427,25 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   let lastTime = 0;
 
   function update(dt: number): void {
-    const state = input.update();
-    const { phase, playerParams: params, cameraParams } = useGameStore.getState();
+    cachedInputState = input.update();
+    const { phase, cameraParams } = useGameStore.getState();
     cam.setParams(cameraParams);
 
     // Check for character selection
     const selected = useGameStore.getState().selectedCharacter;
     if (selected && selected !== lastSelectedCharacter) {
       lastSelectedCharacter = selected;
-      spawnPlayer(selected);
+      spawnCharacters(selected);
     }
 
-    if (phase === 'playing' && player) {
-      // Player movement, hop, torch — skip movement input when an NPC is selected
-      // (arrows are used for character cycling in that mode)
-      if (selectedNPC) {
-        player.updateIdle(dt);
-        player.updateTorch(dt);
-      } else {
-        player.update(dt, state, cam.getAngleY(), params);
+    if (phase === 'playing' && activeCharacter) {
+      // Update all characters uniformly
+      for (const char of characters) {
+        char.update(dt);
       }
 
       // Update audio listener position for spatial SFX
-      const pp = player.getPosition();
+      const pp = activeCharacter.getPosition();
       audioSystem.setPlayerPosition(pp.x, pp.z);
 
       // Sync light preset
@@ -392,12 +455,13 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
         applyLightPreset(sceneLights, preset);
       }
 
-      // Camera follows selected NPC or player
-      const camTarget = selectedNPC ? selectedNPC.getCameraTarget() : player.getCameraTarget();
+      // Camera follows active character
+      const camTarget = activeCharacter.getCameraTarget();
       cam.setTarget(camTarget.x, camTarget.y, camTarget.z);
 
       // Active character position (for collectibles, chests, loot)
-      const activePos = selectedNPC ? selectedNPC.getPosition() : player.getPosition();
+      const activePos = activeCharacter.getPosition();
+      const params = useGameStore.getState().playerParams;
 
       // Collectibles
       const pickedUp = collectibles.update(dt, activePos);
@@ -424,9 +488,6 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
         audioSystem.sfx('potion');
       }
 
-      // NPCs
-      for (const npc of npcs) npc.update(dt);
-
       // Click marker fade
       if (clickMarker.visible) {
         markerLife -= dt;
@@ -442,11 +503,11 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       speechSystem.update(dt);
 
       // Pause on Escape
-      if (state.cancel) {
+      if (cachedInputState.cancel) {
         useGameStore.getState().onPauseToggle?.();
       }
     } else if (phase === 'playing') {
-      // No player yet, still update collectibles visually
+      // No characters yet, still update collectibles visually
       collectibles.update(dt, new THREE.Vector3(9999, 0, 9999));
     }
 
@@ -477,6 +538,8 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       cancelAnimationFrame(rafId);
       window.removeEventListener('resize', onResize);
       window.removeEventListener('keydown', onCycleKey);
+      canvas.removeEventListener('pointerdown', onPointerDown);
+      canvas.removeEventListener('pointermove', onPointerMove);
       canvas.removeEventListener('pointerup', onPointerUp);
       input.destroy();
       cam.destroy();
@@ -486,8 +549,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       for (const sys of Object.values(particleSystems)) {
         if (sys) sys.dispose();
       }
-      player?.dispose();
-      for (const npc of npcs) npc.dispose();
+      for (const char of characters) char.dispose();
       terrain.dispose();
       collectibles.dispose();
       chestSystem.dispose();

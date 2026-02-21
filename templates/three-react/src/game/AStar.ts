@@ -5,11 +5,18 @@
 
 import type { NavGrid } from './NavGrid';
 
+export interface WaypointMeta {
+  ladderIndex: number | null;
+  climbDirection?: 'up' | 'down';
+}
+
 export interface PathResult {
   found: boolean;
   path: { x: number; z: number }[];
   /** Full grid-cell path before string-pulling (for debug visualization) */
   rawPath: { x: number; z: number }[];
+  /** Per-waypoint metadata (same length as path[]) */
+  meta: WaypointMeta[];
 }
 
 // Direction offsets matching NavGrid: 0=N, 1=NE, 2=E, 3=SE, 4=S, 5=SW, 6=W, 7=NW
@@ -93,6 +100,8 @@ function heuristic(ax: number, az: number, bx: number, bz: number): number {
 
 /** Cost multiplier for each unit of height change on an edge. Makes NPCs prefer flat routes. */
 const ELEVATION_PENALTY = 3;
+/** Base cost for traversing a ladder nav-link. Strongly prefers ramps/flat but uses ladders when needed. */
+const LADDER_COST = 8;
 
 export function findPath(
   grid: NavGrid,
@@ -108,15 +117,15 @@ export function findPath(
   // Quick bail: start or goal blocked or isolated (no passable edges)
   const startCell = grid.getCell(start.gx, start.gz);
   const goalCell = grid.getCell(goal.gx, goal.gz);
-  if (!startCell || startCell.blocked || startCell.passable === 0 ||
-      !goalCell || goalCell.blocked || goalCell.passable === 0) {
-    return { found: false, path: [], rawPath: [] };
+  if (!startCell || startCell.blocked || (startCell.passable === 0 && !grid.getNavLinks(start.gx, start.gz)) ||
+      !goalCell || goalCell.blocked || (goalCell.passable === 0 && !grid.getNavLinks(goal.gx, goal.gz))) {
+    return { found: false, path: [], rawPath: [], meta: [] };
   }
 
   // Already there
   if (start.gx === goal.gx && start.gz === goal.gz) {
     const p = [{ x: goalX, z: goalZ }];
-    return { found: true, path: p, rawPath: p };
+    return { found: true, path: p, rawPath: p, meta: [{ ladderIndex: null }] };
   }
 
   const w = grid.width;
@@ -125,6 +134,7 @@ export function findPath(
   const gScore = new Float32Array(totalCells).fill(Infinity);
   const fScore = new Float32Array(totalCells).fill(Infinity);
   const cameFrom = new Int32Array(totalCells).fill(-1);
+  const cameViaLink = new Int32Array(totalCells).fill(-1); // -1 = normal edge, >= 0 = ladder index
   const closed = new Uint8Array(totalCells);
 
   const startIdx = start.gz * w + start.gx;
@@ -151,7 +161,18 @@ export function findPath(
       // so characters follow every cell and navigate terrain correctly
       const gridPath = reconstructPath(cameFrom, currentIdx, w);
       const worldPath = gridPathToWorld(grid, gridPath, startX, startZ, goalX, goalZ);
-      return { found: true, path: worldPath, rawPath: worldPath };
+      const meta = reconstructMeta(cameFrom, cameViaLink, currentIdx, w, grid, gridPath);
+
+      // Debug: log if path uses any ladders
+      const ladderSteps = meta.filter(m => m.ladderIndex !== null);
+      if (ladderSteps.length > 0) {
+        console.log(`[A*] Path uses ${ladderSteps.length} ladder(s):`, ladderSteps.map((m, i) => {
+          const idx = meta.indexOf(m);
+          return `wp${idx}: ladder${m.ladderIndex} ${m.climbDirection}`;
+        }));
+      }
+
+      return { found: true, path: worldPath, rawPath: worldPath, meta };
     }
 
     const cgx = currentIdx % w;
@@ -177,14 +198,32 @@ export function findPath(
 
       if (tentativeG < gScore[nIdx]) {
         cameFrom[nIdx] = currentIdx;
+        cameViaLink[nIdx] = -1;
         gScore[nIdx] = tentativeG;
         fScore[nIdx] = tentativeG + heuristic(ngx, ngz, goal.gx, goal.gz);
         open.push(nIdx); // May add duplicates; lazy deletion handles it
       }
     }
+
+    // Expand through nav-links (ladders)
+    const links = grid.getNavLinks(cgx, cgz);
+    if (links) {
+      for (const link of links) {
+        const nIdx = link.toGZ * w + link.toGX;
+        if (closed[nIdx]) continue;
+        const tentativeG = currentG + link.cost;
+        if (tentativeG < gScore[nIdx]) {
+          cameFrom[nIdx] = currentIdx;
+          cameViaLink[nIdx] = link.ladderIndex;
+          gScore[nIdx] = tentativeG;
+          fScore[nIdx] = tentativeG + heuristic(link.toGX, link.toGZ, goal.gx, goal.gz);
+          open.push(nIdx);
+        }
+      }
+    }
   }
 
-  return { found: false, path: [], rawPath: [] };
+  return { found: false, path: [], rawPath: [], meta: [] };
 }
 
 function reconstructPath(cameFrom: Int32Array, endIdx: number, width: number): { gx: number; gz: number }[] {
@@ -227,6 +266,58 @@ function gridPathToWorld(
   }
 
   return worldPath;
+}
+
+/** Reconstruct per-waypoint metadata from cameViaLink during path reconstruction. */
+function reconstructMeta(
+  cameFrom: Int32Array, cameViaLink: Int32Array,
+  endIdx: number, width: number, grid: NavGrid,
+  gridPath: { gx: number; gz: number }[],
+): WaypointMeta[] {
+  // Build reverse mapping: for each step in gridPath, check if it arrived via a nav-link
+  const linkIndices: number[] = [];
+  let idx = endIdx;
+  while (idx !== -1) {
+    linkIndices.push(cameViaLink[idx]);
+    idx = cameFrom[idx];
+  }
+  linkIndices.reverse();
+
+  // Convert to WaypointMeta: first waypoint is start (always null), then the rest
+  // gridPath[i] arrived via linkIndices[i]
+  const meta: WaypointMeta[] = [];
+
+  // First entry is start position (no link)
+  meta.push({ ladderIndex: null });
+
+  // Middle entries: gridPath[1..n-2] (skipping first/last which are start/goal world positions)
+  for (let i = 1; i < gridPath.length - 1; i++) {
+    const li = linkIndices[i];
+    if (li >= 0) {
+      // Determine climb direction from surface heights
+      const prevCell = grid.getCell(gridPath[i - 1].gx, gridPath[i - 1].gz);
+      const curCell = grid.getCell(gridPath[i].gx, gridPath[i].gz);
+      const dir = (curCell && prevCell && curCell.surfaceHeight > prevCell.surfaceHeight) ? 'up' : 'down';
+      meta.push({ ladderIndex: li, climbDirection: dir as 'up' | 'down' });
+    } else {
+      meta.push({ ladderIndex: null });
+    }
+  }
+
+  // Last entry is goal position
+  if (gridPath.length > 1) {
+    const lastLi = linkIndices[linkIndices.length - 1];
+    if (lastLi >= 0) {
+      const prevCell = grid.getCell(gridPath[gridPath.length - 2].gx, gridPath[gridPath.length - 2].gz);
+      const curCell = grid.getCell(gridPath[gridPath.length - 1].gx, gridPath[gridPath.length - 1].gz);
+      const dir = (curCell && prevCell && curCell.surfaceHeight > prevCell.surfaceHeight) ? 'up' : 'down';
+      meta.push({ ladderIndex: lastLi, climbDirection: dir as 'up' | 'down' });
+    } else {
+      meta.push({ ladderIndex: null });
+    }
+  }
+
+  return meta;
 }
 
 /** String-pulling: skip to farthest visible waypoint to smooth grid staircase */

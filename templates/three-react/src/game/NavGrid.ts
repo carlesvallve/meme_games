@@ -3,6 +3,8 @@
  * Pure TypeScript, no Three.js dependency.
  */
 
+import type { NavLink } from './Ladder';
+
 /** Slope direction: which edge of the box is the HIGH side.
  *  0 = +Z, 1 = +X, 2 = -Z, 3 = -X */
 export type SlopeDir = 0 | 1 | 2 | 3;
@@ -66,6 +68,9 @@ export class NavGrid {
   private cells: NavCell[];
   private stepHeight = 0.5;
   private slopeHeight = 1.0;
+  private navLinks: Map<number, NavLink[]> = new Map();
+  private spawnRegionLabel = -1;
+  private regionLabels: Int32Array | null = null;
 
   constructor(worldWidth: number, worldDepth: number, cellSize = 0.5) {
     this.cellSize = cellSize;
@@ -78,6 +83,7 @@ export class NavGrid {
 
   build(boxes: ReadonlyArray<AABBBox>, stepHeight: number, capsuleRadius: number): void {
     this.stepHeight = stepHeight;
+    this.navLinks.clear();
     const { width, height, cellSize, originX, originZ } = this;
     const totalCells = width * height;
     this.cells = new Array(totalCells);
@@ -202,6 +208,31 @@ export class NavGrid {
     return this.gridToWorld(gx, gz);
   }
 
+  /** Bake connected-region labels and identify the spawn region (region containing world origin).
+   *  Call once after all nav-links are registered. */
+  bakeSpawnRegion(): void {
+    const { labels } = this.labelConnectedRegions();
+    this.regionLabels = labels;
+    const spawn = this.worldToGrid(0, 0);
+    this.spawnRegionLabel = labels[spawn.gz * this.width + spawn.gx];
+  }
+
+  /** Check if a world-space position is in the main spawn region AND on a well-connected cell.
+   *  Requires at least 4 passable directions to avoid spawning on cliff edges/slopes. */
+  isInSpawnRegion(x: number, z: number): boolean {
+    if (!this.regionLabels || this.spawnRegionLabel < 0) return true; // not baked yet, allow
+    const { gx, gz } = this.worldToGrid(x, z);
+    const idx = gz * this.width + gx;
+    if (this.regionLabels[idx] !== this.spawnRegionLabel) return false;
+    const cell = this.cells[idx];
+    if (!cell || cell.blocked) return false;
+    // Count passable directions — need at least 4 to be on solid ground
+    let dirs = cell.passable;
+    let count = 0;
+    while (dirs) { count += dirs & 1; dirs >>= 1; }
+    return count >= 4;
+  }
+
   /** World-space bounds: half-extent of the grid */
   getHalfSize(): number {
     return this.width * this.cellSize / 2;
@@ -226,6 +257,7 @@ export class NavGrid {
   ): void {
     this.stepHeight = stepHeight;
     this.slopeHeight = slopeHeight ?? stepHeight;
+    this.navLinks.clear();
     const { width, height, cellSize, originX, originZ } = this;
     const totalCells = width * height;
     this.cells = new Array(totalCells);
@@ -256,25 +288,22 @@ export class NavGrid {
         const surfaceHeight = h00 * (1 - fx) * (1 - fz) + h10 * fx * (1 - fz) +
           h01 * (1 - fx) * fz + h11 * fx * fz;
 
+        // Block cells near world edge to prevent pathfinding outside visible mesh.
+        // NavGrid covers 40m but heightmap mesh is 36m (2m margin each side = 4 cells).
+        const EDGE_MARGIN = 5;
+        const nearEdge = gx < EDGE_MARGIN || gx >= width - EDGE_MARGIN ||
+                         gz < EDGE_MARGIN || gz >= height - EDGE_MARGIN;
+
         const idx = gz * width + gx;
         this.cells[idx] = {
           gx, gz,
           worldX, worldZ,
           surfaceHeight,
-          blocked: false,
+          blocked: nearEdge,
           passable: 0,
         };
       }
     }
-
-    // 2. Precompute gradient magnitude per cell by sampling the heightmap directly
-    //    at a fine scale (half a heightmap cell), matching the player movement check.
-    // Use a conservative margin (0.75×) because resolveMovement samples with
-    // getTerrainY(radius>0) which takes max-of-5-points and sees steeper slopes
-    // near cliff edges than plain bilinear interpolation.
-    const effectiveSlopeHeight = slopeHeight ?? stepHeight * 2;
-    const maxSlope = (effectiveSlopeHeight / cellSize) * 0.75;
-    const slopeMags = new Float32Array(totalCells);
 
     // Helper: sample heightmap at world XZ via bilinear interpolation
     const sampleHM = (wx: number, wz: number): number => {
@@ -288,27 +317,69 @@ export class NavGrid {
         heights[(siz + 1) * hmVerts + six + 1] * sfx * sfz;
     };
 
-    const eps = hmCellSize * 0.5; // fine-scale gradient sampling (half a HM cell)
+    const halfCell = cellSize * 0.5;
+
+    // Match resolveMovement's gradient check exactly:
+    // It samples gradient at (pos + moveDir * eps) using getTerrainY with radius.
+    const charRadius = 0.25;
+    const sampleR = charRadius * 0.5;
+    const effectiveSlopeHeight = slopeHeight ?? stepHeight * 2;
+    const maxSlope = (effectiveSlopeHeight / hmCellSize) * 0.5;
+    const eps = hmCellSize * 0.5;
+
+    // Sample max height at a point + 4 cardinal offsets (matches getTerrainY with radius)
+    const sampleHMRadius = (wx: number, wz: number, r: number): number => {
+      if (r <= 0) return sampleHM(wx, wz);
+      return Math.max(
+        sampleHM(wx, wz),
+        sampleHM(wx - r, wz),
+        sampleHM(wx + r, wz),
+        sampleHM(wx, wz - r),
+        sampleHM(wx, wz + r),
+      );
+    };
+
+    // Compute gradient magnitude at a point (same formula as resolveMovement)
+    const gradMagAt = (px: number, pz: number): number => {
+      const hL = sampleHMRadius(px - eps, pz, sampleR);
+      const hR = sampleHMRadius(px + eps, pz, sampleR);
+      const hU = sampleHMRadius(px, pz - eps, sampleR);
+      const hD = sampleHMRadius(px, pz + eps, sampleR);
+      const gxV = (hR - hL) / (2 * eps);
+      const gzV = (hD - hU) / (2 * eps);
+      return Math.sqrt(gxV * gxV + gzV * gzV);
+    };
+
+    // 2. Block cells based on corner heights.
+    // Sample the 4 corners of each cell. If the height range exceeds stepHeight,
+    // the cell is on a cliff face and is unwalkable — simple and robust.
     for (let gz = 0; gz < height; gz++) {
       for (let gx = 0; gx < width; gx++) {
         const cell = this.cells[gz * width + gx];
+        if (cell.blocked) continue;
         const wx = cell.worldX;
         const wz = cell.worldZ;
-        const hL = sampleHM(wx - eps, wz);
-        const hR = sampleHM(wx + eps, wz);
-        const hU = sampleHM(wx, wz - eps);
-        const hD = sampleHM(wx, wz + eps);
-        const gxVal = (hR - hL) / (2 * eps);
-        const gzVal = (hD - hU) / (2 * eps);
-        slopeMags[gz * width + gx] = Math.sqrt(gxVal * gxVal + gzVal * gzVal);
+        const h00 = sampleHM(wx - halfCell, wz - halfCell);
+        const h10 = sampleHM(wx + halfCell, wz - halfCell);
+        const h01 = sampleHM(wx - halfCell, wz + halfCell);
+        const h11 = sampleHM(wx + halfCell, wz + halfCell);
+        const hMax = Math.max(h00, h10, h01, h11);
+        const hMin = Math.min(h00, h10, h01, h11);
+
+        if (hMax - hMin > stepHeight) {
+          cell.blocked = true;
+        }
       }
     }
 
-    // 3. Compute per-edge passability using both height-diff and gradient checks
+    // 3. Compute per-edge passability.
+    // For each edge A→B, simulate what resolveMovement does:
+    // check the gradient "ahead" — at the neighbor cell center — in the movement direction.
+    // If it exceeds maxSlope, the character would be blocked trying to walk there.
     for (let gz = 0; gz < height; gz++) {
       for (let gx = 0; gx < width; gx++) {
         const cell = this.cells[gz * width + gx];
-        const cellSlope = slopeMags[gz * width + gx];
+        if (cell.blocked) continue; // blocked cells get passable=0
 
         let mask = 0;
         for (let dir = 0; dir < 8; dir++) {
@@ -317,26 +388,23 @@ export class NavGrid {
 
           if (ngx < 0 || ngx >= width || ngz < 0 || ngz >= height) continue;
           const neighbor = this.cells[ngz * width + ngx];
-          const neighborSlope = slopeMags[ngz * width + ngx];
+          if (neighbor.blocked) continue;
 
-          // Height-diff check (conservative: matches the 0.75× margin on maxSlope)
-          if (Math.abs(cell.surfaceHeight - neighbor.surfaceHeight) > effectiveSlopeHeight * 0.75) continue;
+          // Height difference between cell centers
+          if (Math.abs(cell.surfaceHeight - neighbor.surfaceHeight) > stepHeight) continue;
 
-          // Gradient check: if either cell is on a steep slope, block the edge.
-          // Also sample the midpoint between cells for cliffs that fall between cell centers.
-          if (cellSlope > maxSlope || neighborSlope > maxSlope) continue;
-          const midX = (cell.worldX + neighbor.worldX) * 0.5;
-          const midZ = (cell.worldZ + neighbor.worldZ) * 0.5;
-          const mhL = sampleHM(midX - eps, midZ);
-          const mhR = sampleHM(midX + eps, midZ);
-          const mhU = sampleHM(midX, midZ - eps);
-          const mhD = sampleHM(midX, midZ + eps);
-          const mgx = (mhR - mhL) / (2 * eps);
-          const mgz = (mhD - mhU) / (2 * eps);
-          const midSlope = Math.sqrt(mgx * mgx + mgz * mgz);
-          if (midSlope > maxSlope) continue;
+          // Ahead-gradient check: mirrors resolveMovement exactly.
+          // When character at cell A walks toward cell B, resolveMovement checks
+          // the gradient at (destination + moveDir * eps). We check at the neighbor
+          // cell center, which is where the character would be heading.
+          const aheadGrad = gradMagAt(neighbor.worldX, neighbor.worldZ);
+          if (aheadGrad > maxSlope) continue;
 
-          // Diagonal: both adjacent cardinals must also be passable
+          // Also check gradient at current cell (character could be blocked leaving)
+          const srcGrad = gradMagAt(cell.worldX, cell.worldZ);
+          if (srcGrad > maxSlope) continue;
+
+          // Diagonal: both adjacent cardinals must also be non-blocked and reachable
           if (dir % 2 === 1) {
             const [c1, c2] = DIAGONAL_CARDINALS[dir];
             const n1gx = gx + DIR_DGX[c1];
@@ -347,8 +415,11 @@ export class NavGrid {
             if (n1gx < 0 || n1gx >= width || n1gz < 0 || n1gz >= height) continue;
             if (n2gx < 0 || n2gx >= width || n2gz < 0 || n2gz >= height) continue;
 
-            if (slopeMags[n1gz * width + n1gx] > maxSlope) continue;
-            if (slopeMags[n2gz * width + n2gx] > maxSlope) continue;
+            const adj1 = this.cells[n1gz * width + n1gx];
+            const adj2 = this.cells[n2gz * width + n2gx];
+            if (adj1.blocked || adj2.blocked) continue;
+            if (Math.abs(cell.surfaceHeight - adj1.surfaceHeight) > stepHeight) continue;
+            if (Math.abs(cell.surfaceHeight - adj2.surfaceHeight) > stepHeight) continue;
           }
 
           mask |= 1 << dir;
@@ -356,6 +427,77 @@ export class NavGrid {
         cell.passable = mask;
       }
     }
+  }
+
+  /** Add a bidirectional nav-link between two cells (e.g. for ladders). */
+  addNavLink(fromGX: number, fromGZ: number, toGX: number, toGZ: number, cost: number, ladderIndex: number): void {
+    const w = this.width;
+    const fromKey = fromGZ * w + fromGX;
+    const toKey = toGZ * w + toGX;
+
+    if (!this.navLinks.has(fromKey)) this.navLinks.set(fromKey, []);
+    this.navLinks.get(fromKey)!.push({ toGX, toGZ, cost, ladderIndex });
+
+    if (!this.navLinks.has(toKey)) this.navLinks.set(toKey, []);
+    this.navLinks.get(toKey)!.push({ toGX: fromGX, toGZ: fromGZ, cost, ladderIndex });
+  }
+
+  /** Get nav-links from a cell, if any. */
+  getNavLinks(gx: number, gz: number): NavLink[] | undefined {
+    return this.navLinks.get(gz * this.width + gx);
+  }
+
+  /** BFS through passable edges and nav-links to find connected components.
+   *  Returns labels (-1 = unreachable/blocked) and region count. */
+  labelConnectedRegions(): { labels: Int32Array; regionCount: number } {
+    const total = this.width * this.height;
+    const labels = new Int32Array(total).fill(-1);
+    let regionId = 0;
+    const queue: number[] = [];
+
+    for (let i = 0; i < total; i++) {
+      const cell = this.cells[i];
+      // Skip cells with no outgoing edges and no nav-links
+      if (cell.passable === 0 && !this.navLinks.has(i)) continue;
+      if (labels[i] !== -1) continue;
+
+      labels[i] = regionId;
+      queue.length = 0;
+      queue.push(i);
+      let head = 0;
+      while (head < queue.length) {
+        const cur = queue[head++];
+        const curCell = this.cells[cur];
+        const cgx = cur % this.width;
+        const cgz = (cur - cgx) / this.width;
+
+        // Traverse passable edges
+        for (let dir = 0; dir < 8; dir++) {
+          if (!(curCell.passable & (1 << dir))) continue;
+          const ngx = cgx + DIR_DGX[dir];
+          const ngz = cgz + DIR_DGZ[dir];
+          if (ngx < 0 || ngx >= this.width || ngz < 0 || ngz >= this.height) continue;
+          const nIdx = ngz * this.width + ngx;
+          if (labels[nIdx] !== -1) continue;
+          labels[nIdx] = regionId;
+          queue.push(nIdx);
+        }
+
+        // Traverse nav-links (ladders)
+        const links = this.navLinks.get(cur);
+        if (links) {
+          for (const link of links) {
+            const nIdx = link.toGZ * this.width + link.toGX;
+            if (nIdx < 0 || nIdx >= total || labels[nIdx] !== -1) continue;
+            labels[nIdx] = regionId;
+            queue.push(nIdx);
+          }
+        }
+      }
+      regionId++;
+    }
+
+    return { labels, regionCount: regionId };
   }
 
   /** Bresenham-style grid line-of-sight check.
