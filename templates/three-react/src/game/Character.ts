@@ -285,7 +285,11 @@ export class Character implements BehaviorAgent {
         this.visualGroundY = this.groundY;
         this.velocityY = 0;
         if (impactSpeed > 1 && this.footSfxTimer >= FOOT_SFX_COOLDOWN) {
-          audioSystem.sfxAt('land', this.mesh.position.x, this.mesh.position.z);
+          if (this._selected) {
+            audioSystem.sfx('land');
+          } else {
+            audioSystem.sfxAt('land', this.mesh.position.x, this.mesh.position.z);
+          }
           this.footSfxTimer = 0;
         }
       }
