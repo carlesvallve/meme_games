@@ -79,14 +79,16 @@ export class Character {
    * Move character by direction vector. Does NOT read input — receives normalized dx/dz.
    * Returns true if character moved.
    */
-  move(dx: number, dz: number, speed: number, stepHeight: number, capsuleRadius: number, dt: number): boolean {
+  move(dx: number, dz: number, speed: number, stepHeight: number, capsuleRadius: number, dt: number, slopeHeight?: number): boolean {
     if (Math.abs(dx) < 0.001 && Math.abs(dz) < 0.001) return false;
     this.footSfxTimer += dt;
 
-    const newX = this.mesh.position.x + dx * speed * dt;
-    const newZ = this.mesh.position.z + dz * speed * dt;
+    const oldX = this.mesh.position.x;
+    const oldZ = this.mesh.position.z;
+    const newX = oldX + dx * speed * dt;
+    const newZ = oldZ + dz * speed * dt;
 
-    const resolved = this.terrain.resolveMovement(newX, newZ, this.groundY, stepHeight, capsuleRadius);
+    const resolved = this.terrain.resolveMovement(newX, newZ, this.groundY, stepHeight, capsuleRadius, oldX, oldZ, slopeHeight);
     this.mesh.position.x = resolved.x;
     this.mesh.position.z = resolved.z;
     this.groundY = resolved.y;

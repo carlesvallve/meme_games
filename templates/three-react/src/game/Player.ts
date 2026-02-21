@@ -26,7 +26,7 @@ export class Player extends Character {
       mx /= moveLen;
       mz /= moveLen;
 
-      this.move(mx, mz, params.speed, params.stepHeight, params.capsuleRadius, dt);
+      this.move(mx, mz, params.speed, params.stepHeight, params.capsuleRadius, dt, params.slopeHeight);
 
       // Hop + step SFX (respects foot sound cooldown)
       const currentHopHalf = this.applyHop(params.hopHeight);

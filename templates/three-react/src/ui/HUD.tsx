@@ -60,6 +60,8 @@ export function HUD() {
   const potions = useGameStore((s) => s.potions);
   const toggles = useGameStore((s) => s.particleToggles);
   const toggle = useGameStore((s) => s.toggleParticle);
+  const activeCharacterName = useGameStore((s) => s.activeCharacterName);
+  const activeCharacterColor = useGameStore((s) => s.activeCharacterColor);
 
   return (
     <div
@@ -79,7 +81,7 @@ export function HUD() {
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10, pointerEvents: 'auto' }}>
         <div style={{ opacity: 0.7, fontSize: 13 }}>
-          WASD move &middot; Drag orbit &middot; Scroll zoom
+          WASD move &middot; Drag orbit &middot; Scroll zoom &middot; ←→ cycle
         </div>
         <div style={{ display: 'flex', gap: 6 }}>
           {TOGGLE_KEYS.map((t) => {
@@ -121,6 +123,18 @@ export function HUD() {
         gap: 6,
         alignItems: 'flex-end',
       }}>
+        {activeCharacterName && (
+          <div style={{
+            fontSize: 12,
+            fontWeight: 700,
+            letterSpacing: 1.5,
+            textTransform: 'uppercase',
+            color: activeCharacterColor ?? '#6af',
+            marginBottom: 2,
+          }}>
+            {activeCharacterName}
+          </div>
+        )}
         <StatRow icon="💎" label="GEMS" value={collectibles} color="#44ffaa" />
         <StatRow icon="🪙" label="COINS" value={coins} color="#ffd700" />
         <StatRow icon="🧪" label="POTIONS" value={potions} color="#ff6688" />

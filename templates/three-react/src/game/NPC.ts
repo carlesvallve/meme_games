@@ -3,9 +3,18 @@ import { Character } from './Character';
 import type { CharacterType } from './characters';
 import type { Terrain } from './Terrain';
 import type { NavGrid } from './NavGrid';
-import type { BehaviorAgent } from './behaviors/Behavior';
+import { Behavior, type BehaviorAgent, type BehaviorStatus } from './behaviors/Behavior';
 import { Roaming } from './behaviors/Roaming';
+import { GoToPoint } from './behaviors/GoToPoint';
 import { audioSystem } from '../utils/AudioSystem';
+
+/** Simple behavior that just idles in place. */
+class IdleBehavior extends Behavior {
+  update(agent: BehaviorAgent, dt: number): BehaviorStatus {
+    agent.updateIdle(dt);
+    return 'running';
+  }
+}
 
 // Debug vis
 const DEBUG_PATH = true;
@@ -29,7 +38,11 @@ function getGoalGeo(): THREE.SphereGeometry {
 }
 
 export class NPC extends Character implements BehaviorAgent {
-  private behavior: Roaming;
+  readonly characterType: CharacterType;
+  private behavior: Behavior;
+  private roaming: Roaming;
+  private navGrid: NavGrid;
+  private _selected = false;
 
   // Debug visualization
   private debugLine: THREE.Line | null = null;
@@ -42,8 +55,11 @@ export class NPC extends Character implements BehaviorAgent {
 
   constructor(scene: THREE.Scene, terrain: Terrain, navGrid: NavGrid, type: CharacterType, position: THREE.Vector3) {
     super(scene, terrain, type, position);
+    this.characterType = type;
+    this.navGrid = navGrid;
 
-    this.behavior = new Roaming({ navGrid });
+    this.roaming = new Roaming({ navGrid });
+    this.behavior = this.roaming;
 
     if (DEBUG_PATH) {
       this.debugLineMat = new THREE.LineBasicMaterial({ color: DEBUG_LINE_COLOR, transparent: true, opacity: 0.6 });
@@ -70,10 +86,43 @@ export class NPC extends Character implements BehaviorAgent {
     return currentHopHalf;
   }
 
+  // ── Selection & point-and-click ─────────────────────────────────
+
+  get selected(): boolean { return this._selected; }
+
+  select(): void {
+    this._selected = true;
+    // Stop roaming — idle until player gives a click target
+    this.behavior = new IdleBehavior({ navGrid: this.navGrid });
+  }
+
+  deselect(): void {
+    this._selected = false;
+    this.behavior = this.roaming;
+  }
+
+  /** Set a point-and-click movement goal. Replaces current behavior with GoToPoint. */
+  goTo(worldX: number, worldZ: number): void {
+    this.behavior = new GoToPoint({ navGrid: this.navGrid }, worldX, worldZ);
+  }
+
+  getCameraTarget(): { x: number; y: number; z: number } {
+    return {
+      x: this.mesh.position.x,
+      y: this.visualGroundY + 0.5,
+      z: this.mesh.position.z,
+    };
+  }
+
   // ── Update ───────────────────────────────────────────────────────
 
   update(dt: number): void {
-    this.behavior.update(this, dt);
+    const status = this.behavior.update(this, dt);
+
+    // If a GoToPoint behavior finished, go back to idle (waiting for next click)
+    if (this._selected && status === 'done') {
+      this.behavior = new IdleBehavior({ navGrid: this.navGrid });
+    }
 
     if (DEBUG_PATH) this.syncDebugVis();
     this.updateTorch(dt);

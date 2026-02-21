@@ -7,7 +7,7 @@ export interface BehaviorAgent {
   getX(): number;
   getZ(): number;
   /** Move toward direction. Returns true if actually moved. */
-  move(dx: number, dz: number, speed: number, stepHeight: number, capsuleRadius: number, dt: number): boolean;
+  move(dx: number, dz: number, speed: number, stepHeight: number, capsuleRadius: number, dt: number, slopeHeight?: number): boolean;
   applyHop(hopHeight: number): number;
   updateIdle(dt: number): void;
 }
@@ -27,9 +27,11 @@ export abstract class Behavior {
 
   abstract update(agent: BehaviorAgent, dt: number): BehaviorStatus;
 
-  /** Get the current waypoints for debug visualization (if any) */
+  /** Get the smoothed waypoints for movement */
   getWaypoints(): ReadonlyArray<{ x: number; z: number }> { return []; }
   getWaypointIndex(): number { return 0; }
+  /** Get the full grid-cell path for debug visualization (before string-pulling) */
+  getRawWaypoints(): ReadonlyArray<{ x: number; z: number }> { return []; }
 
   /** Helper: find a path from agent to target */
   protected findPath(agent: BehaviorAgent, goalX: number, goalZ: number): PathResult {

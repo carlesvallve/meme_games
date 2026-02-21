@@ -1,8 +1,13 @@
 import { useState, useRef, useEffect } from 'react';
 import { useGameStore, type PlayerParams, type CameraParams, type TorchParams, type LightPreset } from '../store';
 import { Layer } from '../game/Entity';
+import type { TerrainPreset } from '../game/Terrain';
+import type { HeightmapStyle } from '../game/TerrainNoise';
 
-type ActivePanel = 'player' | 'camera' | 'light' | null;
+type ActivePanel = 'player' | 'camera' | 'light' | 'scene' | null;
+
+const TERRAIN_PRESETS: TerrainPreset[] = ['scattered', 'terraced', 'heightmap'];
+const HEIGHTMAP_STYLES: HeightmapStyle[] = ['rolling', 'terraces', 'islands', 'caves'];
 
 interface SliderDef<K> {
   key: K;
@@ -15,6 +20,7 @@ interface SliderDef<K> {
 const PLAYER_PARAMS: SliderDef<keyof PlayerParams>[] = [
   { key: 'speed', label: 'Speed', min: 1, max: 16, step: 0.5 },
   { key: 'stepHeight', label: 'Step Height', min: 0, max: 2, step: 0.1 },
+  { key: 'slopeHeight', label: 'Slope Height', min: 0, max: 4, step: 0.1 },
   { key: 'capsuleRadius', label: 'Capsule Radius', min: 0.1, max: 1.5, step: 0.05 },
   { key: 'hopHeight', label: 'Hop Intensity', min: 0, max: 0.5, step: 0.01 },
   { key: 'magnetRadius', label: 'Magnet Radius', min: 0, max: 10, step: 0.5 },
@@ -158,6 +164,97 @@ function CollisionLayerSelect({ value, onChange }: { value: number; onChange: (v
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+function ScenePanel() {
+  const terrainPreset = useGameStore((s) => s.terrainPreset);
+  const heightmapStyle = useGameStore((s) => s.heightmapStyle);
+  const setTerrainPreset = useGameStore((s) => s.setTerrainPreset);
+  const setHeightmapStyle = useGameStore((s) => s.setHeightmapStyle);
+  const regenerate = useGameStore((s) => s.onRegenerateScene);
+  const heightmapThumb = useGameStore((s) => s.heightmapThumb);
+
+  return (
+    <div style={{ ...panelStyle, marginBottom: 4 }}>
+      {/* Heightmap thumbnail + label row */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+        {heightmapThumb && (
+          <img
+            src={heightmapThumb}
+            alt="heightmap"
+            style={{
+              width: 48,
+              height: 48,
+              imageRendering: 'pixelated',
+              border: '1px solid rgba(255,255,255,0.2)',
+              borderRadius: 3,
+              flexShrink: 0,
+            }}
+          />
+        )}
+        <div style={{ color: '#6af', fontSize: 10, fontWeight: 700, letterSpacing: 1.5 }}>TERRAIN</div>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+        <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Preset</span>
+        <div style={{ display: 'flex', gap: 3, flex: 1 }}>
+          {TERRAIN_PRESETS.map((p) => (
+            <button
+              key={p}
+              onClick={() => setTerrainPreset(p)}
+              style={{
+                ...btnStyle(terrainPreset === p),
+                flex: 1,
+                textTransform: 'capitalize',
+              }}
+            >
+              {p}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Heightmap style — only when heightmap preset */}
+      {terrainPreset === 'heightmap' && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+          <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Style</span>
+          <div style={{ display: 'flex', gap: 3, flex: 1 }}>
+            {HEIGHTMAP_STYLES.map((s) => (
+              <button
+                key={s}
+                onClick={() => setHeightmapStyle(s)}
+                style={{
+                  ...btnStyle(heightmapStyle === s),
+                  flex: 1,
+                  textTransform: 'capitalize',
+                }}
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Regenerate button */}
+      <button
+        onClick={() => regenerate?.()}
+        style={{
+          padding: '6px 12px',
+          background: 'rgba(100,220,120,0.2)',
+          color: '#8f8',
+          border: '1px solid rgba(100,220,120,0.4)',
+          borderRadius: 4,
+          cursor: 'pointer',
+          fontSize: 11,
+          fontWeight: 600,
+          letterSpacing: 0.5,
+          width: '100%',
+        }}
+      >
+        Regenerate
+      </button>
     </div>
   );
 }
@@ -310,8 +407,13 @@ export function SettingsPanel() {
         </div>
       )}
 
+      {active === 'scene' && <ScenePanel />}
+
       {/* Buttons */}
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 4 }}>
+        <button onClick={() => toggle('scene')} style={btnStyle(active === 'scene')}>
+          Scene
+        </button>
         <button onClick={() => toggle('player')} style={btnStyle(active === 'player')}>
           Player
         </button>
