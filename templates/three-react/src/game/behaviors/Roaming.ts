@@ -1,4 +1,5 @@
 import { Behavior, type BehaviorAgent, type BehaviorContext, type BehaviorStatus } from './Behavior';
+import type { WaypointMeta } from '../AStar';
 
 export interface RoamingOptions {
   /** Movement speed */
@@ -53,10 +54,12 @@ export class Roaming extends Behavior {
   private idleTimer = 0;
   private waypoints: { x: number; z: number }[] = [];
   private rawWaypoints: { x: number; z: number }[] = [];
+  private waypointMeta: WaypointMeta[] = [];
   private waypointIndex = 0;
   private stuckTimer = 0;
   private lastProgressX = 0;
   private lastProgressZ = 0;
+  private isOnLadder = false;
 
   constructor(ctx: BehaviorContext, options?: RoamingOptions) {
     super(ctx);
@@ -117,6 +120,7 @@ export class Roaming extends Behavior {
 
       this.waypoints = result.path.slice(1);
       this.rawWaypoints = result.rawPath.slice(1);
+      this.waypointMeta = result.meta.slice(1);
       this.waypointIndex = 0;
       this.stuckTimer = 0;
       this.lastProgressX = agent.getX();
@@ -130,6 +134,21 @@ export class Roaming extends Behavior {
   }
 
   private followPath(agent: BehaviorAgent, dt: number): void {
+    // Handle active climbing
+    if (this.isOnLadder) {
+      if (agent.updateClimb(dt)) {
+        return; // still climbing
+      }
+      // Climb finished — advance past ladder waypoint
+      this.isOnLadder = false;
+      this.waypointIndex++;
+      this.resetStuck(agent);
+      if (this.waypointIndex >= this.waypoints.length) {
+        this.enterIdle();
+      }
+      return;
+    }
+
     if (this.waypointIndex >= this.waypoints.length) {
       this.enterIdle();
       return;
@@ -148,7 +167,21 @@ export class Roaming extends Behavior {
       this.resetStuck(agent);
       if (this.waypointIndex >= this.waypoints.length) {
         this.enterIdle();
+        return;
       }
+
+      // After arriving at a waypoint, check if the NEXT waypoint is a ladder arrival cell.
+      // If so, trigger the climb immediately from here (the departure cell).
+      const newMeta = this.waypointMeta[this.waypointIndex];
+      if (newMeta && newMeta.ladderIndex !== null) {
+        const ladder = this.ctx.ladderDefs[newMeta.ladderIndex];
+        if (ladder) {
+          agent.startClimb(ladder, newMeta.climbDirection ?? 'up');
+          this.isOnLadder = true;
+          return;
+        }
+      }
+
       return;
     }
 
@@ -189,7 +222,9 @@ export class Roaming extends Behavior {
     this.state = 'idle';
     this.waypoints = [];
     this.rawWaypoints = [];
+    this.waypointMeta = [];
     this.waypointIndex = 0;
+    this.isOnLadder = false;
     this.idleTimer = this.randomIdle();
   }
 

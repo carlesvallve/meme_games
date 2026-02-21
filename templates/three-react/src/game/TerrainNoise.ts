@@ -4,6 +4,13 @@
  * algorithms and provides bilinear interpolation for height queries.
  */
 
+import type { LadderDef } from './Ladder';
+
+export interface HeightmapResult {
+  heights: Float32Array;
+  ladders: LadderDef[];
+}
+
 // ── Seeded permutation table ────────────────────────────────────────
 
 function buildPerm(seed: number): Uint8Array {
@@ -253,7 +260,7 @@ export function generateHeightmap(
   config: HeightmapStyleConfig,
   groundSize: number,
   seed?: number,
-): Float32Array {
+): HeightmapResult {
   const { resolution, maxHeight, algorithm, quantizeStep } = config;
   const actualSeed = seed ?? (Date.now() & 0xffff);
   const verts = resolution + 1;
@@ -324,7 +331,11 @@ export function generateHeightmap(
     ensureConnectivity(grid, verts, SLOPE_HEIGHT * 0.75, quantizeStep, config.maxHeight);
   }
 
-  return grid;
+  // Ladder detection is now handled at the NavGrid level (Terrain.buildNavGrid)
+  // which uses actual walkability checks rather than vertex-level connectivity.
+  const ladders: LadderDef[] = [];
+
+  return { heights: grid, ladders };
 }
 
 // ── FBM generation ──────────────────────────────────────────────────
@@ -656,9 +667,12 @@ function labelRegions(
   return { labels, regionCount: regionId };
 }
 
-/** Collect border vertices for each region (vertices adjacent to a different label). */
+/** Collect border vertices for each region (vertices adjacent to a different label).
+ *  If interRegionOnly is true, map-edge vertices are NOT counted as borders —
+ *  only vertices next to a different non-ceiling region qualify. */
 function buildBoundaryIndex(
   labels: Int32Array, verts: number, regionCount: number,
+  interRegionOnly = false,
 ): Map<number, number[]> {
   const borders = new Map<number, number[]>();
   for (let r = 0; r < regionCount; r++) borders.set(r, []);
@@ -673,9 +687,12 @@ function buildBoundaryIndex(
       for (const [dx, dz] of dirs) {
         const nx = x + dx;
         const nz = z + dz;
-        if (nx < 0 || nx >= verts || nz < 0 || nz >= verts) { isBorder = true; continue; }
+        if (nx < 0 || nx >= verts || nz < 0 || nz >= verts) {
+          if (!interRegionOnly) isBorder = true;
+          continue;
+        }
         const nlab = labels[nz * verts + nx];
-        if (nlab !== lab) { isBorder = true; break; }
+        if (nlab !== lab && nlab >= 0) { isBorder = true; break; }
       }
       if (isBorder) borders.get(lab)!.push(i);
     }
@@ -845,45 +862,255 @@ function carveRampPath(
   }
 }
 
-/** Ensure all non-ceiling elevation zones are reachable from the spawn region.
- *  Iteratively carves ramps between disconnected regions in the heightmap. */
+/** Max height difference that ramps will bridge. Taller cliffs are left for ladders. */
+const MAX_RAMP_HEIGHT = 2.0;
+
+/** Ensure non-ceiling elevation zones are reachable from the spawn region.
+ *  Carves ramps for small height differences only. Tall cliffs are left for ladders. */
 function ensureConnectivity(
   grid: Float32Array, verts: number,
   slopeHeight: number, quantizeStep: number, maxHeight: number,
 ): void {
   const ceilingH = maxHeight * HEIGHT_CEILING_FRAC;
-  const spawnVertex = Math.floor(verts / 2); // center vertex index on each axis
+  const spawnVertex = Math.floor(verts / 2);
+
+  // Track region pairs we've skipped (too tall for ramps)
+  const skippedRegionPairs = new Set<string>();
 
   for (let iter = 0; iter < MAX_RAMP_ITER; iter++) {
     const { labels, regionCount } = labelRegions(grid, verts, slopeHeight, ceilingH);
 
-    // Identify spawn region
     const spawnLabel = labels[spawnVertex * verts + spawnVertex];
-    if (spawnLabel < 0) break; // spawn is in ceiling — shouldn't happen
+    if (spawnLabel < 0) break;
 
-    // Check if all non-ceiling vertices share spawn label
-    let allConnected = true;
+    // Collect all non-spawn regions
+    const otherRegions = new Set<number>();
     for (let i = 0; i < labels.length; i++) {
       if (labels[i] >= 0 && labels[i] !== spawnLabel) {
-        allConnected = false;
-        break;
+        otherRegions.add(labels[i]);
       }
     }
-    if (allConnected) break;
+    if (otherRegions.size === 0) break;
 
-    // Build boundary index and find closest disconnected region
     const borders = buildBoundaryIndex(labels, verts, regionCount);
-    const pair = findClosestBorderPair(borders, spawnLabel, labels, verts);
-    if (!pair) break;
+    const spawnBorder = borders.get(spawnLabel);
+    if (!spawnBorder || spawnBorder.length === 0) break;
+
+    // Find closest border pair that hasn't been skipped
+    let bestDist = Infinity;
+    let bestSrc = -1, bestDst = -1, bestRegion = -1;
+
+    for (const region of otherRegions) {
+      const pairKey = `${Math.min(spawnLabel, region)},${Math.max(spawnLabel, region)}`;
+      if (skippedRegionPairs.has(pairKey)) continue;
+
+      const rBorder = borders.get(region);
+      if (!rBorder || rBorder.length === 0) continue;
+
+      for (const si of spawnBorder) {
+        const sx = si % verts, sz = (si - sx) / verts;
+        for (const di of rBorder) {
+          const dx = di % verts, dz = (di - dx) / verts;
+          const dist = (sx - dx) * (sx - dx) + (sz - dz) * (sz - dz);
+          if (dist < bestDist) {
+            bestDist = dist; bestSrc = si; bestDst = di; bestRegion = region;
+          }
+        }
+      }
+    }
+
+    if (bestRegion < 0) break; // all remaining regions are skipped (too tall)
+
+    const hSrc = grid[bestSrc];
+    const hDst = grid[bestDst];
+    const heightDiff = Math.abs(hSrc - hDst);
+
+    if (heightDiff > MAX_RAMP_HEIGHT) {
+      // Too tall for a ramp — skip and leave for ladders
+      const pairKey = `${Math.min(spawnLabel, bestRegion)},${Math.max(spawnLabel, bestRegion)}`;
+      skippedRegionPairs.add(pairKey);
+      continue;
+    }
 
     // Carve ramp
-    const srcX = pair.srcIdx % verts;
-    const srcZ = (pair.srcIdx - srcX) / verts;
-    const dstX = pair.dstIdx % verts;
-    const dstZ = (pair.dstIdx - dstX) / verts;
+    const srcX = bestSrc % verts, srcZ = (bestSrc - srcX) / verts;
+    const dstX = bestDst % verts, dstZ = (bestDst - dstX) / verts;
     const path = bresenhamLine(srcX, srcZ, dstX, dstZ);
     carveRampPath(grid, verts, path, slopeHeight, RAMP_WIDTH, quantizeStep);
   }
+}
+
+// ── Ladder detection ────────────────────────────────────────────────
+// Single-pass: label regions, then for EACH non-spawn region find the
+// closest cliff-edge pair and place a ladder. No iteration needed.
+
+function detectLadderSites(
+  grid: Float32Array, verts: number,
+  slopeHeight: number, maxHeight: number, groundSize: number,
+): LadderDef[] {
+  const ceilingH = maxHeight * HEIGHT_CEILING_FRAC;
+  const spawnVertex = Math.floor(verts / 2);
+  const cellSize = groundSize / (verts - 1);
+  const halfGround = groundSize / 2;
+  const navCellSize = 0.5;
+  const navHalf = groundSize / 2;
+  const ladders: LadderDef[] = [];
+
+  const { labels, regionCount } = labelRegions(grid, verts, slopeHeight, ceilingH);
+  const spawnLabel = labels[spawnVertex * verts + spawnVertex];
+  if (spawnLabel < 0) return ladders;
+
+  // Collect all unique non-spawn, non-ceiling region IDs
+  const otherRegions = new Set<number>();
+  for (let i = 0; i < labels.length; i++) {
+    if (labels[i] >= 0 && labels[i] !== spawnLabel) {
+      otherRegions.add(labels[i]);
+    }
+  }
+  if (otherRegions.size === 0) return ladders;
+
+  console.log(`[detectLadderSites] spawnLabel=${spawnLabel}, ${otherRegions.size} disconnected region(s), ${regionCount} total regions`);
+
+  // Build borders for all regions (interRegionOnly = true to avoid map-edge vertices)
+  const borders = buildBoundaryIndex(labels, verts, regionCount, true);
+  const spawnBorder = borders.get(spawnLabel);
+
+  // Use a union-find to track which regions are transitively connected via ladders
+  // Start: spawn region is in one group, each other region is its own group
+  const parent = new Map<number, number>();
+  const find = (r: number): number => {
+    while (parent.has(r) && parent.get(r) !== r) {
+      const p = parent.get(r)!;
+      parent.set(r, parent.get(p) ?? p); // path compression
+      r = p;
+    }
+    return r;
+  };
+  const union = (a: number, b: number) => {
+    const ra = find(a), rb = find(b);
+    if (ra !== rb) parent.set(rb, ra);
+  };
+  // Initialize: every region is its own root
+  parent.set(spawnLabel, spawnLabel);
+  for (const r of otherRegions) parent.set(r, r);
+
+  // For each disconnected region, find closest border pair to ANY already-connected region
+  // and place a ladder. Repeat until all regions are connected.
+  const MAX_ITER = otherRegions.size + 5;
+  for (let iter = 0; iter < MAX_ITER; iter++) {
+    // Find the first region not yet connected to spawn
+    let targetRegion = -1;
+    for (const r of otherRegions) {
+      if (find(r) !== find(spawnLabel)) {
+        targetRegion = r;
+        break;
+      }
+    }
+    if (targetRegion < 0) break; // all connected
+
+    // Find closest border pair between ANY spawn-connected region and this target
+    const targetBorder = borders.get(targetRegion);
+    if (!targetBorder || targetBorder.length === 0) {
+      // Tiny region with no border — just mark it connected
+      union(spawnLabel, targetRegion);
+      continue;
+    }
+
+    let bestDist = Infinity;
+    let bestSrc = -1, bestDst = -1;
+
+    // Check spawn border → target border
+    if (spawnBorder) {
+      for (const si of spawnBorder) {
+        const sx = si % verts, sz = (si - sx) / verts;
+        for (const di of targetBorder) {
+          const dx = di % verts, dz = (di - dx) / verts;
+          const dist = (sx - dx) * (sx - dx) + (sz - dz) * (sz - dz);
+          if (dist < bestDist) {
+            bestDist = dist; bestSrc = si; bestDst = di;
+          }
+        }
+      }
+    }
+
+    // Also check other connected regions' borders → target border
+    for (const r of otherRegions) {
+      if (r === targetRegion) continue;
+      if (find(r) !== find(spawnLabel)) continue; // not connected yet
+      const rBorder = borders.get(r);
+      if (!rBorder) continue;
+      for (const si of rBorder) {
+        const sx = si % verts, sz = (si - sx) / verts;
+        for (const di of targetBorder) {
+          const dx = di % verts, dz = (di - dx) / verts;
+          const dist = (sx - dx) * (sx - dx) + (sz - dz) * (sz - dz);
+          if (dist < bestDist) {
+            bestDist = dist; bestSrc = si; bestDst = di;
+          }
+        }
+      }
+    }
+
+    if (bestSrc < 0) {
+      union(spawnLabel, targetRegion);
+      continue;
+    }
+
+    const hSrc = grid[bestSrc];
+    const hDst = grid[bestDst];
+
+    // Determine low/high sides
+    const lowIdx = hSrc <= hDst ? bestSrc : bestDst;
+    const highIdx = hSrc <= hDst ? bestDst : bestSrc;
+    const lowX = lowIdx % verts;
+    const lowZ = (lowIdx - lowX) / verts;
+    const highX = highIdx % verts;
+    const highZ = (highIdx - highX) / verts;
+    const lowH = grid[lowIdx];
+    const highH = grid[highIdx];
+
+    // Facing direction: from high side toward low side (cliff face normal)
+    let fdx = lowX - highX;
+    let fdz = lowZ - highZ;
+    const fLen = Math.sqrt(fdx * fdx + fdz * fdz);
+    if (fLen > 0) { fdx /= fLen; fdz /= fLen; }
+
+    // Convert vertex coordinates to world coordinates
+    const worldLowX = lowX * cellSize - halfGround;
+    const worldLowZ = lowZ * cellSize - halfGround;
+    const worldHighX = highX * cellSize - halfGround;
+    const worldHighZ = highZ * cellSize - halfGround;
+
+    // Place ladder at the midpoint of the cliff edge
+    const ladderX = (worldLowX + worldHighX) / 2;
+    const ladderZ = (worldLowZ + worldHighZ) / 2;
+
+    // Cell coords are placeholders — Terrain.ts will recompute with NavGrid.worldToGrid()
+    ladders.push({
+      bottomX: ladderX,
+      bottomZ: ladderZ,
+      bottomY: lowH,
+      topY: highH,
+      facingDX: fdx,
+      facingDZ: fdz,
+      lowWorldX: worldLowX,
+      lowWorldZ: worldLowZ,
+      highWorldX: worldHighX,
+      highWorldZ: worldHighZ,
+      bottomCellGX: 0,
+      bottomCellGZ: 0,
+      topCellGX: 0,
+      topCellGZ: 0,
+    });
+
+    console.log(`[Ladder ${ladders.length}] h=${(highH - lowH).toFixed(1)}m at (${ladderX.toFixed(1)}, ${ladderZ.toFixed(1)}) low=(${worldLowX.toFixed(1)},${worldLowZ.toFixed(1)}) high=(${worldHighX.toFixed(1)},${worldHighZ.toFixed(1)})`);
+
+    // Mark this region as connected
+    union(spawnLabel, targetRegion);
+  }
+
+  console.log(`[detectLadderSites] Created ${ladders.length} ladder(s) for ${otherRegions.size} disconnected regions`);
+  return ladders;
 }
 
 // ── Bilinear height sampling ────────────────────────────────────────

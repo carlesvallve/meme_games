@@ -1,6 +1,7 @@
 import type { NavGrid } from '../NavGrid';
 import type { PathResult } from '../AStar';
 import { findPath } from '../AStar';
+import type { LadderDef } from '../Ladder';
 
 /** Minimal interface a behavior needs from its owner */
 export interface BehaviorAgent {
@@ -10,10 +11,17 @@ export interface BehaviorAgent {
   move(dx: number, dz: number, speed: number, stepHeight: number, capsuleRadius: number, dt: number, slopeHeight?: number): boolean;
   applyHop(hopHeight: number): number;
   updateIdle(dt: number): void;
+  /** Start climbing a ladder */
+  startClimb(ladder: LadderDef, direction: 'up' | 'down'): void;
+  /** Update climbing animation, returns true while climbing */
+  updateClimb(dt: number): boolean;
+  /** Check if character is currently climbing */
+  isClimbing(): boolean;
 }
 
 export interface BehaviorContext {
   navGrid: NavGrid;
+  ladderDefs: ReadonlyArray<LadderDef>;
 }
 
 export type BehaviorStatus = 'running' | 'done';

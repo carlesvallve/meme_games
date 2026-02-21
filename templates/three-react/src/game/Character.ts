@@ -4,7 +4,14 @@ import { createCharacterMesh } from './characters';
 import type { CharacterType } from './characters';
 import { Entity, Layer } from './Entity';
 import type { Terrain } from './Terrain';
+import type { NavGrid } from './NavGrid';
+import { Behavior, type BehaviorAgent, type BehaviorStatus } from './behaviors/Behavior';
+import { Roaming } from './behaviors/Roaming';
+import { GoToPoint } from './behaviors/GoToPoint';
+import { IdleBehavior } from './behaviors/IdleBehavior';
+import { PlayerControl, type PlayerControlDeps } from './behaviors/PlayerControl';
 import { audioSystem } from '../utils/AudioSystem';
+import type { LadderDef } from './Ladder';
 
 export function lerpAngle(current: number, target: number, t: number): number {
   let diff = target - current;
@@ -22,20 +29,67 @@ const STEP_UP_RATE = 12;
 /** Minimum time between any foot sounds (step or land) per character */
 const FOOT_SFX_COOLDOWN = 0.12;
 
-export class Character {
+// ── Climbing constants ──────────────────────────────────────────────
+const CLIMB_SPEED = 2.5;       // m/s along ladder
+const MOUNT_SPEED = 4.0;       // m/s walking to ladder entry
+const DISMOUNT_SPEED = 3.0;    // m/s stepping off ladder
+/** How far the character stands in front of the cliff during climbing (along facing normal) */
+const CLIMB_WALL_OFFSET = 0.35;
+
+type ClimbPhase = 'face' | 'mount' | 'climb' | 'dismount';
+
+interface ClimbState {
+  ladder: LadderDef;
+  direction: 'up' | 'down';
+  phase: ClimbPhase;
+  phaseTime: number;
+  mountDuration: number;
+  dismountDuration: number;
+  startX: number;
+  startZ: number;
+  startY: number;
+  targetFacing: number;
+  leanAngle: number;
+  /** Actual cliff geometry used for climb path */
+  cLowX: number; cLowZ: number; cLowY: number;
+  cHighX: number; cHighZ: number; cHighY: number;
+  /** Cliff-derived facing direction */
+  cfDX: number; cfDZ: number;
+}
+
+// ── Debug visualization constants ───────────────────────────────────
+const DEBUG_PATH = true;
+const DEBUG_LINE_COLOR = 0x00ffaa;
+const DEBUG_NODE_COLOR = 0x00ffaa;
+const DEBUG_GOAL_COLOR = 0xff4466;
+const DEBUG_NODE_RADIUS = 0.08;
+const DEBUG_GOAL_RADIUS = 0.14;
+const DEBUG_Y_OFFSET = 0;
+
+let _nodeGeo: THREE.SphereGeometry | null = null;
+let _goalGeo: THREE.SphereGeometry | null = null;
+function getNodeGeo(): THREE.SphereGeometry {
+  if (!_nodeGeo) _nodeGeo = new THREE.SphereGeometry(DEBUG_NODE_RADIUS, 6, 4);
+  return _nodeGeo;
+}
+function getGoalGeo(): THREE.SphereGeometry {
+  if (!_goalGeo) _goalGeo = new THREE.SphereGeometry(DEBUG_GOAL_RADIUS, 8, 6);
+  return _goalGeo;
+}
+
+export class Character implements BehaviorAgent {
   readonly mesh: THREE.Mesh;
+  readonly characterType: CharacterType;
   entity: Entity;
   facing = 0;
   groundY = 0;
-  /** Smoothed visual Y — lags behind groundY for smooth transitions */
   protected visualGroundY = 0;
-  /** Vertical velocity for gravity-based falling */
   private velocityY = 0;
   moveTime = 0;
   lastHopHalf = 0;
   hopFrequency = 4;
-  /** Time since last foot sound (step or land) */
   protected footSfxTimer = 0;
+  private climbState: ClimbState | null = null;
 
   torchLight: THREE.PointLight;
   torchLightEntity: Entity;
@@ -44,10 +98,30 @@ export class Character {
 
   protected scene: THREE.Scene;
   protected terrain: Terrain;
+  private navGrid: NavGrid;
+  private ladderDefs: ReadonlyArray<LadderDef>;
 
-  constructor(scene: THREE.Scene, terrain: Terrain, type: CharacterType, position: THREE.Vector3) {
+  // ── Behavior system ─────────────────────────────────────────────
+  private behavior: Behavior;
+  private defaultBehavior: Roaming;
+  private playerControl: PlayerControl | null = null;
+  private _selected = false;
+
+  // ── Debug visualization ─────────────────────────────────────────
+  private debugLine: THREE.Line | null = null;
+  private debugNodes: THREE.Mesh[] = [];
+  private debugGoal: THREE.Mesh | null = null;
+  private debugLineMat: THREE.LineBasicMaterial | null = null;
+  private debugNodeMat: THREE.MeshBasicMaterial | null = null;
+  private debugGoalMat: THREE.MeshBasicMaterial | null = null;
+  private lastDebugWaypointCount = 0;
+
+  constructor(scene: THREE.Scene, terrain: Terrain, navGrid: NavGrid, type: CharacterType, position: THREE.Vector3, ladderDefs: ReadonlyArray<LadderDef> = []) {
     this.scene = scene;
     this.terrain = terrain;
+    this.navGrid = navGrid;
+    this.characterType = type;
+    this.ladderDefs = ladderDefs;
 
     // Mesh
     this.mesh = createCharacterMesh(type);
@@ -73,12 +147,103 @@ export class Character {
     this.fillLight = new THREE.PointLight(new THREE.Color(torch.color), torch.intensity * 0.4, 3);
     this.fillLight.castShadow = false;
     scene.add(this.fillLight);
+
+    // Default behavior: roaming
+    this.defaultBehavior = new Roaming({ navGrid, ladderDefs });
+    this.behavior = this.defaultBehavior;
+
+    // Debug materials
+    if (DEBUG_PATH) {
+      this.debugLineMat = new THREE.LineBasicMaterial({ color: DEBUG_LINE_COLOR, transparent: true, opacity: 0.6 });
+      this.debugNodeMat = new THREE.MeshBasicMaterial({ color: DEBUG_NODE_COLOR, transparent: true, opacity: 0.7 });
+      this.debugGoalMat = new THREE.MeshBasicMaterial({ color: DEBUG_GOAL_COLOR, transparent: true, opacity: 0.8 });
+    }
   }
 
-  /**
-   * Move character by direction vector. Does NOT read input — receives normalized dx/dz.
-   * Returns true if character moved.
-   */
+  // ── BehaviorAgent interface ──────────────────────────────────────
+
+  getX(): number { return this.mesh.position.x; }
+  getZ(): number { return this.mesh.position.z; }
+
+  /** Override applyHop to emit spatial step SFX */
+  applyHop(hopHeight: number): number {
+    const hopSin = Math.sin(this.moveTime * Math.PI);
+    const hop = Math.abs(hopSin) * hopHeight;
+    this.mesh.position.y = this.visualGroundY + hop;
+    const currentHopHalf = Math.floor(this.moveTime) % 2;
+
+    if (currentHopHalf !== this.lastHopHalf && this.footSfxTimer >= 0.12) {
+      this.lastHopHalf = currentHopHalf;
+      this.footSfxTimer = 0;
+      if (this._selected) {
+        audioSystem.sfx('step');
+      } else {
+        audioSystem.sfxAt('step', this.mesh.position.x, this.mesh.position.z);
+      }
+    }
+
+    return currentHopHalf;
+  }
+
+  // ── Selection & control switching ────────────────────────────────
+
+  get selected(): boolean { return this._selected; }
+
+  /** Switch this character to player (WASD) control. */
+  setPlayerControlled(deps: PlayerControlDeps): void {
+    this._selected = true;
+    this.playerControl = new PlayerControl({ navGrid: this.navGrid, ladderDefs: this.ladderDefs }, deps);
+    this.behavior = this.playerControl;
+  }
+
+  /** Revert this character to AI (roaming) control. */
+  setAIControlled(): void {
+    this._selected = false;
+    this.playerControl = null;
+    this.behavior = this.defaultBehavior;
+  }
+
+  /** Set a click-to-move goal via A* pathfinding. */
+  goTo(worldX: number, worldZ: number): void {
+    this.clearDebugVis();
+    this.behavior = new GoToPoint({ navGrid: this.navGrid, ladderDefs: this.ladderDefs }, worldX, worldZ);
+  }
+
+  getCameraTarget(): { x: number; y: number; z: number } {
+    return {
+      x: this.mesh.position.x,
+      y: this.visualGroundY + 0.5,
+      z: this.mesh.position.z,
+    };
+  }
+
+  // ── Update ───────────────────────────────────────────────────────
+
+  update(dt: number): void {
+    // WASD interrupts GoToPoint for player-controlled characters
+    if (this._selected && this.playerControl && this.behavior instanceof GoToPoint) {
+      if (this.playerControl.hasInput()) {
+        this.behavior = this.playerControl;
+      }
+    }
+
+    const status = this.behavior.update(this, dt);
+
+    // If GoToPoint finished, revert to appropriate behavior
+    if (status === 'done') {
+      if (this._selected && this.playerControl) {
+        this.behavior = this.playerControl;
+      } else {
+        this.behavior = this.defaultBehavior;
+      }
+    }
+
+    if (DEBUG_PATH) this.syncDebugVis();
+    this.updateTorch(dt);
+  }
+
+  // ── Movement (BehaviorAgent) ─────────────────────────────────────
+
   move(dx: number, dz: number, speed: number, stepHeight: number, capsuleRadius: number, dt: number, slopeHeight?: number): boolean {
     if (Math.abs(dx) < 0.001 && Math.abs(dz) < 0.001) return false;
     this.footSfxTimer += dt;
@@ -93,26 +258,19 @@ export class Character {
     this.mesh.position.z = resolved.z;
     this.groundY = resolved.y;
 
-    // Smooth vertical transitions
     this.updateVisualY(dt);
 
-    // Face movement direction (add PI because voxel model front is -Z)
     const targetAngle = Math.atan2(dx, dz) + Math.PI;
     this.facing = lerpAngle(this.facing, targetAngle, 1 - Math.exp(-12 * dt));
     this.mesh.rotation.y = this.facing;
 
-    // Hop animation
     this.moveTime += dt * this.hopFrequency;
 
     return true;
   }
 
-  /** Smooth vertical transitions:
-   *  - Stepping up: exponential lerp (smooth climb)
-   *  - Falling down: gravity-based (natural drop) */
   private updateVisualY(dt: number): void {
     if (this.groundY > this.visualGroundY) {
-      // Stepping up — smooth lerp
       this.visualGroundY = THREE.MathUtils.lerp(
         this.visualGroundY,
         this.groundY,
@@ -120,15 +278,12 @@ export class Character {
       );
       this.velocityY = 0;
     } else if (this.groundY < this.visualGroundY) {
-      // Falling — gravity
       this.velocityY = Math.min(this.velocityY + GRAVITY * dt, MAX_FALL_SPEED);
       this.visualGroundY -= this.velocityY * dt;
-      // Clamp to ground — land with thud
       if (this.visualGroundY <= this.groundY) {
         const impactSpeed = this.velocityY;
         this.visualGroundY = this.groundY;
         this.velocityY = 0;
-        // Thud intensity based on how fast we were falling (normalized to max)
         if (impactSpeed > 1 && this.footSfxTimer >= FOOT_SFX_COOLDOWN) {
           audioSystem.sfxAt('land', this.mesh.position.x, this.mesh.position.z);
           this.footSfxTimer = 0;
@@ -139,15 +294,6 @@ export class Character {
     }
   }
 
-  /** Apply hop to mesh Y position. Returns the current hop half for SFX detection. */
-  applyHop(hopHeight: number): number {
-    const hopSin = Math.sin(this.moveTime * Math.PI);
-    const hop = Math.abs(hopSin) * hopHeight;
-    this.mesh.position.y = this.visualGroundY + hop;
-    return Math.floor(this.moveTime) % 2;
-  }
-
-  /** Lerp mesh Y to groundY when not moving */
   updateIdle(dt: number): void {
     this.footSfxTimer += dt;
     if (this.moveTime > 0) {
@@ -162,7 +308,6 @@ export class Character {
     );
   }
 
-  /** Update torch and fill lights */
   updateTorch(dt: number): void {
     const torchOn = useGameStore.getState().torchEnabled;
     const torch = useGameStore.getState().torchParams;
@@ -176,7 +321,6 @@ export class Character {
     this.torchLight.color.set(torch.color);
     this.torchLight.distance = torch.distance;
 
-    // Flicker
     this.torchTime += dt * 12;
     const flickerAmount = torch.flicker;
     const flicker = 1 + (
@@ -186,14 +330,12 @@ export class Character {
     ) * flickerAmount;
     this.torchLight.intensity = torch.intensity * flicker;
 
-    // Main torch — centered above character
     this.torchLight.position.set(
       this.mesh.position.x,
       this.mesh.position.y + torch.offsetUp,
       this.mesh.position.z,
     );
 
-    // Fill light — offset to front-right to illuminate the character mesh
     const fwdX = -Math.sin(this.facing);
     const fwdZ = -Math.cos(this.facing);
     const rightX = -fwdZ;
@@ -207,11 +349,293 @@ export class Character {
     );
   }
 
+  // ── Climbing ─────────────────────────────────────────────────────
+
+  startClimb(ladder: LadderDef, direction: 'up' | 'down'): void {
+    if (this.climbState) return;
+
+    // Use actual cliff geometry positions if available, fallback to cell centers
+    const cLowX = ladder.cliffLowX ?? ladder.lowWorldX;
+    const cLowZ = ladder.cliffLowZ ?? ladder.lowWorldZ;
+    const cHighX = ladder.cliffHighX ?? ladder.highWorldX;
+    const cHighZ = ladder.cliffHighZ ?? ladder.highWorldZ;
+
+    // Compute facing from actual cliff geometry direction (high→low = facing direction)
+    let cfDX = cLowX - cHighX;
+    let cfDZ = cLowZ - cHighZ;
+    const cfLen = Math.sqrt(cfDX * cfDX + cfDZ * cfDZ);
+    if (cfLen > 0.001) { cfDX /= cfLen; cfDZ /= cfLen; }
+    else { cfDX = ladder.facingDX; cfDZ = ladder.facingDZ; }
+
+    const targetFacing = Math.atan2(cfDX, cfDZ);
+
+    const offX = cfDX * CLIMB_WALL_OFFSET;
+    const offZ = cfDZ * CLIMB_WALL_OFFSET;
+    const entryX = (direction === 'up' ? cLowX : cHighX) + offX;
+    const entryZ = (direction === 'up' ? cLowZ : cHighZ) + offZ;
+    const mountDist = Math.sqrt(
+      (this.mesh.position.x - entryX) ** 2 + (this.mesh.position.z - entryZ) ** 2,
+    );
+    const mountDuration = Math.max(0.05, mountDist / MOUNT_SPEED);
+    const dismountDuration = Math.max(0.05, 0.4 / DISMOUNT_SPEED);
+
+    const cLowY = ladder.cliffLowY ?? ladder.bottomY;
+    const cHighY = ladder.cliffHighY ?? ladder.topY;
+    const leanAngle = -(ladder.leanAngle ?? Math.atan2(
+      Math.sqrt((cHighX - cLowX) ** 2 + (cHighZ - cLowZ) ** 2),
+      cHighY - cLowY,
+    ));
+
+    this.climbState = {
+      ladder,
+      direction,
+      phase: 'face',
+      phaseTime: 0,
+      mountDuration,
+      dismountDuration,
+      startX: this.mesh.position.x,
+      startZ: this.mesh.position.z,
+      startY: this.visualGroundY,
+      targetFacing,
+      leanAngle,
+      cLowX, cLowZ, cLowY,
+      cHighX, cHighZ, cHighY,
+      cfDX, cfDZ,
+    };
+  }
+
+  updateClimb(dt: number): boolean {
+    const cs = this.climbState;
+    if (!cs) return false;
+
+    cs.phaseTime += dt;
+
+    switch (cs.phase) {
+      case 'face':
+        cs.phase = 'mount';
+        cs.phaseTime = 0;
+        // fallthrough
+
+      case 'mount': {
+        const t = Math.min(1, cs.phaseTime / cs.mountDuration);
+        const oX = cs.cfDX * CLIMB_WALL_OFFSET;
+        const oZ = cs.cfDZ * CLIMB_WALL_OFFSET;
+        const targetX = (cs.direction === 'up' ? cs.cLowX : cs.cHighX) + oX;
+        const targetZ = (cs.direction === 'up' ? cs.cLowZ : cs.cHighZ) + oZ;
+        this.mesh.position.x = cs.startX + (targetX - cs.startX) * t;
+        this.mesh.position.z = cs.startZ + (targetZ - cs.startZ) * t;
+        this.facing = lerpAngle(this.facing, cs.targetFacing, 1 - Math.exp(-8 * dt));
+        this.mesh.rotation.order = 'YXZ';
+        this.mesh.rotation.y = this.facing;
+        this.mesh.rotation.x = THREE.MathUtils.lerp(0, cs.leanAngle, t);
+        if (cs.phaseTime >= cs.mountDuration) {
+          this.facing = cs.targetFacing;
+          this.mesh.rotation.y = this.facing;
+          this.mesh.rotation.x = cs.leanAngle;
+          cs.phase = 'climb';
+          cs.phaseTime = 0;
+        }
+        break;
+      }
+
+      case 'climb': {
+        const dy = Math.abs(cs.cHighY - cs.cLowY);
+        const dxW = cs.cHighX - cs.cLowX;
+        const dzW = cs.cHighZ - cs.cLowZ;
+        const horizDist = Math.sqrt(dxW * dxW + dzW * dzW);
+        const totalLen = Math.sqrt(horizDist * horizDist + dy * dy);
+        const climbDuration = totalLen / CLIMB_SPEED;
+        const t = Math.min(1, cs.phaseTime / climbDuration);
+        const oX = cs.cfDX * CLIMB_WALL_OFFSET;
+        const oZ = cs.cfDZ * CLIMB_WALL_OFFSET;
+
+        if (cs.direction === 'up') {
+          this.mesh.position.x = cs.cLowX + dxW * t + oX;
+          this.mesh.position.z = cs.cLowZ + dzW * t + oZ;
+          const y = cs.cLowY + dy * t;
+          this.groundY = y;
+          this.visualGroundY = y;
+          this.mesh.position.y = y;
+        } else {
+          this.mesh.position.x = cs.cHighX - dxW * t + oX;
+          this.mesh.position.z = cs.cHighZ - dzW * t + oZ;
+          const y = cs.cHighY - dy * t;
+          this.groundY = y;
+          this.visualGroundY = y;
+          this.mesh.position.y = y;
+        }
+
+        this.facing = lerpAngle(this.facing, cs.targetFacing, 1 - Math.exp(-20 * dt));
+        this.mesh.rotation.order = 'YXZ';
+        this.mesh.rotation.y = this.facing;
+        this.mesh.rotation.x = cs.leanAngle;
+
+        if (cs.phaseTime >= climbDuration) {
+          cs.phase = 'dismount';
+          cs.phaseTime = 0;
+        }
+        break;
+      }
+
+      case 'dismount': {
+        const t = Math.min(1, cs.phaseTime / cs.dismountDuration);
+        const DISMOUNT_DIST = 0.4;
+        const oX = cs.cfDX * CLIMB_WALL_OFFSET;
+        const oZ = cs.cfDZ * CLIMB_WALL_OFFSET;
+
+        let exitX: number, exitZ: number;
+        if (cs.direction === 'up') {
+          // Step away from cliff onto the high plateau
+          exitX = cs.cHighX - cs.cfDX * DISMOUNT_DIST;
+          exitZ = cs.cHighZ - cs.cfDZ * DISMOUNT_DIST;
+        } else {
+          // Step away from cliff onto the low ground
+          exitX = cs.cLowX + cs.cfDX * DISMOUNT_DIST;
+          exitZ = cs.cLowZ + cs.cfDZ * DISMOUNT_DIST;
+        }
+
+        const startX = (cs.direction === 'up' ? cs.cHighX : cs.cLowX) + oX;
+        const startZ = (cs.direction === 'up' ? cs.cHighZ : cs.cLowZ) + oZ;
+
+        const curX = startX + (exitX - startX) * t;
+        const curZ = startZ + (exitZ - startZ) * t;
+        this.mesh.position.x = curX;
+        this.mesh.position.z = curZ;
+
+        const terrainY = this.terrain.getTerrainY(curX, curZ);
+        this.groundY = terrainY;
+        this.visualGroundY = THREE.MathUtils.lerp(
+          this.visualGroundY, terrainY, 1 - Math.exp(-STEP_UP_RATE * dt),
+        );
+        this.mesh.position.y = this.visualGroundY;
+
+        this.facing = cs.targetFacing;
+        this.mesh.rotation.order = 'YXZ';
+        this.mesh.rotation.y = this.facing;
+        this.mesh.rotation.x = cs.leanAngle * (1 - t);
+
+        if (cs.phaseTime >= cs.dismountDuration) {
+          this.velocityY = 0;
+          this.mesh.rotation.order = 'XYZ';
+          this.mesh.rotation.x = 0;
+          this.climbState = null;
+          return false;
+        }
+        break;
+      }
+    }
+
+    this.updateTorch(dt);
+    return true;
+  }
+
+  isClimbing(): boolean {
+    return this.climbState !== null;
+  }
+
   getPosition(): THREE.Vector3 {
     return this.mesh.position;
   }
 
+  // ── Debug visualization ──────────────────────────────────────────
+
+  private syncDebugVis(): void {
+    const waypoints = this.behavior.getWaypoints();
+    const idx = this.behavior.getWaypointIndex();
+    const remaining = waypoints.slice(idx);
+
+    if (remaining.length === 0) {
+      if (this.debugLine) this.clearDebugVis();
+      this.lastDebugWaypointCount = 0;
+      return;
+    }
+
+    if (!this.debugLine) {
+      this.buildDebugVis(remaining);
+      this.lastDebugWaypointCount = remaining.length;
+      return;
+    }
+
+    this.updateDebugLine(remaining);
+
+    while (this.debugNodes.length > Math.max(0, remaining.length - 1)) {
+      const node = this.debugNodes.shift()!;
+      this.scene.remove(node);
+    }
+
+    this.lastDebugWaypointCount = remaining.length;
+  }
+
+  private buildDebugVis(remaining: ReadonlyArray<{ x: number; z: number }>): void {
+    this.clearDebugVis();
+    if (!this.debugLineMat || !this.debugNodeMat || !this.debugGoalMat) return;
+    if (remaining.length === 0) return;
+
+    const points = this.buildLinePoints(remaining);
+    const lineGeo = new THREE.BufferGeometry().setFromPoints(points);
+    this.debugLine = new THREE.Line(lineGeo, this.debugLineMat);
+    this.scene.add(this.debugLine);
+
+    for (let i = 0; i < remaining.length - 1; i++) {
+      const wp = remaining[i];
+      const wy = this.terrain.getTerrainY(wp.x, wp.z) + DEBUG_Y_OFFSET;
+      const sphere = new THREE.Mesh(getNodeGeo(), this.debugNodeMat);
+      sphere.position.set(wp.x, wy, wp.z);
+      sphere.scale.set(0.5, 0.5, 0.5);
+      this.scene.add(sphere);
+      this.debugNodes.push(sphere);
+    }
+
+    const goal = remaining[remaining.length - 1];
+    const goalY = this.terrain.getTerrainY(goal.x, goal.z) + DEBUG_Y_OFFSET;
+    this.debugGoal = new THREE.Mesh(getGoalGeo(), this.debugGoalMat);
+    this.debugGoal.position.set(goal.x, goalY, goal.z);
+    this.debugGoal.scale.set(0.5, 0.5, 0.5);
+    this.scene.add(this.debugGoal);
+  }
+
+  private updateDebugLine(remaining: ReadonlyArray<{ x: number; z: number }>): void {
+    if (!this.debugLine) return;
+    const points = this.buildLinePoints(remaining);
+    const geo = this.debugLine.geometry as THREE.BufferGeometry;
+    geo.setFromPoints(points);
+  }
+
+  private buildLinePoints(remaining: ReadonlyArray<{ x: number; z: number }>): THREE.Vector3[] {
+    const points: THREE.Vector3[] = [];
+    points.push(new THREE.Vector3(
+      this.mesh.position.x,
+      this.mesh.position.y + DEBUG_Y_OFFSET,
+      this.mesh.position.z,
+    ));
+    for (const wp of remaining) {
+      const wy = this.terrain.getTerrainY(wp.x, wp.z) + DEBUG_Y_OFFSET;
+      points.push(new THREE.Vector3(wp.x, wy, wp.z));
+    }
+    return points;
+  }
+
+  private clearDebugVis(): void {
+    if (this.debugLine) {
+      this.debugLine.geometry.dispose();
+      this.scene.remove(this.debugLine);
+      this.debugLine = null;
+    }
+    for (const node of this.debugNodes) {
+      this.scene.remove(node);
+    }
+    this.debugNodes = [];
+    if (this.debugGoal) {
+      this.scene.remove(this.debugGoal);
+      this.debugGoal = null;
+    }
+  }
+
   dispose(): void {
+    this.clearDebugVis();
+    this.debugLineMat?.dispose();
+    this.debugNodeMat?.dispose();
+    this.debugGoalMat?.dispose();
     this.entity.destroy();
     this.torchLightEntity.destroy();
     this.scene.remove(this.mesh);
