@@ -18,19 +18,19 @@ import { sfxPotion } from './sfx/potion';
  * No flat zone — volume decreases smoothly from distance 0.
  * Sounds beyond MAX_HEARING_RANGE are culled entirely.
  *
- * With ROLLOFF_REF = 12:
+ * With ROLLOFF_REF = 3:
  *   dist  0 → vol 1.00  (right on top)
- *   dist  3 → vol 0.80
- *   dist  6 → vol 0.67
- *   dist 12 → vol 0.50
- *   dist 20 → vol 0.38
- *   dist 25 → culled (silent)
+ *   dist  2 → vol 0.60
+ *   dist  5 → vol 0.38
+ *   dist  8 → vol 0.27
+ *   dist 12 → vol 0.20
+ *   dist 15 → culled (silent)
  *
  * Increase ROLLOFF_REF for slower falloff (louder at range).
  * Decrease for faster falloff (quieter at range).
  */
-const MAX_HEARING_RANGE = 25;
-const ROLLOFF_REF = 12;
+const MAX_HEARING_RANGE = 15;
+const ROLLOFF_REF = 3;
 
 class AudioSystemClass {
   private ctx: AudioContext | null = null;

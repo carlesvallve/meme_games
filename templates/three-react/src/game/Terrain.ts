@@ -376,6 +376,16 @@ export class Terrain {
           tmpColor.copy(colorSteepSlope).lerp(colorCliff, t);
         }
 
+        // Cliff-base fix: if a neighbor sample is much higher than this vertex,
+        // we're at the foot of a cliff — blend back toward ground color to prevent
+        // gray rock bleeding onto flat ground cells.
+        const maxNeighborH = Math.max(hL, hR, hU, hD);
+        const cliffAbove = maxNeighborH - hC;
+        if (cliffAbove > 0.3) {
+          const baseBlend = Math.min(1, (cliffAbove - 0.3) / 0.5);
+          tmpColor.lerp(colorFlat, baseBlend * 0.85);
+        }
+
         // Subtle height variation to avoid flat-looking large terraces
         const heightVar = 0.92 + 0.16 * (hC / Math.max(config.maxHeight, 1));
         tmpColor.multiplyScalar(heightVar);
@@ -974,11 +984,6 @@ export class Terrain {
       ladder.topCellGX = top.gx;
       ladder.topCellGZ = top.gz;
 
-      // Verify cells exist and log
-      bottomCell = grid.getCell(bottom.gx, bottom.gz);
-      topCell = grid.getCell(top.gx, top.gz);
-      console.log(`[NavLink ${i}] bottom=(${bottom.gx},${bottom.gz}) h=${bottomCell?.surfaceHeight.toFixed(1)} passable=${bottomCell?.passable} | top=(${top.gx},${top.gz}) h=${topCell?.surfaceHeight.toFixed(1)} passable=${topCell?.passable} | ladderH=${(ladder.topY - ladder.bottomY).toFixed(1)}m`);
-
       grid.addNavLink(bottom.gx, bottom.gz, top.gx, top.gz, LADDER_COST, i);
     }
 
@@ -1036,186 +1041,207 @@ export class Terrain {
   }
 
   /** BFS the NavGrid to find disconnected walkable regions and bridge them with ladders. */
+  /** Place a single ladder between two grid cells and register the nav-link. */
+  private placeLadder(
+    grid: NavGrid, ladderCost: number, navLinkOffset: number,
+    agx: number, agz: number, bgx: number, bgz: number,
+  ): boolean {
+    const cellA = grid.getCell(agx, agz)!;
+    const cellB = grid.getCell(bgx, bgz)!;
+    const aWorld = grid.gridToWorld(agx, agz);
+    const bWorld = grid.gridToWorld(bgx, bgz);
+
+    const aIsLow = cellA.surfaceHeight <= cellB.surfaceHeight;
+    const lowCell = aIsLow ? cellA : cellB;
+    const highCell = aIsLow ? cellB : cellA;
+    const lowWorld = aIsLow ? aWorld : bWorld;
+    const highWorld = aIsLow ? bWorld : aWorld;
+    const lowGX = aIsLow ? agx : bgx;
+    const lowGZ = aIsLow ? agz : bgz;
+    const highGX = aIsLow ? bgx : agx;
+    const highGZ = aIsLow ? bgz : agz;
+
+    const heightDiff = highCell.surfaceHeight - lowCell.surfaceHeight;
+    if (heightDiff < 0.3) return false;
+
+    let fdx = lowWorld.x - highWorld.x;
+    let fdz = lowWorld.z - highWorld.z;
+    const fLen = Math.sqrt(fdx * fdx + fdz * fdz);
+    if (fLen > 0) { fdx /= fLen; fdz /= fLen; }
+
+    const ladderDef: LadderDef = {
+      bottomX: (lowWorld.x + highWorld.x) / 2,
+      bottomZ: (lowWorld.z + highWorld.z) / 2,
+      bottomY: lowCell.surfaceHeight,
+      topY: highCell.surfaceHeight,
+      facingDX: fdx,
+      facingDZ: fdz,
+      lowWorldX: lowWorld.x,
+      lowWorldZ: lowWorld.z,
+      highWorldX: highWorld.x,
+      highWorldZ: highWorld.z,
+      bottomCellGX: lowGX,
+      bottomCellGZ: lowGZ,
+      topCellGX: highGX,
+      topCellGZ: highGZ,
+    };
+
+    const ladderIndex = this.ladderDefs.length;
+    this.ladderDefs.push(ladderDef);
+
+    const bottomNavX = lowWorld.x + fdx * navLinkOffset;
+    const bottomNavZ = lowWorld.z + fdz * navLinkOffset;
+    const topNavX = highWorld.x - fdx * navLinkOffset;
+    const topNavZ = highWorld.z - fdz * navLinkOffset;
+
+    let bottom = grid.worldToGrid(bottomNavX, bottomNavZ);
+    let top = grid.worldToGrid(topNavX, topNavZ);
+
+    const bottomCellNav = grid.getCell(bottom.gx, bottom.gz);
+    if (!bottomCellNav || bottomCellNav.passable === 0) {
+      bottom = { gx: lowGX, gz: lowGZ };
+    }
+    const topCellNav = grid.getCell(top.gx, top.gz);
+    if (!topCellNav || topCellNav.passable === 0) {
+      top = { gx: highGX, gz: highGZ };
+    }
+
+    ladderDef.bottomCellGX = bottom.gx;
+    ladderDef.bottomCellGZ = bottom.gz;
+    ladderDef.topCellGX = top.gx;
+    ladderDef.topCellGZ = top.gz;
+
+    grid.addNavLink(bottom.gx, bottom.gz, top.gx, top.gz, ladderCost, ladderIndex);
+    this.createSingleLadderMesh(ladderIndex);
+
+    return true;
+  }
+
   private ensureNavGridConnectivity(grid: NavGrid, ladderCost: number, navLinkOffset: number): void {
-    const MAX_ITER = 50;
-    const EDGE_MARGIN = 8; // keep ladders well away from world edge
-    const skippedRegions = new Set<number>(); // persist across iterations
+    const MAX_ITER = 60;
+    const EDGE_MARGIN = 3;
+    const MAX_WALK = 20;  // max cells to walk through a cliff in one direction
+    const DIRS: [number, number][] = [[1, 0], [-1, 0], [0, 1], [0, -1]]; // cardinals only → clean ladder angles
 
     for (let iter = 0; iter < MAX_ITER; iter++) {
       const { labels, regionCount } = grid.labelConnectedRegions();
       if (regionCount <= 1) break;
 
-      // Find spawn region (center of map)
-      const spawn = grid.worldToGrid(0, 0);
-      const spawnIdx = spawn.gz * grid.width + spawn.gx;
-      const spawnLabel = labels[spawnIdx];
-      if (spawnLabel < 0) break;
-
-      // Region sizes
+      // Always use largest region as connected seed
       const regionSizes = new Map<number, number>();
       for (let i = 0; i < labels.length; i++) {
         if (labels[i] < 0) continue;
         regionSizes.set(labels[i], (regionSizes.get(labels[i]) ?? 0) + 1);
       }
+      let spawnLabel = -1;
+      let spawnSize = 0;
+      for (const [r, size] of regionSizes) {
+        if (size > spawnSize) { spawnLabel = r; spawnSize = size; }
+      }
+      if (spawnLabel < 0) break;
 
-      // Collect cliff-boundary cells per region:
-      // Walkable cells that have a neighbor with a SIGNIFICANT HEIGHT DIFFERENCE.
-      // This excludes world-edge boundaries (which just have blocked cells at same height).
-      const regionBoundary = new Map<number, { gx: number; gz: number }[]>();
-      for (const [r] of regionSizes) regionBoundary.set(r, []);
+      const connectedSet = new Set<number>();
+      connectedSet.add(spawnLabel);
 
-      for (let gz = EDGE_MARGIN; gz < grid.height - EDGE_MARGIN; gz++) {
-        for (let gx = EDGE_MARGIN; gx < grid.width - EDGE_MARGIN; gx++) {
-          const idx = gz * grid.width + gx;
-          const lab = labels[idx];
-          if (lab < 0) continue;
-          const cell = grid.getCell(gx, gz);
-          if (!cell || cell.passable === 0) continue;
+      if (iter === 0) {
+        const disconnected = [...regionSizes.entries()].filter(([r, s]) => r !== spawnLabel && s >= 2);
+        console.log(`[NavGrid] ${regionCount} regions, spawn=${spawnLabel} (${spawnSize} cells), ${disconnected.length} disconnected`);
+      }
 
-          // Check if this cell is near a CLIFF (significant height change in neighborhood)
-          let isCliffBorder = false;
-          for (let dz = -2; dz <= 2 && !isCliffBorder; dz++) {
-            for (let dx = -2; dx <= 2 && !isCliffBorder; dx++) {
-              if (dx === 0 && dz === 0) continue;
-              const ngx = gx + dx;
-              const ngz = gz + dz;
-              if (ngx < 0 || ngx >= grid.width || ngz < 0 || ngz >= grid.height) continue;
-              const nCell = grid.getCell(ngx, ngz);
-              if (!nCell) continue;
-              // Cliff boundary: significant height difference (> 0.8m)
-              if (Math.abs(nCell.surfaceHeight - cell.surfaceHeight) > 0.8) {
-                isCliffBorder = true;
+      // Try ALL disconnected regions — find globally best candidate via cliff-walk
+      type Candidate = { agx: number; agz: number; bgx: number; bgz: number; score: number };
+      let bestCandidate: Candidate | null = null;
+      let bestScore = Infinity;
+      let failedRegions = 0;
+
+      for (const [region, size] of regionSizes) {
+        if (connectedSet.has(region)) continue;
+        if (size < 2) continue;
+
+        let regionHasCandidate = false;
+
+        // Scan border cells of this region
+        for (let gz = EDGE_MARGIN; gz < grid.height - EDGE_MARGIN; gz++) {
+          for (let gx = EDGE_MARGIN; gx < grid.width - EDGE_MARGIN; gx++) {
+            const idx = gz * grid.width + gx;
+            if (labels[idx] !== region) continue;
+            const cell = grid.getCell(gx, gz);
+            if (!cell || cell.passable === 0) continue;
+
+            // Quick border check — only process cells on region edge
+            let isBorder = cell.passable !== 0xFF;
+            if (!isBorder) {
+              for (const [ddx, ddz] of DIRS) {
+                const nIdx = (gz + ddz) * grid.width + (gx + ddx);
+                if (nIdx >= 0 && nIdx < labels.length && labels[nIdx] !== region) { isBorder = true; break; }
+              }
+            }
+            if (!isBorder) continue;
+
+            // Walk each cardinal direction through cliff to find connected-set cell
+            for (const [ddx, ddz] of DIRS) {
+              // First step must leave the region (walk outward, not inward)
+              const firstGX = gx + ddx;
+              const firstGZ = gz + ddz;
+              if (firstGX < EDGE_MARGIN || firstGX >= grid.width - EDGE_MARGIN) continue;
+              if (firstGZ < EDGE_MARGIN || firstGZ >= grid.height - EDGE_MARGIN) continue;
+              const firstIdx = firstGZ * grid.width + firstGX;
+              if (labels[firstIdx] === region) continue; // walking inward — skip
+
+              let cx = firstGX;
+              let cz = firstGZ;
+              for (let step = 0; step < MAX_WALK; step++) {
+                if (cx < EDGE_MARGIN || cx >= grid.width - EDGE_MARGIN) break;
+                if (cz < EDGE_MARGIN || cz >= grid.height - EDGE_MARGIN) break;
+
+                const nIdx = cz * grid.width + cx;
+                const nLab = labels[nIdx];
+
+                if (nLab >= 0 && connectedSet.has(nLab)) {
+                  // Found a connected-set cell on the other side of the cliff
+                  const nCell = grid.getCell(cx, cz);
+                  if (nCell && nCell.passable !== 0) {
+                    const heightDiff = Math.abs(cell.surfaceHeight - nCell.surfaceHeight);
+                    if (heightDiff >= 0.3) {
+                      const dist = step + 1;
+                      const flatness = this.scoreCliffFlatness(grid, gx, gz, cx, cz);
+                      const score = heightDiff * 2 + flatness * 2 + dist * 0.3;
+                      if (score < bestScore) {
+                        bestScore = score;
+                        bestCandidate = { agx: gx, agz: gz, bgx: cx, bgz: cz, score };
+                      }
+                      regionHasCandidate = true;
+                    }
+                  }
+                  break; // stop walking this direction
+                }
+
+                // Skip over walkable cells of other disconnected regions (slope ledges).
+                // Don't stop — the connected set may be on the far side.
+
+                // Otherwise it's blocked (nLab === -1) — continue through cliff
+                cx += ddx;
+                cz += ddz;
               }
             }
           }
-          if (isCliffBorder) regionBoundary.get(lab)!.push({ gx, gz });
         }
+
+        if (!regionHasCandidate) failedRegions++;
       }
 
-      if (iter === 0) {
-        const disconnected = [...regionSizes.entries()].filter(([r]) => r !== spawnLabel && regionSizes.get(r)! >= 4);
-        console.log(`[NavGrid] Connectivity check: ${regionCount} regions, spawn=${spawnLabel} (${regionSizes.get(spawnLabel) ?? 0} cells), ${disconnected.length} disconnected region(s): ${disconnected.map(([r, s]) => `r${r}(${s}cells/${(regionBoundary.get(r) ?? []).length}border)`).join(', ')}`);
-      }
-
-      // Find first disconnected region of meaningful size (skip already-failed ones)
-      let targetRegion = -1;
-      for (const [r, size] of regionSizes) {
-        if (r === spawnLabel) continue;
-        if (size < 4) continue;
-        if (skippedRegions.has(r)) continue;
-        targetRegion = r;
+      if (!bestCandidate) {
+        if (failedRegions > 0) {
+          console.warn(`[NavGrid] ${failedRegions} regions unreachable via cliff-walk`);
+        }
         break;
       }
-      if (targetRegion < 0) break;
 
-      // Find best boundary pair between target region and spawn region
-      const targetBorder = regionBoundary.get(targetRegion) ?? [];
-      const spawnBorder = regionBoundary.get(spawnLabel) ?? [];
-
-      let bestScore = Infinity;
-      let bestAGX = -1, bestAGZ = -1, bestBGX = -1, bestBGZ = -1;
-
-      for (const a of targetBorder) {
-        for (const b of spawnBorder) {
-          const dx = a.gx - b.gx;
-          const dz = a.gz - b.gz;
-          const dist = Math.sqrt(dx * dx + dz * dz);
-          if (dist * 2 > bestScore) continue; // quick reject
-          const flatness = this.scoreCliffFlatness(grid, a.gx, a.gz, b.gx, b.gz);
-          const score = dist * 2 + flatness * 3;
-          if (score < bestScore) {
-            bestScore = score;
-            bestAGX = a.gx; bestAGZ = a.gz;
-            bestBGX = b.gx; bestBGZ = b.gz;
-          }
-        }
+      if (!this.placeLadder(grid, ladderCost, navLinkOffset, bestCandidate.agx, bestCandidate.agz, bestCandidate.bgx, bestCandidate.bgz)) {
+        // placeLadder can fail if height diff too small after grid-to-world rounding
+        // Skip this pair by poisoning the cell — mark as visited. Re-label next iter.
+        break;
       }
-
-      if (bestAGX < 0) {
-        const tSize = regionSizes.get(targetRegion) ?? 0;
-        const tBorderSize = targetBorder.length;
-        const sBorderSize = spawnBorder.length;
-        console.warn(`[NavGrid] Can't bridge region ${targetRegion} (${tSize} cells, ${tBorderSize} cliff-border) to spawn (${sBorderSize} cliff-border). Skipping.`);
-        skippedRegions.add(targetRegion);
-        continue;
-      }
-
-      // Create LadderDef from the cell pair
-      const cellA = grid.getCell(bestAGX, bestAGZ)!;
-      const cellB = grid.getCell(bestBGX, bestBGZ)!;
-      const aWorld = grid.gridToWorld(bestAGX, bestAGZ);
-      const bWorld = grid.gridToWorld(bestBGX, bestBGZ);
-
-      const aIsLow = cellA.surfaceHeight <= cellB.surfaceHeight;
-      const lowCell = aIsLow ? cellA : cellB;
-      const highCell = aIsLow ? cellB : cellA;
-      const lowWorld = aIsLow ? aWorld : bWorld;
-      const highWorld = aIsLow ? bWorld : aWorld;
-      const lowGX = aIsLow ? bestAGX : bestBGX;
-      const lowGZ = aIsLow ? bestAGZ : bestBGZ;
-      const highGX = aIsLow ? bestBGX : bestAGX;
-      const highGZ = aIsLow ? bestBGZ : bestAGZ;
-
-      // Facing direction: from high toward low (cliff face normal)
-      let fdx = lowWorld.x - highWorld.x;
-      let fdz = lowWorld.z - highWorld.z;
-      const fLen = Math.sqrt(fdx * fdx + fdz * fdz);
-      if (fLen > 0) { fdx /= fLen; fdz /= fLen; }
-
-      // Skip if height difference is too small (characters can step over)
-      const heightDiff = highCell.surfaceHeight - lowCell.surfaceHeight;
-      if (heightDiff < 0.3) continue;
-
-      const ladderDef: LadderDef = {
-        bottomX: (lowWorld.x + highWorld.x) / 2,
-        bottomZ: (lowWorld.z + highWorld.z) / 2,
-        bottomY: lowCell.surfaceHeight,
-        topY: highCell.surfaceHeight,
-        facingDX: fdx,
-        facingDZ: fdz,
-        lowWorldX: lowWorld.x,
-        lowWorldZ: lowWorld.z,
-        highWorldX: highWorld.x,
-        highWorldZ: highWorld.z,
-        bottomCellGX: lowGX,
-        bottomCellGZ: lowGZ,
-        topCellGX: highGX,
-        topCellGZ: highGZ,
-      };
-
-      const ladderIndex = this.ladderDefs.length;
-      this.ladderDefs.push(ladderDef);
-
-      // Register nav-link (offset into terraces for walkability)
-      const bottomNavX = lowWorld.x + fdx * navLinkOffset;
-      const bottomNavZ = lowWorld.z + fdz * navLinkOffset;
-      const topNavX = highWorld.x - fdx * navLinkOffset;
-      const topNavZ = highWorld.z - fdz * navLinkOffset;
-
-      let bottom = grid.worldToGrid(bottomNavX, bottomNavZ);
-      let top = grid.worldToGrid(topNavX, topNavZ);
-
-      // Verify walkable; fallback to cell position
-      const bottomCellNav = grid.getCell(bottom.gx, bottom.gz);
-      if (!bottomCellNav || bottomCellNav.passable === 0) {
-        bottom = { gx: lowGX, gz: lowGZ };
-      }
-      const topCellNav = grid.getCell(top.gx, top.gz);
-      if (!topCellNav || topCellNav.passable === 0) {
-        top = { gx: highGX, gz: highGZ };
-      }
-
-      ladderDef.bottomCellGX = bottom.gx;
-      ladderDef.bottomCellGZ = bottom.gz;
-      ladderDef.topCellGX = top.gx;
-      ladderDef.topCellGZ = top.gz;
-
-      grid.addNavLink(bottom.gx, bottom.gz, top.gx, top.gz, ladderCost, ladderIndex);
-
-      // Create the ladder mesh
-      this.createSingleLadderMesh(ladderIndex);
-
-      console.log(`[NavGrid Ladder ${ladderIndex}] h=${heightDiff.toFixed(1)}m flat=${this.scoreCliffFlatness(grid, bestAGX, bestAGZ, bestBGX, bestBGZ).toFixed(1)} at (${lowWorld.x.toFixed(1)},${lowWorld.z.toFixed(1)}) → (${highWorld.x.toFixed(1)},${highWorld.z.toFixed(1)})`);
     }
 
     console.log(`[Terrain] NavGrid connectivity: ${this.ladderDefs.length} total ladders`);

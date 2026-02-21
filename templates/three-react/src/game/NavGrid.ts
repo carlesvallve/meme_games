@@ -208,13 +208,23 @@ export class NavGrid {
     return this.gridToWorld(gx, gz);
   }
 
-  /** Bake connected-region labels and identify the spawn region (region containing world origin).
+  /** Bake connected-region labels and identify the spawn region (largest region).
    *  Call once after all nav-links are registered. */
   bakeSpawnRegion(): void {
     const { labels } = this.labelConnectedRegions();
     this.regionLabels = labels;
-    const spawn = this.worldToGrid(0, 0);
-    this.spawnRegionLabel = labels[spawn.gz * this.width + spawn.gx];
+    // Use the largest region as spawn — not (0,0) which may be a tiny terrace
+    const regionSizes = new Map<number, number>();
+    for (let i = 0; i < labels.length; i++) {
+      if (labels[i] < 0) continue;
+      regionSizes.set(labels[i], (regionSizes.get(labels[i]) ?? 0) + 1);
+    }
+    let largestLabel = -1;
+    let largestSize = 0;
+    for (const [r, size] of regionSizes) {
+      if (size > largestSize) { largestLabel = r; largestSize = size; }
+    }
+    this.spawnRegionLabel = largestLabel;
   }
 
   /** Check if a world-space position is in the main spawn region AND on a well-connected cell.
@@ -339,12 +349,16 @@ export class NavGrid {
       );
     };
 
-    // Compute gradient magnitude at a point (same formula as resolveMovement)
+    // Compute gradient magnitude at a point.
+    // Uses plain sampleHM (no radius expansion) to avoid cliff-edge contamination.
+    // The corner-based cell blocking (step 2) already catches actual cliff faces.
+    // Using sampleHMRadius here would inflate gradients on flat cells near cliffs,
+    // creating impassable rings that fragment terraces into tiny regions.
     const gradMagAt = (px: number, pz: number): number => {
-      const hL = sampleHMRadius(px - eps, pz, sampleR);
-      const hR = sampleHMRadius(px + eps, pz, sampleR);
-      const hU = sampleHMRadius(px, pz - eps, sampleR);
-      const hD = sampleHMRadius(px, pz + eps, sampleR);
+      const hL = sampleHM(px - eps, pz);
+      const hR = sampleHM(px + eps, pz);
+      const hU = sampleHM(px, pz - eps);
+      const hD = sampleHM(px, pz + eps);
       const gxV = (hR - hL) / (2 * eps);
       const gzV = (hD - hU) / (2 * eps);
       return Math.sqrt(gxV * gxV + gzV * gzV);

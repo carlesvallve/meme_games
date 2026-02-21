@@ -67,6 +67,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   /** Wipe terrain + all dependent systems and rebuild from current store settings */
   function regenerateScene(): void {
     activeCharacter = null;
+    debugLadderIndex = -1;
 
     // Dispose old systems
     for (const char of characters) char.dispose();
@@ -293,10 +294,26 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     selectCharacter(characters[nextIdx]);
   }
 
+  // Debug: cycle through ladders with L key
+  let debugLadderIndex = -1; // -1 = follow character (normal mode)
+
   const onCycleKey = (e: KeyboardEvent) => {
     if (useGameStore.getState().phase !== 'playing') return;
     if (e.code === 'ArrowLeft') { cycleCharacter(-1); e.preventDefault(); }
     else if (e.code === 'ArrowRight') { cycleCharacter(1); e.preventDefault(); }
+    else if (e.code === 'KeyL') {
+      const ladders = terrain.getLadderDefs();
+      if (ladders.length === 0) return;
+      debugLadderIndex++;
+      if (debugLadderIndex >= ladders.length) debugLadderIndex = -1;
+      if (debugLadderIndex >= 0) {
+        const l = ladders[debugLadderIndex];
+        console.log(`[Debug] Ladder ${debugLadderIndex}/${ladders.length - 1}: h=${(l.topY - l.bottomY).toFixed(1)}m at (${l.bottomX.toFixed(1)}, ${l.bottomZ.toFixed(1)})`);
+      } else {
+        console.log('[Debug] Camera back to character');
+      }
+      e.preventDefault();
+    }
   };
   window.addEventListener('keydown', onCycleKey);
 
@@ -455,9 +472,18 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
         applyLightPreset(sceneLights, preset);
       }
 
-      // Camera follows active character
-      const camTarget = activeCharacter.getCameraTarget();
-      cam.setTarget(camTarget.x, camTarget.y, camTarget.z);
+      // Camera follows active character (or debug ladder)
+      if (debugLadderIndex >= 0) {
+        const ladders = terrain.getLadderDefs();
+        const l = ladders[debugLadderIndex];
+        if (l) {
+          const midY = (l.bottomY + l.topY) / 2;
+          cam.setTarget(l.bottomX, midY, l.bottomZ);
+        }
+      } else {
+        const camTarget = activeCharacter.getCameraTarget();
+        cam.setTarget(camTarget.x, camTarget.y, camTarget.z);
+      }
 
       // Active character position (for collectibles, chests, loot)
       const activePos = activeCharacter.getPosition();
