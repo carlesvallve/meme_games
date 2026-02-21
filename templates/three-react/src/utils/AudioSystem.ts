@@ -1,8 +1,42 @@
-type OscType = OscillatorType;
+import { playTone, toneSweep, noiseBurst } from './sfx';
+import { sfxHit } from './sfx/hit';
+import { sfxDamage } from './sfx/damage';
+import { sfxScore } from './sfx/score';
+import { sfxStart } from './sfx/start';
+import { sfxDeath } from './sfx/death';
+import { sfxStep, sfxLand } from './sfx/step';
+import { sfxPickup } from './sfx/pickup';
+import { sfxCoin } from './sfx/coin';
+import { sfxChest } from './sfx/chest';
+import { sfxThud } from './sfx/thud';
+import { sfxPotion } from './sfx/potion';
+
+/**
+ * Spatial audio attenuation
+ *
+ * Uses inverse-distance rolloff: vol = REF / (REF + dist)
+ * No flat zone — volume decreases smoothly from distance 0.
+ * Sounds beyond MAX_HEARING_RANGE are culled entirely.
+ *
+ * With ROLLOFF_REF = 12:
+ *   dist  0 → vol 1.00  (right on top)
+ *   dist  3 → vol 0.80
+ *   dist  6 → vol 0.67
+ *   dist 12 → vol 0.50
+ *   dist 20 → vol 0.38
+ *   dist 25 → culled (silent)
+ *
+ * Increase ROLLOFF_REF for slower falloff (louder at range).
+ * Decrease for faster falloff (quieter at range).
+ */
+const MAX_HEARING_RANGE = 25;
+const ROLLOFF_REF = 12;
 
 class AudioSystemClass {
   private ctx: AudioContext | null = null;
   private muted = false;
+  private playerX = 0;
+  private playerZ = 0;
 
   init(): void {
     if (this.ctx) return;
@@ -13,114 +47,100 @@ class AudioSystemClass {
     }
   }
 
+  /** Update the listener position (call each frame with player pos) */
+  setPlayerPosition(x: number, z: number): void {
+    this.playerX = x;
+    this.playerZ = z;
+  }
+
   private ensureContext(): AudioContext | null {
     if (!this.ctx) this.init();
     return this.ctx;
   }
 
-  playTone(freq: number, duration: number, type: OscType = 'square', volume = 0.15): void {
-    if (this.muted) return;
-    const ctx = this.ensureContext();
-    if (!ctx) return;
-
-    try {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = type;
-      osc.frequency.value = freq;
-      gain.gain.value = volume;
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start();
-      osc.stop(ctx.currentTime + duration);
-    } catch {
-      // ignore
-    }
+  /** Compute volume multiplier based on distance from player.
+   *  Uses inverse-distance falloff: vol = ref / (ref + dist)
+   *  Smooth from distance 0 (vol=1) with no flat zone. */
+  private distanceVolume(x: number, z: number): number {
+    const dx = x - this.playerX;
+    const dz = z - this.playerZ;
+    const dist = Math.sqrt(dx * dx + dz * dz);
+    if (dist >= MAX_HEARING_RANGE) return 0;
+    return ROLLOFF_REF / (ROLLOFF_REF + dist);
   }
 
-  toneSweep(startFreq: number, endFreq: number, duration: number, type: OscType = 'sine', volume = 0.1): void {
+  playTone(freq: number, duration: number, type: OscillatorType = 'square', volume = 0.15): void {
     if (this.muted) return;
     const ctx = this.ensureContext();
     if (!ctx) return;
+    try { playTone(ctx, freq, duration, type, volume); } catch { /* ignore */ }
+  }
 
-    try {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = type;
-      osc.frequency.setValueAtTime(startFreq, ctx.currentTime);
-      osc.frequency.linearRampToValueAtTime(endFreq, ctx.currentTime + duration);
-      gain.gain.value = volume;
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start();
-      osc.stop(ctx.currentTime + duration);
-    } catch {
-      // ignore
-    }
+  toneSweep(startFreq: number, endFreq: number, duration: number, type: OscillatorType = 'sine', volume = 0.1): void {
+    if (this.muted) return;
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+    try { toneSweep(ctx, startFreq, endFreq, duration, type, volume); } catch { /* ignore */ }
   }
 
   noiseBurst(duration = 0.1, volume = 0.1): void {
     if (this.muted) return;
     const ctx = this.ensureContext();
     if (!ctx) return;
+    try { noiseBurst(ctx, duration, volume); } catch { /* ignore */ }
+  }
+
+  playNote(note: number, octave = 4, duration = 0.2, type: OscillatorType = 'square', volume = 0.1): void {
+    const freq = 440 * Math.pow(2, (note - 9 + (octave - 4) * 12) / 12);
+    this.playTone(freq, duration, type, volume);
+  }
+
+  /** Play SFX at full volume (non-positional, e.g. UI sounds) */
+  sfx(type: string, intensity = 1, bounceCount = 0): void {
+    this.playSfx(type, 1, intensity, bounceCount);
+  }
+
+  /** Play SFX at a world position — volume attenuated by distance to player */
+  sfxAt(type: string, x: number, z: number, intensity = 1, bounceCount = 0): void {
+    const vol = this.distanceVolume(x, z);
+    if (vol < 0.01) return; // too far, skip entirely
+    this.playSfx(type, vol, intensity, bounceCount);
+  }
+
+  private playSfx(type: string, volume: number, intensity: number, bounceCount: number): void {
+    if (this.muted) return;
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+
+    // For spatial attenuation, route through a gain node
+    const dest = volume < 0.99 ? this.createAttenuatedDest(ctx, volume) : ctx.destination;
 
     try {
-      const bufferSize = Math.floor(ctx.sampleRate * duration);
-      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-      const data = buffer.getChannelData(0);
-      for (let i = 0; i < bufferSize; i++) {
-        data[i] = (Math.random() * 2 - 1) * volume;
+      switch (type) {
+        case 'hit':    sfxHit(ctx, dest); break;
+        case 'damage': sfxDamage(ctx, dest); break;
+        case 'score':  sfxScore(ctx, dest); break;
+        case 'start':  sfxStart(ctx, dest); break;
+        case 'death':  sfxDeath(ctx, dest); break;
+        case 'step':   sfxStep(ctx, dest); break;
+        case 'pickup': sfxPickup(ctx, dest); break;
+        case 'coin':   sfxCoin(ctx, dest); break;
+        case 'chest':  sfxChest(ctx, dest); break;
+        case 'thud':   sfxThud(ctx, intensity, bounceCount, dest); break;
+        case 'land':   sfxLand(ctx, dest); break;
+        case 'potion': sfxPotion(ctx, dest); break;
+        default:       playTone(ctx, 440, 0.1, 'sine', 0.08); break;
       }
-      const source = ctx.createBufferSource();
-      source.buffer = buffer;
-      const gain = ctx.createGain();
-      gain.gain.value = 1;
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
-      source.connect(gain);
-      gain.connect(ctx.destination);
-      source.start();
     } catch {
       // ignore
     }
   }
 
-  playNote(note: number, octave = 4, duration = 0.2, type: OscType = 'square', volume = 0.1): void {
-    // note: 0=C, 1=C#, 2=D, ... 11=B
-    const freq = 440 * Math.pow(2, (note - 9 + (octave - 4) * 12) / 12);
-    this.playTone(freq, duration, type, volume);
-  }
-
-  sfx(type: string): void {
-    switch (type) {
-      case 'hit':
-        this.playTone(200, 0.15, 'sawtooth', 0.1);
-        break;
-      case 'damage':
-        this.playTone(80, 0.2, 'square', 0.12);
-        break;
-      case 'score':
-        this.playTone(600, 0.08, 'sine', 0.1);
-        break;
-      case 'start':
-        this.playTone(523, 0.15, 'square', 0.1);
-        setTimeout(() => this.playTone(659, 0.15, 'square', 0.1), 150);
-        setTimeout(() => this.playTone(784, 0.3, 'square', 0.1), 300);
-        break;
-      case 'death':
-        this.playTone(300, 0.2, 'sawtooth', 0.1);
-        setTimeout(() => this.playTone(200, 0.3, 'sawtooth', 0.12), 200);
-        break;
-      case 'step':
-        this.playTone(100, 0.05, 'sine', 0.05);
-        break;
-      case 'pickup':
-        this.toneSweep(400, 800, 0.15, 'sine', 0.1);
-        break;
-      default:
-        this.playTone(440, 0.1, 'sine', 0.08);
-    }
+  private createAttenuatedDest(ctx: AudioContext, volume: number): AudioNode {
+    const gain = ctx.createGain();
+    gain.gain.value = volume;
+    gain.connect(ctx.destination);
+    return gain;
   }
 
   toggleMute(): boolean {

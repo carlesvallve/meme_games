@@ -18,6 +18,18 @@ export interface PlayerParams {
   magnetSpeed: number;
 }
 
+export type LightPreset = 'default' | 'bright' | 'dark' | 'none';
+
+export interface TorchParams {
+  intensity: number;
+  distance: number;
+  offsetForward: number;  // forward from character facing
+  offsetRight: number;    // right of character facing
+  offsetUp: number;       // height above character
+  color: string;
+  flicker: number;
+}
+
 export interface CameraParams {
   minDistance: number;
   maxDistance: number;
@@ -38,10 +50,15 @@ interface GameStore {
 
   selectedCharacter: CharacterType | null;
   collectibles: number;
+  coins: number;
+  potions: number;
   speechBubbles: SpeechBubbleData[];
   particleToggles: ParticleToggles;
   playerParams: PlayerParams;
   cameraParams: CameraParams;
+  lightPreset: LightPreset;
+  torchEnabled: boolean;
+  torchParams: TorchParams;
 
   setPhase: (phase: GameStore['phase']) => void;
   setScore: (score: number) => void;
@@ -51,10 +68,15 @@ interface GameStore {
 
   selectCharacter: (type: CharacterType) => void;
   setCollectibles: (n: number) => void;
+  addCoins: (n: number) => void;
+  addPotions: (n: number) => void;
   setSpeechBubbles: (bubbles: SpeechBubbleData[]) => void;
   toggleParticle: (key: keyof ParticleToggles) => void;
   setPlayerParam: (key: keyof PlayerParams, value: number) => void;
   setCameraParam: <K extends keyof CameraParams>(key: K, value: CameraParams[K]) => void;
+  setLightPreset: (preset: LightPreset) => void;
+  toggleTorch: () => void;
+  setTorchParam: <K extends keyof TorchParams>(key: K, value: TorchParams[K]) => void;
 
   onStartGame: (() => void) | null;
   onPauseToggle: (() => void) | null;
@@ -71,10 +93,15 @@ export const useGameStore = create<GameStore>((set) => ({
 
   selectedCharacter: null,
   collectibles: 0,
+  coins: 0,
+  potions: 0,
   speechBubbles: [],
   particleToggles: { dust: true, lightRain: false, rain: false, debris: false },
-  playerParams: { speed: 4, stepHeight: 0.5, capsuleRadius: 0.25, hopHeight: 0.05, magnetRadius: 2, magnetSpeed: 16 },
-  cameraParams: { minDistance: 5, maxDistance: 25, pitchMin: -80, pitchMax: -10, rotationSpeed: 0.005, zoomSpeed: 0.01, collisionLayers: Layer.Architecture },
+  playerParams: { speed: 4, stepHeight: 0.5, capsuleRadius: 0.25, hopHeight: 0.1, magnetRadius: 2, magnetSpeed: 16 },
+  cameraParams: { minDistance: 5, maxDistance: 25, pitchMin: -80, pitchMax: -10, rotationSpeed: 0.005, zoomSpeed: 0.01, collisionLayers: Layer.None },
+  lightPreset: 'default' as LightPreset,
+  torchEnabled: true,
+  torchParams: { intensity: 2.5, distance: 8, offsetForward: 0.3, offsetRight: 0.25, offsetUp: 1.0, color: '#ff9944', flicker: 0.3 },
 
   setPhase: (phase) => set({ phase }),
   setScore: (score) => set({ score }),
@@ -84,6 +111,8 @@ export const useGameStore = create<GameStore>((set) => ({
 
   selectCharacter: (type) => set({ selectedCharacter: type, phase: 'playing' }),
   setCollectibles: (collectibles) => set({ collectibles }),
+  addCoins: (n) => set((s) => ({ coins: s.coins + n })),
+  addPotions: (n) => set((s) => ({ potions: s.potions + n })),
   setSpeechBubbles: (speechBubbles) => set({ speechBubbles }),
   toggleParticle: (key) =>
     set((s) => ({
@@ -96,6 +125,12 @@ export const useGameStore = create<GameStore>((set) => ({
   setCameraParam: (key, value) =>
     set((s) => ({
       cameraParams: { ...s.cameraParams, [key]: value },
+    })),
+  setLightPreset: (lightPreset) => set({ lightPreset }),
+  toggleTorch: () => set((s) => ({ torchEnabled: !s.torchEnabled })),
+  setTorchParam: (key, value) =>
+    set((s) => ({
+      torchParams: { ...s.torchParams, [key]: value },
     })),
 
   onStartGame: null,

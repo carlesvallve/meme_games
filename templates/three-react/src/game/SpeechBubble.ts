@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { useGameStore } from '../store';
 import { getRandomThought } from './thoughtBubbles';
+import { entityRegistry, Layer } from './Entity';
 import type { CharacterType } from './characters';
 import type { SpeechBubbleData } from '../types';
 
@@ -23,6 +24,10 @@ export class SpeechBubbleSystem {
   private camera: THREE.Camera | null = null;
   private screenWidth = window.innerWidth;
   private screenHeight = window.innerHeight;
+  private raycaster = new THREE.Raycaster();
+  private _dir = new THREE.Vector3();
+  private occluded = false;
+  private occludedAlpha = 1;
 
   constructor() {
     this.nextDelay = 5 + Math.random() * 6;
@@ -80,6 +85,24 @@ export class SpeechBubbleSystem {
     });
   }
 
+  private isPlayerOccluded(playerPos: THREE.Vector3): boolean {
+    if (!this.camera) return false;
+
+    const camPos = this.camera.position;
+    this._dir.copy(playerPos).sub(camPos);
+    const dist = this._dir.length();
+    if (dist < 0.01) return false;
+    this._dir.divideScalar(dist);
+
+    this.raycaster.set(camPos, this._dir);
+    this.raycaster.near = 0.1;
+    this.raycaster.far = dist;
+
+    const occluders = entityRegistry.getByLayer(Layer.Architecture).map(e => e.object3D);
+    const hits = this.raycaster.intersectObjects(occluders, true);
+    return hits.length > 0;
+  }
+
   private pushToStore(): void {
     if (!this.playerMesh || !this.camera) {
       useGameStore.getState().setSpeechBubbles([]);
@@ -103,6 +126,17 @@ export class SpeechBubbleSystem {
       return;
     }
 
+    // Fade out when occluded by architecture
+    this.occluded = this.isPlayerOccluded(pos);
+    const fadeSpeed = 8;
+    const targetAlpha = this.occluded ? 0 : 1;
+    this.occludedAlpha += (targetAlpha - this.occludedAlpha) * Math.min(1, fadeSpeed * 0.016);
+
+    if (this.occludedAlpha < 0.01) {
+      useGameStore.getState().setSpeechBubbles([]);
+      return;
+    }
+
     for (const b of this.bubbles) {
       let opacity = 1;
       if (b.age < b.fadeIn) {
@@ -116,7 +150,7 @@ export class SpeechBubbleSystem {
         text: b.text,
         x,
         y: y - 20, // Offset slightly above the projected point
-        opacity: Math.max(0, Math.min(1, opacity)),
+        opacity: Math.max(0, Math.min(1, opacity * this.occludedAlpha)),
       });
     }
 

@@ -9,21 +9,57 @@ const TOGGLE_KEYS: { key: keyof ParticleToggles; label: string }[] = [
   { key: 'debris', label: 'Debris' },
 ];
 
-export function HUD() {
-  const collectibles = useGameStore((s) => s.collectibles);
-  const toggles = useGameStore((s) => s.particleToggles);
-  const toggle = useGameStore((s) => s.toggleParticle);
+function usePop(value: number): boolean {
   const [pop, setPop] = useState(false);
-  const prevRef = useRef(collectibles);
-
+  const prevRef = useRef(value);
   useEffect(() => {
-    if (collectibles !== prevRef.current) {
-      prevRef.current = collectibles;
+    if (value !== prevRef.current) {
+      prevRef.current = value;
       setPop(true);
       const t = setTimeout(() => setPop(false), 300);
       return () => clearTimeout(t);
     }
-  }, [collectibles]);
+  }, [value]);
+  return pop;
+}
+
+function StatRow({ icon, label, value, color }: {
+  icon: string;
+  label: string;
+  value: number;
+  color: string;
+}) {
+  const pop = usePop(value);
+  return (
+    <div style={{
+      display: 'flex',
+      alignItems: 'center',
+      gap: 4,
+    }}>
+      <span style={{ fontSize: 13 }}>{icon}</span>
+      <span style={{ fontSize: 11, opacity: 0.6, letterSpacing: 1 }}>{label}</span>
+      <span style={{
+        fontSize: 18,
+        fontWeight: 700,
+        marginLeft: 2,
+        transform: pop ? 'scale(1.25)' : 'scale(1)',
+        transition: 'transform 0.15s ease-out',
+        color: pop ? color : '#fff',
+        transformOrigin: 'right center',
+        display: 'inline-block',
+      }}>
+        {value}
+      </span>
+    </div>
+  );
+}
+
+export function HUD() {
+  const collectibles = useGameStore((s) => s.collectibles);
+  const coins = useGameStore((s) => s.coins);
+  const potions = useGameStore((s) => s.potions);
+  const toggles = useGameStore((s) => s.particleToggles);
+  const toggle = useGameStore((s) => s.toggleParticle);
 
   return (
     <div
@@ -35,13 +71,13 @@ export function HUD() {
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'flex-start',
-        pointerEvents: 'auto',
+        pointerEvents: 'none',
         color: '#fff',
         textShadow: '0 1px 4px rgba(0,0,0,0.8)',
         fontSize: 18,
       }}
     >
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, pointerEvents: 'auto' }}>
         <div style={{ opacity: 0.7, fontSize: 13 }}>
           WASD move &middot; Drag orbit &middot; Scroll zoom
         </div>
@@ -77,19 +113,17 @@ export function HUD() {
           })}
         </div>
       </div>
-      <div style={{ textAlign: 'right' }}>
-        <div style={{ fontSize: 14, opacity: 0.7 }}>COLLECTIBLES</div>
-        <div
-          style={{
-            fontSize: 32,
-            fontWeight: 700,
-            transform: pop ? 'scale(1.3)' : 'scale(1)',
-            transition: 'transform 0.15s ease-out',
-            color: pop ? '#44ffaa' : '#fff',
-          }}
-        >
-          {collectibles}
-        </div>
+
+      {/* Right-side vertical stats */}
+      <div style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 6,
+        alignItems: 'flex-end',
+      }}>
+        <StatRow icon="💎" label="GEMS" value={collectibles} color="#44ffaa" />
+        <StatRow icon="🪙" label="COINS" value={coins} color="#ffd700" />
+        <StatRow icon="🧪" label="POTIONS" value={potions} color="#ff6688" />
       </div>
     </div>
   );

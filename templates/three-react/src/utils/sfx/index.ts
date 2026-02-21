@@ -1,0 +1,11 @@
+export { playTone, toneSweep, noiseBurst } from './primitives';
+export { sfxHit } from './hit';
+export { sfxDamage } from './damage';
+export { sfxScore } from './score';
+export { sfxStart } from './start';
+export { sfxDeath } from './death';
+export { sfxStep } from './step';
+export { sfxPickup } from './pickup';
+export { sfxCoin } from './coin';
+export { sfxChest } from './chest';
+export { sfxThud } from './thud';
