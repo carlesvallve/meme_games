@@ -12,6 +12,7 @@ interface ParamDef {
 const PARAMS: ParamDef[] = [
   { key: 'speed', label: 'Speed', min: 1, max: 16, step: 0.5 },
   { key: 'stepHeight', label: 'Step Height', min: 0, max: 2, step: 0.1 },
+  { key: 'slopeHeight', label: 'Slope Height', min: 0, max: 4, step: 0.1 },
   { key: 'capsuleRadius', label: 'Capsule Radius', min: 0.1, max: 1.5, step: 0.05 },
   { key: 'hopHeight', label: 'Hop Intensity', min: 0, max: 0.5, step: 0.01 },
   { key: 'magnetRadius', label: 'Magnet Radius', min: 0, max: 10, step: 0.5 },

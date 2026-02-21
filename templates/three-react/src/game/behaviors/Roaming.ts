@@ -5,6 +5,8 @@ export interface RoamingOptions {
   speed?: number;
   /** Step height for terrain traversal */
   stepHeight?: number;
+  /** Max climbable slope height per cell */
+  slopeHeight?: number;
   /** Capsule radius for collision */
   capsuleRadius?: number;
   /** Hop height while walking */
@@ -28,6 +30,7 @@ export interface RoamingOptions {
 const DEFAULTS: Required<RoamingOptions> = {
   speed: 4,
   stepHeight: 0.5,
+  slopeHeight: 1.0,
   capsuleRadius: 0.25,
   hopHeight: 0.1,
   radiusMin: 3,
@@ -49,6 +52,7 @@ export class Roaming extends Behavior {
   private state: RoamState = 'idle';
   private idleTimer = 0;
   private waypoints: { x: number; z: number }[] = [];
+  private rawWaypoints: { x: number; z: number }[] = [];
   private waypointIndex = 0;
   private stuckTimer = 0;
   private lastProgressX = 0;
@@ -86,6 +90,10 @@ export class Roaming extends Behavior {
     return this.waypointIndex;
   }
 
+  getRawWaypoints(): ReadonlyArray<{ x: number; z: number }> {
+    return this.rawWaypoints;
+  }
+
   private pickDestination(agent: BehaviorAgent): void {
     const { radiusMin, radiusMax, maxAttempts, worldMargin } = this.opts;
     const halfBound = this.ctx.navGrid.getHalfSize() - worldMargin;
@@ -93,8 +101,13 @@ export class Roaming extends Behavior {
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       const angle = Math.random() * Math.PI * 2;
       const dist = radiusMin + Math.random() * (radiusMax - radiusMin);
-      const tx = Math.max(-halfBound, Math.min(halfBound, agent.getX() + Math.cos(angle) * dist));
-      const tz = Math.max(-halfBound, Math.min(halfBound, agent.getZ() + Math.sin(angle) * dist));
+      const rawX = Math.max(-halfBound, Math.min(halfBound, agent.getX() + Math.cos(angle) * dist));
+      const rawZ = Math.max(-halfBound, Math.min(halfBound, agent.getZ() + Math.sin(angle) * dist));
+
+      // Snap to nav grid cell center
+      const snapped = this.ctx.navGrid.snapToGrid(rawX, rawZ);
+      const tx = snapped.x;
+      const tz = snapped.z;
 
       // Check destination cell is walkable before running A*
       if (!this.ctx.navGrid.isWalkable(tx, tz)) continue;
@@ -103,6 +116,7 @@ export class Roaming extends Behavior {
       if (!result.found || result.path.length < 2) continue;
 
       this.waypoints = result.path.slice(1);
+      this.rawWaypoints = result.rawPath.slice(1);
       this.waypointIndex = 0;
       this.stuckTimer = 0;
       this.lastProgressX = agent.getX();
@@ -125,8 +139,11 @@ export class Roaming extends Behavior {
     const dx = target.x - agent.getX();
     const dz = target.z - agent.getZ();
     const dist = Math.sqrt(dx * dx + dz * dz);
+    const isLast = this.waypointIndex === this.waypoints.length - 1;
 
-    if (dist < this.opts.waypointReach) {
+    const reach = isLast ? 0.02 : this.opts.waypointReach;
+
+    if (dist < reach) {
       this.waypointIndex++;
       this.resetStuck(agent);
       if (this.waypointIndex >= this.waypoints.length) {
@@ -151,7 +168,14 @@ export class Roaming extends Behavior {
 
     const nx = dx / dist;
     const nz = dz / dist;
-    agent.move(nx, nz, this.opts.speed, this.opts.stepHeight, this.opts.capsuleRadius, dt);
+    // Clamp speed so the character decelerates into the final waypoint
+    // and never overshoots it
+    let speed = this.opts.speed;
+    if (isLast) {
+      const maxStep = dist / dt;
+      speed = Math.min(speed, Math.max(0.5, maxStep));
+    }
+    agent.move(nx, nz, speed, this.opts.stepHeight, this.opts.capsuleRadius, dt, this.opts.slopeHeight);
     agent.applyHop(this.opts.hopHeight);
   }
 
@@ -164,6 +188,7 @@ export class Roaming extends Behavior {
   private enterIdle(): void {
     this.state = 'idle';
     this.waypoints = [];
+    this.rawWaypoints = [];
     this.waypointIndex = 0;
     this.idleTimer = this.randomIdle();
   }

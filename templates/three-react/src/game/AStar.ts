@@ -8,6 +8,8 @@ import type { NavGrid } from './NavGrid';
 export interface PathResult {
   found: boolean;
   path: { x: number; z: number }[];
+  /** Full grid-cell path before string-pulling (for debug visualization) */
+  rawPath: { x: number; z: number }[];
 }
 
 // Direction offsets matching NavGrid: 0=N, 1=NE, 2=E, 3=SE, 4=S, 5=SW, 6=W, 7=NW
@@ -103,17 +105,18 @@ export function findPath(
   const start = grid.worldToGrid(startX, startZ);
   const goal = grid.worldToGrid(goalX, goalZ);
 
-  // Quick bail: start or goal blocked
+  // Quick bail: start or goal blocked or isolated (no passable edges)
   const startCell = grid.getCell(start.gx, start.gz);
   const goalCell = grid.getCell(goal.gx, goal.gz);
-  if (!startCell || startCell.blocked || !goalCell || goalCell.blocked) {
-    return { found: false, path: [] };
+  if (!startCell || startCell.blocked || startCell.passable === 0 ||
+      !goalCell || goalCell.blocked || goalCell.passable === 0) {
+    return { found: false, path: [], rawPath: [] };
   }
 
   // Already there
   if (start.gx === goal.gx && start.gz === goal.gz) {
-    const w = grid.gridToWorld(goal.gx, goal.gz);
-    return { found: true, path: [{ x: goalX, z: goalZ }] };
+    const p = [{ x: goalX, z: goalZ }];
+    return { found: true, path: p, rawPath: p };
   }
 
   const w = grid.width;
@@ -144,11 +147,11 @@ export function findPath(
     closed[currentIdx] = 1;
 
     if (currentIdx === goalIdx) {
-      // Reconstruct path
+      // Reconstruct path — use the full grid path (no string-pulling)
+      // so characters follow every cell and navigate terrain correctly
       const gridPath = reconstructPath(cameFrom, currentIdx, w);
       const worldPath = gridPathToWorld(grid, gridPath, startX, startZ, goalX, goalZ);
-      const smoothed = stringPull(grid, worldPath);
-      return { found: true, path: smoothed };
+      return { found: true, path: worldPath, rawPath: worldPath };
     }
 
     const cgx = currentIdx % w;
@@ -181,7 +184,7 @@ export function findPath(
     }
   }
 
-  return { found: false, path: [] };
+  return { found: false, path: [], rawPath: [] };
 }
 
 function reconstructPath(cameFrom: Int32Array, endIdx: number, width: number): { gx: number; gz: number }[] {

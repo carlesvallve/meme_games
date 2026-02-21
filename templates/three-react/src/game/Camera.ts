@@ -197,6 +197,11 @@ export class Camera {
     return this.angleY;
   }
 
+  /** Returns true if the most recent pointer interaction was a confirmed drag (not a click). */
+  wasDrag(): boolean {
+    return this.dragConfirmed;
+  }
+
   setTarget(x: number, y: number, z: number): void {
     this.target.set(x, y, z);
   }

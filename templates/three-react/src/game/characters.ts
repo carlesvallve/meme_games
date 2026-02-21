@@ -226,6 +226,19 @@ const MODELS: Record<CharacterType, VoxelModelDef> = {
   dog: DOG_MODEL,
 };
 
+/** Mesh scale applied in createCharacterMesh */
+const CHAR_MESH_SCALE = 1.6;
+
+/** World-space height of each character type (slices × voxelScale × meshScale) */
+export const CHARACTER_HEIGHTS: Record<CharacterType, number> = Object.fromEntries(
+  (Object.entries(MODELS) as [CharacterType, VoxelModelDef][]).map(([type, model]) => {
+    const h = model.slices.length;
+    const ms = model.modelScale ?? 1;
+    const voxelScale = (TOKEN_HEIGHT / h) * ms;
+    return [type, h * voxelScale * CHAR_MESH_SCALE];
+  }),
+) as Record<CharacterType, number>;
+
 const geoCache = new Map<string, THREE.BufferGeometry>();
 
 export function getCharacterGeometry(type: CharacterType, teamColor: string): THREE.BufferGeometry {

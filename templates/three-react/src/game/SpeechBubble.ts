@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { useGameStore } from '../store';
 import { getRandomThought } from './thoughtBubbles';
 import { entityRegistry, Layer } from './Entity';
-import type { CharacterType } from './characters';
+import { CHARACTER_HEIGHTS, type CharacterType } from './characters';
 import type { SpeechBubbleData } from '../types';
 
 interface ActiveBubble {
@@ -112,7 +112,9 @@ export class SpeechBubbleSystem {
     const result: SpeechBubbleData[] = [];
     const pos = new THREE.Vector3();
     this.playerMesh.getWorldPosition(pos);
-    pos.y += 1.4; // Above head
+    // Position above head — height varies per character type
+    const charHeight = CHARACTER_HEIGHTS[this.characterType] ?? 0.8;
+    pos.y += charHeight + 0.15;
 
     const projected = pos.clone().project(this.camera);
 
