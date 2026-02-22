@@ -10,6 +10,7 @@ export interface HeightmapResult {
   heights: Float32Array;
   ladders: LadderDef[];
   rampCells: Set<number>;
+  seed: number;
 }
 
 // ── Seeded permutation table ────────────────────────────────────────
@@ -385,7 +386,7 @@ export function generateHeightmap(
   // which uses actual walkability checks rather than vertex-level connectivity.
   const ladders: LadderDef[] = [];
 
-  return { heights: grid, ladders, rampCells };
+  return { heights: grid, ladders, rampCells, seed: actualSeed };
 }
 
 // ── FBM generation ──────────────────────────────────────────────────

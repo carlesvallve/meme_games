@@ -104,6 +104,7 @@ interface GameStore {
   onPauseToggle: (() => void) | null;
   onRestart: (() => void) | null;
   onRegenerateScene: (() => void) | null;
+  onRemesh: (() => void) | null;
   onRandomizePalette: (() => void) | null;
 }
 
@@ -180,5 +181,6 @@ export const useGameStore = create<GameStore>((set) => ({
   onPauseToggle: null,
   onRestart: null,
   onRegenerateScene: null,
+  onRemesh: null,
   onRandomizePalette: null,
 }));
