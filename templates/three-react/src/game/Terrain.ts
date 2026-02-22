@@ -6,6 +6,9 @@ import { generateHeightmap, sampleHeightmap, getHeightmapConfig } from './Terrai
 import type { LadderDef } from './Ladder';
 import type { HeightmapStyle } from './TerrainNoise';
 export type { HeightmapStyle } from './TerrainNoise';
+import { generateDungeon } from './DungeonGenerator';
+import type { WalkMask } from './DungeonGenerator';
+import { DoorSystem } from './Door';
 import { useGameStore } from '../store';
 import { randomPalette, palettes } from './ColorPalettes';
 import type { TerrainPalette } from './ColorPalettes';
@@ -18,7 +21,7 @@ function snapPos(v: number, halfSize: number): number {
   return edge + halfSize;
 }
 
-interface DebrisBox {
+export interface DebrisBox {
   x: number;
   z: number;
   halfW: number;
@@ -29,7 +32,7 @@ interface DebrisBox {
 
 // ── Terrain presets ─────────────────────────────────────────────────
 
-export type TerrainPreset = 'scattered' | 'terraced' | 'heightmap';
+export type TerrainPreset = 'scattered' | 'terraced' | 'heightmap' | 'dungeon' | 'rooms';
 
 interface TerrainPresetConfig {
   count: number;
@@ -75,6 +78,22 @@ const PRESET_CONFIGS: Record<TerrainPreset, TerrainPresetConfig> = {
     generateBox() { return { w: 1, d: 1, h: 0.5 }; },
     generatePos() { return null; },
   },
+
+  /** BSP-partitioned dungeon with rooms, corridors, and walls */
+  dungeon: {
+    count: 0,
+    spawnClear: 0,
+    generateBox() { return { w: 1, d: 1, h: 0.5 }; },
+    generatePos() { return null; },
+  },
+
+  /** Simple random room placement with corridors */
+  rooms: {
+    count: 0,
+    spawnClear: 0,
+    generateBox() { return { w: 1, d: 1, h: 0.5 }; },
+    generatePos() { return null; },
+  },
 };
 
 const DEBUG_RAMPS = false;
@@ -115,6 +134,15 @@ export class Terrain {
 
   // NavGrid reference (set after buildNavGrid, used by getRandomPosition)
   private navGrid: NavGrid | null = null;
+
+  // Dungeon walk mask (only for dungeon/rooms presets)
+  private walkMask: WalkMask | null = null;
+
+  // Dynamic debris (e.g. doors) — checked by resolveMovement alongside static debris
+  private dynamicDebris: DebrisBox[] = [];
+
+  // Door system (only for rooms preset)
+  private doorSystem: DoorSystem | null = null;
 
   constructor(scene: THREE.Scene, preset: TerrainPreset = 'scattered', heightmapStyle: HeightmapStyle = 'rolling', palettePick: string = 'random') {
     this.preset = preset;
@@ -508,8 +536,13 @@ export class Terrain {
 
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(points, 3));
+    // Dark lines on light surfaces, light lines on dark surfaces
+    const lum = baseColor.r * 0.299 + baseColor.g * 0.587 + baseColor.b * 0.114;
+    const gridColor = lum > 0.25
+      ? baseColor.clone().multiplyScalar(0.65)
+      : baseColor.clone().multiplyScalar(1.4);
     const mat = new THREE.LineBasicMaterial({
-      color: baseColor.clone().multiplyScalar(1.4),
+      color: gridColor,
       transparent: true,
       opacity: 0.9,
       depthWrite: false,
@@ -597,6 +630,8 @@ export class Terrain {
       this.createHeightmapMesh();
     } else if (this.preset === 'terraced') {
       this.createTerracedDebris();
+    } else if (this.preset === 'dungeon' || this.preset === 'rooms') {
+      this.createDungeonDebris();
     } else {
       this.createScatteredDebris();
     }
@@ -1105,7 +1140,28 @@ export class Terrain {
     this.ladderMeshes.push(ladderGroup);
   }
 
-  /** Generate deliberate staircase clusters + scattered filler */
+  private createDungeonDebris(): void {
+    const { wallGap } = useGameStore.getState();
+    const output = generateDungeon(this.preset as 'dungeon' | 'rooms', this.groundSize, wallGap);
+    this.walkMask = output.walkMask;
+
+    console.log(`[Terrain] ${this.preset}: ${output.roomCount} rooms, ${output.corridorCount} corridors, ${output.boxes.length} boxes, ${output.doors.length} doors`);
+
+    for (const def of output.boxes) {
+      this.placeBox(def.x, def.z, def.w, def.d, def.h, true);
+    }
+
+    // Create door system for dungeon and rooms presets
+    if (output.doors.length > 0) {
+      this.doorSystem = new DoorSystem(
+        this.group,
+        this,
+        output.doors,
+        output.walkMask.cellSize,
+      );
+    }
+  }
+
   private createTerracedDebris(): void {
     const halfGround = this.groundSize / 2 - 2;
     const spawnClear = 4;
@@ -1259,17 +1315,19 @@ export class Terrain {
     }
   }
 
-  /** Place a single box into the world. Skips z-fighting overlaps. */
-  private placeBox(x: number, z: number, w: number, d: number, h: number): boolean {
+  /** Place a single box into the world. Skips z-fighting overlaps unless skipZFight is set. */
+  private placeBox(x: number, z: number, w: number, d: number, h: number, skipZFight = false): boolean {
     const colors = [0x2a2a3e, 0x33334a, 0x252538, 0x1e1e30, 0x3a3a50];
     const hw = w / 2, hd = d / 2;
 
-    const zFight = this.debris.some(b =>
-      Math.abs(h - b.height) < 0.01 &&
-      Math.abs(x - b.x) < hw + b.halfW &&
-      Math.abs(z - b.z) < hd + b.halfD
-    );
-    if (zFight) return false;
+    if (!skipZFight) {
+      const zFight = this.debris.some(b =>
+        Math.abs(h - b.height) < 0.01 &&
+        Math.abs(x - b.x) < hw + b.halfW &&
+        Math.abs(z - b.z) < hd + b.halfD
+      );
+      if (zFight) return false;
+    }
 
     const geo = new THREE.BoxGeometry(w, h, d);
     const color = colors[Math.floor(Math.random() * colors.length)];
@@ -1358,6 +1416,10 @@ export class Terrain {
       grid.buildFromHeightmap(this.heightmapData, this.heightmapRes, this.heightmapGroundSize, stepHeight, slopeHeight);
     } else {
       grid.build(this.debris, stepHeight, capsuleRadius);
+      // For dungeon/rooms, block nav cells outside the dungeon walkable area
+      if (this.walkMask) {
+        grid.applyWalkMask(this.walkMask.openGrid, this.walkMask.gridW, this.walkMask.gridD, this.walkMask.cellSize, this.groundSize);
+      }
     }
 
     // Register ladder nav-links.
@@ -1694,6 +1756,24 @@ export class Terrain {
     return this.debris;
   }
 
+  /** Add a dynamic debris box (e.g. closed door) for collision checks */
+  addDynamicDebris(box: DebrisBox): void {
+    if (!this.dynamicDebris.includes(box)) {
+      this.dynamicDebris.push(box);
+    }
+  }
+
+  /** Remove a dynamic debris box (e.g. door opened) */
+  removeDynamicDebris(box: DebrisBox): void {
+    const idx = this.dynamicDebris.indexOf(box);
+    if (idx >= 0) this.dynamicDebris.splice(idx, 1);
+  }
+
+  /** Get the door system (for update calls from Game.ts) */
+  getDoorSystem(): DoorSystem | null {
+    return this.doorSystem;
+  }
+
   /** The raycastable terrain surface mesh (heightmap or ground plane). */
   getTerrainMesh(): THREE.Mesh | null {
     return this.heightmapMesh;
@@ -1836,9 +1916,12 @@ export class Terrain {
       return { x: rx, z: rz, y: terrainY };
     }
 
-    // Box-based: iterative push-out
+    // Box-based: iterative push-out (static + dynamic debris)
+    const allDebris = this.dynamicDebris.length > 0
+      ? [...this.debris, ...this.dynamicDebris]
+      : this.debris;
     for (let pass = 0; pass < 4; pass++) {
-      for (const box of this.debris) {
+      for (const box of allDebris) {
         const effectiveH = getBoxHeightAt(box, rx, rz);
         if (effectiveH - currentY <= stepHeight) continue;
 
@@ -2014,6 +2097,13 @@ export class Terrain {
     }
     this.ladderMeshes = [];
     this.ladderDefs = [];
+
+    // Dispose door system
+    if (this.doorSystem) {
+      this.doorSystem.dispose();
+      this.doorSystem = null;
+    }
+    this.dynamicDebris.length = 0;
   }
 
   /** Check if any taller debris box overlaps within `clearance` of (x, z) at surfaceY */
@@ -2045,6 +2135,21 @@ export class Terrain {
       }
       // Fallback: spawn at origin
       return new THREE.Vector3(0, this.getTerrainY(0, 0), 0);
+    }
+
+    // Dungeon/rooms: pick directly from NavGrid spawn-region cells
+    if ((this.preset === 'dungeon' || this.preset === 'rooms') && this.navGrid) {
+      for (let attempt = 0; attempt < 50; attempt++) {
+        const cell = this.navGrid.getRandomSpawnCell();
+        if (!cell) break;
+        return new THREE.Vector3(cell.x, cell.surfaceHeight, cell.z);
+      }
+      // Fallback: center of first floor tile
+      if (this.debris.length > 0) {
+        const floor = this.debris[0];
+        return new THREE.Vector3(floor.x, floor.height, floor.z);
+      }
+      return new THREE.Vector3(0, 0, 0);
     }
 
     for (let attempt = 0; attempt < 50; attempt++) {

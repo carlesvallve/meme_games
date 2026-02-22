@@ -7,7 +7,7 @@ import { palettes } from '../game/ColorPalettes';
 
 type ActivePanel = 'player' | 'camera' | 'light' | 'scene' | null;
 
-const TERRAIN_PRESETS: TerrainPreset[] = ['scattered', 'terraced', 'heightmap'];
+const TERRAIN_PRESETS: TerrainPreset[] = ['scattered', 'terraced', 'heightmap', 'dungeon', 'rooms'];
 const HEIGHTMAP_STYLES: HeightmapStyle[] = ['rolling', 'terraces', 'islands', 'caves'];
 const PALETTE_NAMES = ['random', ...Object.keys(palettes)];
 
@@ -182,6 +182,8 @@ function ScenePanel() {
   const setPaletteName = useGameStore((s) => s.setPaletteName);
   const gridOpacity = useGameStore((s) => s.gridOpacity);
   const setGridOpacity = useGameStore((s) => s.setGridOpacity);
+  const wallGap = useGameStore((s) => s.wallGap);
+  const setWallGap = useGameStore((s) => s.setWallGap);
   const resolutionScale = useGameStore((s) => s.resolutionScale);
   const setResolutionScale = useGameStore((s) => s.setResolutionScale);
   const remesh = useGameStore((s) => s.onRemesh);
@@ -245,6 +247,23 @@ function ScenePanel() {
               </button>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* Wall gap slider — only when rooms preset */}
+      {terrainPreset === 'rooms' && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+          <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Wall Gap</span>
+          <input
+            type="range"
+            min={0} max={4} step={1}
+            value={wallGap}
+            onChange={(e) => setWallGap(parseInt(e.target.value, 10))}
+            style={{ flex: 1, height: 14, accentColor: '#6af' }}
+          />
+          <span style={{ color: '#fff', width: 36, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+            {wallGap}
+          </span>
         </div>
       )}
 

@@ -523,6 +523,13 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       const chestsOpened = chestSystem.update(dt, activePos, params.stepHeight);
       if (chestsOpened > 0) audioSystem.sfx('chest');
 
+      // Doors — all characters can interact
+      const doorSystem = terrain.getDoorSystem();
+      if (doorSystem) {
+        const charPositions = characters.map(c => c.getPosition());
+        doorSystem.update(dt, charPositions, params.stepHeight);
+      }
+
       // Loot
       const loot = lootSystem.update(dt, activePos);
       if (loot.coins > 0) {

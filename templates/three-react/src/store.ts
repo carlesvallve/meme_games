@@ -66,6 +66,7 @@ interface GameStore {
   heightmapStyle: HeightmapStyle;
   paletteName: string;       // user selection: 'random' or specific name
   paletteActive: string;     // actual palette in use (for display)
+  wallGap: number;
   gridOpacity: number;
   resolutionScale: number;
 
@@ -90,6 +91,7 @@ interface GameStore {
   setHeightmapStyle: (style: HeightmapStyle) => void;
   setPaletteName: (name: string) => void;
   setPaletteActive: (name: string) => void;
+  setWallGap: (gap: number) => void;
   setGridOpacity: (opacity: number) => void;
   setResolutionScale: (scale: number) => void;
 
@@ -131,6 +133,7 @@ export const useGameStore = create<GameStore>((set) => ({
   heightmapStyle: 'islands' as HeightmapStyle,
   paletteName: 'random',
   paletteActive: '',
+  wallGap: 1,
   gridOpacity: 0.25,
   resolutionScale: 1,
 
@@ -167,6 +170,7 @@ export const useGameStore = create<GameStore>((set) => ({
   setHeightmapStyle: (heightmapStyle) => set({ heightmapStyle }),
   setPaletteName: (paletteName) => set({ paletteName }),
   setPaletteActive: (paletteActive) => set({ paletteActive }),
+  setWallGap: (wallGap) => set({ wallGap }),
   setGridOpacity: (gridOpacity) => set({ gridOpacity }),
   setResolutionScale: (resolutionScale) => set({ resolutionScale }),
 
