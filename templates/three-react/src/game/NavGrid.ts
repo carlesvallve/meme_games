@@ -243,6 +243,77 @@ export class NavGrid {
     return count >= 4;
   }
 
+  /**
+   * Apply a walkability mask from a coarser grid (e.g. dungeon room grid).
+   * Nav cells whose center falls on a non-open room-grid cell are blocked.
+   * Recomputes passability after blocking.
+   */
+  applyWalkMask(openGrid: boolean[], maskGridW: number, maskGridD: number, maskCellSize: number, worldSize: number): void {
+    const { width, height } = this;
+    const halfWorld = worldSize / 2;
+
+    // Block nav cells outside the open mask
+    for (const cell of this.cells) {
+      const mgx = Math.floor((cell.worldX + halfWorld) / maskCellSize);
+      const mgz = Math.floor((cell.worldZ + halfWorld) / maskCellSize);
+      if (mgx < 0 || mgx >= maskGridW || mgz < 0 || mgz >= maskGridD ||
+          !openGrid[mgz * maskGridW + mgx]) {
+        cell.blocked = true;
+        cell.passable = 0;
+      }
+    }
+
+    // Recompute passability for non-blocked cells (neighbors may now be blocked)
+    for (let gz = 0; gz < height; gz++) {
+      for (let gx = 0; gx < width; gx++) {
+        const cell = this.cells[gz * width + gx];
+        if (cell.blocked) continue;
+        let mask = 0;
+        for (let dir = 0; dir < 8; dir++) {
+          const ngx = gx + DIR_DGX[dir];
+          const ngz = gz + DIR_DGZ[dir];
+          if (ngx < 0 || ngx >= width || ngz < 0 || ngz >= height) continue;
+          const neighbor = this.cells[ngz * width + ngx];
+          if (neighbor.blocked) continue;
+          if (Math.abs(cell.surfaceHeight - neighbor.surfaceHeight) > this.stepHeight) continue;
+          if (dir % 2 === 1) {
+            const [c1, c2] = DIAGONAL_CARDINALS[dir];
+            const n1gx = gx + DIR_DGX[c1], n1gz = gz + DIR_DGZ[c1];
+            const n2gx = gx + DIR_DGX[c2], n2gz = gz + DIR_DGZ[c2];
+            if (n1gx < 0 || n1gx >= width || n1gz < 0 || n1gz >= height) continue;
+            if (n2gx < 0 || n2gx >= width || n2gz < 0 || n2gz >= height) continue;
+            const adj1 = this.cells[n1gz * width + n1gx];
+            const adj2 = this.cells[n2gz * width + n2gx];
+            if (adj1.blocked || adj2.blocked) continue;
+            if (Math.abs(cell.surfaceHeight - adj1.surfaceHeight) > this.stepHeight) continue;
+            if (Math.abs(cell.surfaceHeight - adj2.surfaceHeight) > this.stepHeight) continue;
+          }
+          mask |= 1 << dir;
+        }
+        cell.passable = mask;
+      }
+    }
+  }
+
+  /** Return the world position of a random cell in the spawn region, or null if none. */
+  getRandomSpawnCell(): { x: number; z: number; surfaceHeight: number } | null {
+    if (!this.regionLabels || this.spawnRegionLabel < 0) return null;
+    // Collect valid spawn indices
+    const candidates: number[] = [];
+    for (let i = 0; i < this.cells.length; i++) {
+      if (this.regionLabels[i] !== this.spawnRegionLabel) continue;
+      const cell = this.cells[i];
+      if (!cell || cell.blocked) continue;
+      let dirs = cell.passable, count = 0;
+      while (dirs) { count += dirs & 1; dirs >>= 1; }
+      if (count >= 4) candidates.push(i);
+    }
+    if (candidates.length === 0) return null;
+    const idx = candidates[Math.floor(Math.random() * candidates.length)];
+    const cell = this.cells[idx];
+    return { x: cell.worldX, z: cell.worldZ, surfaceHeight: cell.surfaceHeight };
+  }
+
   /** World-space bounds: half-extent of the grid */
   getHalfSize(): number {
     return this.width * this.cellSize / 2;
