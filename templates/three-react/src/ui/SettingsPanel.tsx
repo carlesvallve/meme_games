@@ -184,6 +184,7 @@ function ScenePanel() {
   const setGridOpacity = useGameStore((s) => s.setGridOpacity);
   const resolutionScale = useGameStore((s) => s.resolutionScale);
   const setResolutionScale = useGameStore((s) => s.setResolutionScale);
+  const remesh = useGameStore((s) => s.onRemesh);
   const randomizePalette = useGameStore((s) => s.onRandomizePalette);
 
   return (
@@ -313,7 +314,13 @@ function ScenePanel() {
           type="range"
           min={0.5} max={3} step={0.5}
           value={resolutionScale}
-          onChange={(e) => setResolutionScale(parseFloat(e.target.value))}
+          onChange={(e) => {
+            const v = parseFloat(e.target.value);
+            setResolutionScale(v);
+            // Debounce remesh: wait until user stops dragging
+            clearTimeout((window as any).__remeshTimer);
+            (window as any).__remeshTimer = setTimeout(() => remesh?.(), 300);
+          }}
           style={{ flex: 1, height: 14, accentColor: '#6af' }}
         />
         <span style={{ color: '#fff', width: 36, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>

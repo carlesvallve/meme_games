@@ -436,6 +436,9 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     onRegenerateScene: () => {
       regenerateScene();
     },
+    onRemesh: () => {
+      terrain.remesh();
+    },
     onRandomizePalette: () => {
       const { name, palette } = randomPalette();
       terrain.applyPalette(palette, name);

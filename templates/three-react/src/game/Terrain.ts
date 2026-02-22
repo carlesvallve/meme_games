@@ -105,6 +105,10 @@ export class Terrain {
   private heightmapMesh: THREE.Mesh | null = null;
   private heightmapGrid: THREE.LineSegments | null = null;
 
+  // Heightmap seed (stored so remesh can reproduce identical terrain)
+  private heightmapSeed: number | undefined;
+  private isRemeshing = false;
+
   // Ladder data
   private ladderDefs: LadderDef[] = [];
   private ladderMeshes: THREE.Group[] = [];
@@ -625,11 +629,15 @@ export class Terrain {
     const halfGround = groundSize / 2;
 
     // Generate vertex-based heightmap
-    const result = generateHeightmap(config, groundSize, undefined, resolutionScale);
+    const result = generateHeightmap(config, groundSize, this.heightmapSeed, resolutionScale);
+    this.heightmapSeed = result.seed;
     const heights = result.heights;
     const rampCells = result.rampCells;
     this.heightmapData = heights;
-    this.ladderDefs = result.ladders;
+    // During remesh, keep original ladder defs (world positions don't change)
+    if (!this.isRemeshing) {
+      this.ladderDefs = result.ladders;
+    }
     console.log(`[Terrain] Heightmap style=${this.heightmapStyle}, ladders=${this.ladderDefs.length}, rampCells=${rampCells.size}`);
     this.heightmapRes = res;
     this.heightmapGroundSize = groundSize;
@@ -870,21 +878,32 @@ export class Terrain {
       lineColors.push(c, c, c, c, c, c);
     };
 
-    // Draw wireframe edges at NavGrid intervals (~0.5m), not every mesh edge.
-    // At higher resolutions, skip mesh edges to keep grid density constant.
-    const gridSkip = Math.max(1, Math.round(resolutionScale));
-    for (let z = 0; z < verts; z++) {
-      for (let x = 0; x < verts; x++) {
-        const idx = z * verts + x;
-        // Horizontal edge (along X): draw at every gridSkip rows
-        if (x < res && z % gridSkip === 0) {
-          const n = idx + 1;
-          pushLine(bx(idx), by(idx), bz(idx), idx, bx(n), by(n), bz(n), n);
+    // Draw grid at fixed NavGrid intervals (base resolution), independent of mesh resolution.
+    // Sample the heightmap to get Y at each grid intersection, so the grid works at any scale.
+    const baseRes = Math.round(res / resolutionScale);
+    const navCellSize = groundSize / baseRes;
+
+    for (let gz = 0; gz <= baseRes; gz++) {
+      for (let gx = 0; gx <= baseRes; gx++) {
+        const wx = gx * navCellSize - halfGround;
+        const wz = gz * navCellSize - halfGround;
+        const y0 = sampleHeightmap(heights, res, groundSize, wx, wz);
+        // Find nearest mesh vertex for color
+        const mx = Math.min(Math.round((wx + halfGround) / cellSize), res);
+        const mz = Math.min(Math.round((wz + halfGround) / cellSize), res);
+        const nearIdx = mz * verts + mx;
+
+        // Horizontal edge (along X)
+        if (gx < baseRes) {
+          const wx1 = (gx + 1) * navCellSize - halfGround;
+          const y1 = sampleHeightmap(heights, res, groundSize, wx1, wz);
+          pushLineWorld(wx, y0, wz, wx1, y1, wz, nearIdx);
         }
-        // Vertical edge (along Z): draw at every gridSkip columns
-        if (z < res && x % gridSkip === 0) {
-          const n = idx + verts;
-          pushLine(bx(idx), by(idx), bz(idx), idx, bx(n), by(n), bz(n), n);
+        // Vertical edge (along Z)
+        if (gz < baseRes) {
+          const wz1 = (gz + 1) * navCellSize - halfGround;
+          const y1 = sampleHeightmap(heights, res, groundSize, wx, wz1);
+          pushLineWorld(wx, y0, wz, wx, y1, wz1, nearIdx);
         }
       }
     }
@@ -1920,6 +1939,44 @@ export class Terrain {
 
     const { setHeightmapThumb } = useGameStore.getState();
     setHeightmapThumb(canvas.toDataURL());
+  }
+
+  /** Rebuild only the heightmap mesh + grid + ladders at a new resolution scale,
+   *  keeping the same seed so the terrain shape is identical. Entities are unaffected. */
+  remesh(): void {
+    if (this.preset !== 'heightmap') return;
+    const { resolutionScale } = useGameStore.getState();
+    console.log(`[Terrain] Remesh at ${resolutionScale}× (seed=${this.heightmapSeed})`);
+
+    // Dispose old mesh, grid, and ladder visuals
+    if (this.heightmapMesh) {
+      this.group.remove(this.heightmapMesh);
+      this.heightmapMesh.geometry.dispose();
+      (this.heightmapMesh.material as THREE.Material).dispose();
+      this.heightmapMesh = null;
+    }
+    if (this.heightmapGrid) {
+      this.group.remove(this.heightmapGrid);
+      this.heightmapGrid.geometry.dispose();
+      (this.heightmapGrid.material as THREE.Material).dispose();
+      this.heightmapGrid = null;
+    }
+    for (const ladderGroup of this.ladderMeshes) {
+      ladderGroup.traverse((child) => {
+        if (child instanceof THREE.Mesh) {
+          child.geometry.dispose();
+          (child.material as THREE.Material).dispose();
+        }
+      });
+      this.group.remove(ladderGroup);
+    }
+    this.ladderMeshes = [];
+
+    // Rebuild with same seed (stored from previous generation)
+    this.isRemeshing = true;
+    this.createHeightmapMesh();
+    this.isRemeshing = false;
+    this.setGridOpacity(useGameStore.getState().gridOpacity);
   }
 
   dispose(): void {
