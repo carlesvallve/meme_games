@@ -12,8 +12,8 @@ export interface GoToPointOptions {
 
 const DEFAULTS: Required<GoToPointOptions> = {
   speed: 4,
-  stepHeight: 0.5,
-  slopeHeight: 1.0,
+  stepHeight: 0.8,
+  slopeHeight: 1.5,
   capsuleRadius: 0.25,
   hopHeight: 0.1,
   waypointReach: 0.3,

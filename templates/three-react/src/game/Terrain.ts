@@ -7,6 +7,8 @@ import type { LadderDef } from './Ladder';
 import type { HeightmapStyle } from './TerrainNoise';
 export type { HeightmapStyle } from './TerrainNoise';
 import { useGameStore } from '../store';
+import { randomPalette, palettes } from './ColorPalettes';
+import type { TerrainPalette } from './ColorPalettes';
 
 const HALF = 0.5;
 function snapHalf(v: number): number { return Math.max(HALF, Math.round(v / HALF) * HALF); }
@@ -84,11 +86,20 @@ export class Terrain {
   private readonly groundSize = 40;
   readonly preset: TerrainPreset;
   private readonly heightmapStyle: HeightmapStyle;
+  private palette: TerrainPalette;
+  private paletteName: string;
+
+  // Water plane + depth pass for foam
+  private waterMaterial: THREE.ShaderMaterial | null = null;
+  private waterMesh: THREE.Mesh | null = null;
+  private depthTarget: THREE.WebGLRenderTarget | null = null;
 
   // Heightmap mesh data (only for 'heightmap' preset)
   private heightmapData: Float32Array | null = null;
   private heightmapRes = 0;
   private heightmapGroundSize = 0;
+  private heightmapMaxHeight = 8;
+  private heightmapPosterize = 4;
   private heightmapMesh: THREE.Mesh | null = null;
   private heightmapGrid: THREE.LineSegments | null = null;
 
@@ -99,9 +110,17 @@ export class Terrain {
   // NavGrid reference (set after buildNavGrid, used by getRandomPosition)
   private navGrid: NavGrid | null = null;
 
-  constructor(scene: THREE.Scene, preset: TerrainPreset = 'scattered', heightmapStyle: HeightmapStyle = 'rolling') {
+  constructor(scene: THREE.Scene, preset: TerrainPreset = 'scattered', heightmapStyle: HeightmapStyle = 'rolling', palettePick: string = 'random') {
     this.preset = preset;
     this.heightmapStyle = heightmapStyle;
+    if (palettePick !== 'random' && palettes[palettePick]) {
+      this.palette = palettes[palettePick];
+      this.paletteName = palettePick;
+    } else {
+      const { name, palette } = randomPalette();
+      this.palette = palette;
+      this.paletteName = name;
+    }
     this.createGround();
     if (preset !== 'heightmap') {
       this.createGridLines();
@@ -111,16 +130,325 @@ export class Terrain {
   }
 
   private createGround(): void {
-    const geo = new THREE.PlaneGeometry(this.groundSize, this.groundSize);
-    const mat = new THREE.MeshStandardMaterial({
-      color: 0x1a2a1a,
-      roughness: 0.95,
-      metalness: 0.05,
+    const size = this.groundSize;
+    const geo = new THREE.PlaneGeometry(size, size, 64, 64);
+    geo.rotateX(-Math.PI / 2);
+
+    // Depth render target for foam around all objects
+    const depthTarget = new THREE.WebGLRenderTarget(1024, 1024, {
+      minFilter: THREE.NearestFilter,
+      magFilter: THREE.NearestFilter,
     });
-    const ground = new THREE.Mesh(geo, mat);
-    ground.rotation.x = -Math.PI / 2;
-    ground.receiveShadow = true;
-    this.group.add(ground);
+    depthTarget.depthTexture = new THREE.DepthTexture(1024, 1024);
+    depthTarget.depthTexture.format = THREE.DepthFormat;
+    depthTarget.depthTexture.type = THREE.UnsignedIntType;
+    this.depthTarget = depthTarget;
+
+    const waterMat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      uniforms: {
+        uTime: { value: 0 },
+        uShallowColor: { value: new THREE.Color(this.palette.waterShallow) },
+        uDeepColor: { value: new THREE.Color(this.palette.waterDeep) },
+        uDepthTex: { value: depthTarget.depthTexture },
+        uCameraNear: { value: 0.1 },
+        uCameraFar: { value: 100 },
+        uResolution: { value: new THREE.Vector2(1024, 1024) },
+      },
+      vertexShader: /* glsl */ `
+        uniform float uTime;
+        varying vec4 vScreenPos;
+        varying vec3 vWorldPos;
+        varying float vViewZ;
+
+        void main() {
+          vec3 pos = position;
+          // Gentle wave
+          pos.y += sin(pos.x * 0.6 + uTime * 0.3) * cos(pos.z * 0.5 + uTime * 0.2) * 0.012;
+          vec4 worldPos = modelMatrix * vec4(pos, 1.0);
+          vWorldPos = worldPos.xyz;
+          vec4 viewPos = viewMatrix * worldPos;
+          vViewZ = -viewPos.z;
+          vScreenPos = projectionMatrix * viewPos;
+          gl_Position = vScreenPos;
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        uniform float uTime;
+        uniform vec3 uShallowColor;
+        uniform vec3 uDeepColor;
+        uniform sampler2D uDepthTex;
+        uniform float uCameraNear;
+        uniform float uCameraFar;
+        uniform vec2 uResolution;
+        varying vec4 vScreenPos;
+        varying vec3 vWorldPos;
+        varying float vViewZ;
+
+        float hash(vec2 p) {
+          return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+        }
+        float noise(vec2 p) {
+          vec2 i = floor(p);
+          vec2 f = fract(p);
+          f = f * f * (3.0 - 2.0 * f);
+          return mix(
+            mix(hash(i), hash(i + vec2(1,0)), f.x),
+            mix(hash(i + vec2(0,1)), hash(i + vec2(1,1)), f.x),
+            f.y
+          );
+        }
+
+        float linearizeDepth(float d) {
+          return uCameraNear * uCameraFar / (uCameraFar - d * (uCameraFar - uCameraNear));
+        }
+
+        void main() {
+          // Screen-space UV from clip coords
+          vec2 screenUV = (vScreenPos.xy / vScreenPos.w) * 0.5 + 0.5;
+
+          // Scene depth behind this water fragment
+          float sceneDepthRaw = texture2D(uDepthTex, screenUV).r;
+          float sceneDepth = linearizeDepth(sceneDepthRaw);
+          float waterDepth = vViewZ;
+
+          // How much scene geometry is behind the water surface (in world units)
+          float depthDiff = sceneDepth - waterDepth;
+
+          // Discard water in front of scene (terrain above water)
+          if (depthDiff < 0.0) discard;
+
+          // Wave offset for animated foam
+          float waveOffset = sin(vWorldPos.x * 0.8 + uTime * 0.5) * 0.03
+                           + sin(vWorldPos.z * 0.6 + uTime * 0.35) * 0.02;
+
+          float animDepth = depthDiff + waveOffset;
+
+          // Color: shallow → deep
+          float depthMix = smoothstep(0.0, 3.0, animDepth);
+          vec3 col = mix(uShallowColor, uDeepColor, depthMix);
+
+          // Subtle caustics
+          float t = uTime * 0.15;
+          float caustic = noise(vWorldPos.xz * 1.5 + t) * noise(vWorldPos.xz * 2.2 - t * 0.7);
+          col += vec3(caustic * 0.04);
+
+          // ── Smooth foam line at edges ──
+          // Sample depth at neighboring pixels to soften jagged triangle edges
+          float foamNoise = noise(vWorldPos.xz * 5.0 + uTime * 0.3) * 0.008
+                          + noise(vWorldPos.xz * 12.0 - uTime * 0.2) * 0.004;
+
+          vec2 texel = 1.5 / uResolution;  // 1.5px blur radius
+          float foamSum = 0.0;
+          float totalWeight = 0.0;
+          for (int ox = -1; ox <= 1; ox++) {
+            for (int oz = -1; oz <= 1; oz++) {
+              vec2 off = vec2(float(ox), float(oz)) * texel;
+              float sDepth = linearizeDepth(texture2D(uDepthTex, screenUV + off).r);
+              float dd = sDepth - vViewZ;
+              // Compute per-sample foam
+              float sGradX = dFdx(dd);
+              float sGradY = dFdy(dd);
+              float sGrad = length(vec2(sGradX, sGradY));
+              float fw = mix(0.05, 0.1, smoothstep(0.01, 0.1, sGrad));
+              float w = (ox == 0 && oz == 0) ? 2.0 : 1.0;
+              foamSum += smoothstep(fw + foamNoise, 0.0, dd) * w;
+              totalWeight += w;
+            }
+          }
+          float foamLine = (foamSum / totalWeight) * 0.9;
+
+          float foam = min(0.9, foamLine);
+          col = mix(col, vec3(1.0), foam);
+
+          // Alpha: fade in smoothly, more opaque deep
+          float alpha = smoothstep(0.0, 0.5, animDepth) * 0.6;
+          alpha = max(alpha, foam * 0.95);
+
+          gl_FragColor = vec4(col, alpha);
+        }
+      `,
+    });
+
+    this.waterMaterial = waterMat;
+
+    const water = new THREE.Mesh(geo, waterMat);
+    water.position.y = -0.05;
+    this.waterMesh = water;
+    this.group.add(water);
+  }
+
+  /** Render depth pass and animate water. Call before main render. */
+  updateWater(dt: number, renderer?: THREE.WebGLRenderer, scene?: THREE.Scene, camera?: THREE.Camera): void {
+    if (!this.waterMaterial) return;
+    this.waterMaterial.uniforms.uTime.value += dt;
+
+    if (renderer && scene && camera && this.depthTarget && this.waterMesh) {
+      // Update camera uniforms
+      if (camera instanceof THREE.PerspectiveCamera) {
+        this.waterMaterial.uniforms.uCameraNear.value = camera.near;
+        this.waterMaterial.uniforms.uCameraFar.value = camera.far;
+      }
+
+      // Resize depth target to match renderer
+      const size = renderer.getSize(new THREE.Vector2());
+      if (this.depthTarget.width !== size.x || this.depthTarget.height !== size.y) {
+        this.depthTarget.setSize(size.x, size.y);
+        this.waterMaterial.uniforms.uResolution.value.set(size.x, size.y);
+      }
+
+      // Render depth pass: hide water, render scene to depth target
+      this.waterMesh.visible = false;
+      renderer.setRenderTarget(this.depthTarget);
+      renderer.render(scene, camera);
+      renderer.setRenderTarget(null);
+      this.waterMesh.visible = true;
+    }
+  }
+
+  getPaletteName(): string {
+    return this.paletteName;
+  }
+
+  /** Swap palette and recolor existing terrain mesh + water without regenerating */
+  applyPalette(pal: TerrainPalette, name: string): void {
+    this.palette = pal;
+    this.paletteName = name;
+
+    // Update water colors
+    if (this.waterMaterial) {
+      this.waterMaterial.uniforms.uShallowColor.value.set(pal.waterShallow);
+      this.waterMaterial.uniforms.uDeepColor.value.set(pal.waterDeep);
+    }
+
+    // Recolor heightmap mesh vertices
+    if (!this.heightmapMesh || !this.heightmapData) return;
+    const geo = this.heightmapMesh.geometry;
+    const colorAttr = geo.getAttribute('color') as THREE.BufferAttribute;
+    const posAttr = geo.getAttribute('position') as THREE.BufferAttribute;
+    if (!colorAttr || !posAttr) return;
+
+    const heights = this.heightmapData;
+    const res = this.heightmapRes;
+    const groundSize = this.heightmapGroundSize;
+    const maxHeight = this.heightmapMaxHeight;
+    const hmCellSize = groundSize / res;
+    const eps = hmCellSize * 0.5;
+    const maxPassableSlope = 1.0;
+    const waterY = -0.05;
+    const verts = res + 1;
+
+    const colorFlat = new THREE.Color(pal.flat);
+    const colorGentleSlope = new THREE.Color(pal.gentleSlope);
+    const colorSteepSlope = new THREE.Color(pal.steepSlope);
+    const colorCliff = new THREE.Color(pal.cliff);
+    const colorSand = new THREE.Color(pal.sand);
+    const colorWetSand = new THREE.Color(pal.wetSand);
+    const tmpColor = new THREE.Color();
+
+    for (let z = 0; z < verts; z++) {
+      for (let x = 0; x < verts; x++) {
+        const idx = z * verts + x;
+        const hC = heights[idx];
+        const wx = posAttr.getX(idx);
+        const wz = posAttr.getZ(idx);
+
+        const hL = sampleHeightmap(heights, res, groundSize, wx - eps, wz);
+        const hR = sampleHeightmap(heights, res, groundSize, wx + eps, wz);
+        const hU = sampleHeightmap(heights, res, groundSize, wx, wz - eps);
+        const hD = sampleHeightmap(heights, res, groundSize, wx, wz + eps);
+
+        const gx = (hR - hL) / (2 * eps);
+        const gz = (hD - hU) / (2 * eps);
+        const slopeMag = Math.sqrt(gx * gx + gz * gz);
+        const slopeRatio = slopeMag / maxPassableSlope;
+
+        if (slopeRatio < 0.4) {
+          tmpColor.copy(colorFlat);
+        } else if (slopeRatio < 0.9) {
+          const t = (slopeRatio - 0.4) / 0.5;
+          tmpColor.copy(colorFlat).lerp(colorGentleSlope, t);
+        } else if (slopeRatio < 1.0) {
+          const t = (slopeRatio - 0.9) / 0.1;
+          tmpColor.copy(colorGentleSlope).lerp(colorSteepSlope, t);
+        } else {
+          const t = Math.min(1, (slopeRatio - 1.0) / 0.3);
+          tmpColor.copy(colorSteepSlope).lerp(colorCliff, t);
+        }
+
+        const maxNeighborH = Math.max(hL, hR, hU, hD);
+        const minNeighborH = Math.min(hL, hR, hU, hD);
+        if (slopeRatio < 0.9) {
+          const cliffAbove = maxNeighborH - hC;
+          if (cliffAbove > 0.3) {
+            const baseBlend = Math.min(1, (cliffAbove - 0.3) / 0.5);
+            tmpColor.lerp(colorFlat, baseBlend * 0.85);
+          }
+        } else {
+          const dropBelow = hC - minNeighborH;
+          if (dropBelow < 0.4) {
+            const t = 1.0 - dropBelow / 0.4;
+            tmpColor.lerp(colorFlat, t * 0.9);
+          }
+        }
+
+        // Per-terrace color variation
+        if (slopeRatio < 0.9) {
+          const terraceStep = maxHeight / Math.max(this.heightmapPosterize, 2);
+          const level = Math.round(hC / Math.max(terraceStep, 0.5));
+          const hsl = { h: 0, s: 0, l: 0 };
+          tmpColor.getHSL(hsl);
+          const hueShift = ((level % 3) - 1) * 0.025;
+          const satShift = ((level % 2) === 0 ? 0.04 : -0.04);
+          const lumShift = ((level % 3) - 1) * 0.03;
+          hsl.h = (hsl.h + hueShift + 1) % 1;
+          hsl.s = Math.max(0, Math.min(1, hsl.s + satShift));
+          hsl.l = Math.max(0, Math.min(1, hsl.l + lumShift));
+          tmpColor.setHSL(hsl.h, hsl.s, hsl.l);
+        }
+
+        const heightVar = 0.94 + 0.12 * (hC / Math.max(maxHeight, 1));
+        tmpColor.multiplyScalar(heightVar);
+
+        if (slopeRatio < 1.0) {
+          const beachTop = waterY + 0.2;
+          const beachMid = waterY + 0.04;
+          const beachBot = waterY - 0.04;
+          if (hC < beachTop && hC > beachBot - 0.5) {
+            if (hC < beachBot) {
+              const t = 1.0 - Math.min(1, (beachBot - hC) / 0.5);
+              tmpColor.lerp(colorWetSand, t * 0.7);
+            } else if (hC < beachMid) {
+              const t = (hC - beachBot) / (beachMid - beachBot);
+              const sandTarget = colorWetSand.clone().lerp(colorSand, t);
+              tmpColor.lerp(sandTarget, 0.8);
+            } else {
+              const t = (hC - beachMid) / (beachTop - beachMid);
+              tmpColor.lerp(colorSand, (1.0 - t) * 0.8);
+            }
+          }
+        }
+
+        colorAttr.setXYZ(idx, tmpColor.r, tmpColor.g, tmpColor.b);
+      }
+    }
+    colorAttr.needsUpdate = true;
+  }
+
+  setGridOpacity(opacity: number): void {
+    this.group.traverse((obj) => {
+      if (obj instanceof THREE.LineSegments || obj instanceof THREE.Line) {
+        const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+        for (const mat of mats) {
+          if (mat instanceof THREE.LineBasicMaterial) {
+            mat.transparent = true;
+            mat.opacity = opacity;
+            mat.visible = opacity > 0.01;
+          }
+        }
+      }
+    });
   }
 
   private createGridLines(): void {
@@ -296,11 +624,14 @@ export class Terrain {
     // Generate vertex-based heightmap
     const result = generateHeightmap(config, groundSize);
     const heights = result.heights;
+    const rampCells = result.rampCells;
     this.heightmapData = heights;
     this.ladderDefs = result.ladders;
-    console.log(`[Terrain] Heightmap style=${this.heightmapStyle}, ladders=${this.ladderDefs.length}`);
+    console.log(`[Terrain] Heightmap style=${this.heightmapStyle}, ladders=${this.ladderDefs.length}, rampCells=${rampCells.size}`);
     this.heightmapRes = res;
     this.heightmapGroundSize = groundSize;
+    this.heightmapMaxHeight = config.maxHeight;
+    this.heightmapPosterize = config.posterize || 4;
 
     // Debug: render heightmap as grayscale canvas overlay
     this.debugHeightmapCanvas(heights, verts, config.maxHeight);
@@ -311,11 +642,16 @@ export class Terrain {
     const indices: number[] = [];
 
     // Slope-based color palette
-    const colorFlat = new THREE.Color(0x2a3a1e);     // dark grass green
-    const colorGentleSlope = new THREE.Color(0x3a4a28); // earthy green
-    const colorSteepSlope = new THREE.Color(0x7a7580);  // light rocky gray
-    const colorCliff = new THREE.Color(0x908a95);       // whitish rock
+    const pal = this.palette;
+    console.log(`[Terrain] Palette: ${this.paletteName}`);
+    const colorFlat = new THREE.Color(pal.flat);
+    const colorGentleSlope = new THREE.Color(pal.gentleSlope);
+    const colorSteepSlope = new THREE.Color(pal.steepSlope);
+    const colorCliff = new THREE.Color(pal.cliff);
+    const colorSand = new THREE.Color(pal.sand);
+    const colorWetSand = new THREE.Color(pal.wetSand);
     const tmpColor = new THREE.Color();
+    const waterY = -0.05;
 
     // Slope threshold matching NavGrid passability exactly.
     // NavGrid: eps = hmCellSize * 0.5, maxSlope = (slopeHeight / navCellSize) * 0.5
@@ -359,36 +695,94 @@ export class Terrain {
         // Sharp transition: passable = green, unpassable = rock
         const slopeRatio = slopeMag / maxPassableSlope;
 
-        if (slopeRatio < 0.7) {
-          // Clearly passable — grass
+        if (slopeRatio < 0.4) {
+          // Flat ground — base color
           tmpColor.copy(colorFlat);
-        } else if (slopeRatio < 0.95) {
-          // Approaching threshold — grass to earthy
-          const t = (slopeRatio - 0.7) / 0.25;
+        } else if (slopeRatio < 0.9) {
+          // Gentle slope — blend flat → gentleSlope
+          const t = (slopeRatio - 0.4) / 0.5;
           tmpColor.copy(colorFlat).lerp(colorGentleSlope, t);
-        } else if (slopeRatio < 1.05) {
-          // Threshold crossing — sharp earthy to rock
-          const t = (slopeRatio - 0.95) / 0.1;
+        } else if (slopeRatio < 1.0) {
+          // Steep transition — gentleSlope → steepSlope
+          const t = (slopeRatio - 0.9) / 0.1;
           tmpColor.copy(colorGentleSlope).lerp(colorSteepSlope, t);
         } else {
-          // Unpassable — rock
-          const t = Math.min(1, (slopeRatio - 1.05) / 0.5);
+          // Cliff face — full rock
+          const t = Math.min(1, (slopeRatio - 1.0) / 0.3);
           tmpColor.copy(colorSteepSlope).lerp(colorCliff, t);
         }
 
-        // Cliff-base fix: if a neighbor sample is much higher than this vertex,
-        // we're at the foot of a cliff — blend back toward ground color to prevent
-        // gray rock bleeding onto flat ground cells.
+        // Cliff-base fix: prevent rock bleeding onto flat ground.
+        // 1. Flat vertex near cliff above → stay green
+        // 2. Cliff vertex at bottom edge (has a lower flat neighbor) → blend to green
+        //    so triangle interpolation between this and the flat neighbor stays green.
         const maxNeighborH = Math.max(hL, hR, hU, hD);
-        const cliffAbove = maxNeighborH - hC;
-        if (cliffAbove > 0.3) {
-          const baseBlend = Math.min(1, (cliffAbove - 0.3) / 0.5);
-          tmpColor.lerp(colorFlat, baseBlend * 0.85);
+        const minNeighborH = Math.min(hL, hR, hU, hD);
+        if (slopeRatio < 0.9) {
+          // Flat vertex near cliff: stay green
+          const cliffAbove = maxNeighborH - hC;
+          if (cliffAbove > 0.3) {
+            const baseBlend = Math.min(1, (cliffAbove - 0.3) / 0.5);
+            tmpColor.lerp(colorFlat, baseBlend * 0.85);
+          }
+        } else {
+          // Cliff vertex: if it's at the bottom (close to a lower neighbor), blend to green
+          const dropBelow = hC - minNeighborH;
+          if (dropBelow < 0.4) {
+            // Near the bottom of the cliff — blend to green to avoid floor bleeding
+            const t = 1.0 - dropBelow / 0.4;
+            tmpColor.lerp(colorFlat, t * 0.9);
+          }
         }
 
-        // Subtle height variation to avoid flat-looking large terraces
-        const heightVar = 0.92 + 0.16 * (hC / Math.max(config.maxHeight, 1));
+        // Per-terrace color variation: quantize height into levels and
+        // shift hue/brightness so each flat area looks distinct
+        if (slopeRatio < 0.9) {
+          const terraceStep = config.maxHeight / Math.max(config.posterize || 4, 2);
+          const level = Math.round(hC / Math.max(terraceStep, 0.5));
+          // Alternate warm/cool shift per level
+          const hsl = { h: 0, s: 0, l: 0 };
+          tmpColor.getHSL(hsl);
+          const hueShift = ((level % 3) - 1) * 0.025;  // ±2.5% hue
+          const satShift = ((level % 2) === 0 ? 0.04 : -0.04);
+          const lumShift = ((level % 3) - 1) * 0.03;    // ±3% lightness
+          hsl.h = (hsl.h + hueShift + 1) % 1;
+          hsl.s = Math.max(0, Math.min(1, hsl.s + satShift));
+          hsl.l = Math.max(0, Math.min(1, hsl.l + lumShift));
+          tmpColor.setHSL(hsl.h, hsl.s, hsl.l);
+        }
+
+        // Subtle height-based brightness variation
+        const heightVar = 0.94 + 0.12 * (hC / Math.max(config.maxHeight, 1));
         tmpColor.multiplyScalar(heightVar);
+
+        // Beach: blend to sand near water level (only on flat/gentle slopes)
+        if (slopeRatio < 1.0) {
+          const beachTop = waterY + 0.2;   // sand starts here
+          const beachMid = waterY + 0.04; // full sand
+          const beachBot = waterY - 0.04; // wet sand underwater
+          if (hC < beachTop && hC > beachBot - 0.5) {
+            if (hC < beachBot) {
+              // Underwater — wet sand fading out
+              const t = 1.0 - Math.min(1, (beachBot - hC) / 0.5);
+              tmpColor.lerp(colorWetSand, t * 0.7);
+            } else if (hC < beachMid) {
+              // Wet sand zone right at water line
+              const t = (hC - beachBot) / (beachMid - beachBot);
+              const sandTarget = colorWetSand.clone().lerp(colorSand, t);
+              tmpColor.lerp(sandTarget, 0.8);
+            } else {
+              // Dry sand → grass transition
+              const t = (hC - beachMid) / (beachTop - beachMid);
+              tmpColor.lerp(colorSand, (1.0 - t) * 0.8);
+            }
+          }
+        }
+
+        // DEBUG: color ramp cells red
+        if (rampCells.has(idx)) {
+          tmpColor.setRGB(0.9, 0.15, 0.1);
+        }
 
         colors[idx * 3] = tmpColor.r;
         colors[idx * 3 + 1] = tmpColor.g;
@@ -450,9 +844,13 @@ export class Terrain {
       return lum > 0.18 ? 0 : 0.3; // black on bright, white 30% on dark
     };
 
+    const WATER_Y = 0; // lines below this are hidden
+
     /** Push a line segment with per-vertex contrast colors based on terrain brightness */
     const pushLine = (x1: number, y1: number, z1: number, vi1: number,
                       x2: number, y2: number, z2: number, vi2: number) => {
+      // Skip lines fully underwater
+      if (y1 < WATER_Y && y2 < WATER_Y) return;
       linePoints.push(x1, y1, z1, x2, y2, z2);
       const c1 = contrastForVertex(vi1);
       const c2 = contrastForVertex(vi2);
@@ -464,6 +862,7 @@ export class Terrain {
     const pushLineWorld = (x1: number, y1: number, z1: number,
                            x2: number, y2: number, z2: number,
                            nearestVi: number) => {
+      if (y1 < WATER_Y && y2 < WATER_Y) return;
       linePoints.push(x1, y1, z1, x2, y2, z2);
       const c = contrastForVertex(nearestVi);
       lineColors.push(c, c, c, c, c, c);
@@ -549,7 +948,7 @@ export class Terrain {
     const lineMat = new THREE.LineBasicMaterial({
       vertexColors: true,
       transparent: true,
-      opacity: 0.5,
+      opacity: 0.25,
       depthWrite: false,
     });
     const gridLines = new THREE.LineSegments(lineGeo, lineMat);
@@ -1064,6 +1463,10 @@ export class Terrain {
     const heightDiff = highCell.surfaceHeight - lowCell.surfaceHeight;
     if (heightDiff < 0.3) return false;
 
+    // Skip ladders where bottom is underwater
+    const WATER_Y = -0.05;
+    if (lowCell.surfaceHeight < WATER_Y + 0.1) return false;
+
     let fdx = lowWorld.x - highWorld.x;
     let fdz = lowWorld.z - highWorld.z;
     const fLen = Math.sqrt(fdx * fdx + fdz * fdz);
@@ -1205,7 +1608,16 @@ export class Terrain {
                     if (heightDiff >= 0.3) {
                       const dist = step + 1;
                       const flatness = this.scoreCliffFlatness(grid, gx, gz, cx, cz);
-                      const score = heightDiff * 2 + flatness * 2 + dist * 0.3;
+                      // Penalize sloped surfaces at ladder endpoints
+                      // Check height variation among neighbors of each endpoint
+                      let slopePenalty = 0;
+                      for (const [sdx, sdz] of DIRS) {
+                        const na = grid.getCell(gx + sdx, gz + sdz);
+                        if (na) slopePenalty += Math.abs(na.surfaceHeight - cell.surfaceHeight);
+                        const nb = grid.getCell(cx + sdx, cz + sdz);
+                        if (nb && nCell) slopePenalty += Math.abs(nb.surfaceHeight - nCell.surfaceHeight);
+                      }
+                      const score = heightDiff * 2 + flatness * 3 + slopePenalty * 4 + dist * 0.3;
                       if (score < bestScore) {
                         bestScore = score;
                         bestCandidate = { agx: gx, agz: gz, bgx: cx, bgz: cz, score };
