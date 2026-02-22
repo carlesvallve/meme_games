@@ -182,6 +182,8 @@ function ScenePanel() {
   const setPaletteName = useGameStore((s) => s.setPaletteName);
   const gridOpacity = useGameStore((s) => s.gridOpacity);
   const setGridOpacity = useGameStore((s) => s.setGridOpacity);
+  const resolutionScale = useGameStore((s) => s.resolutionScale);
+  const setResolutionScale = useGameStore((s) => s.setResolutionScale);
   const randomizePalette = useGameStore((s) => s.onRandomizePalette);
 
   return (
@@ -301,6 +303,21 @@ function ScenePanel() {
         />
         <span style={{ color: '#fff', width: 36, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
           {gridOpacity.toFixed(2)}
+        </span>
+      </div>
+
+      {/* Resolution scale slider */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+        <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Resolution</span>
+        <input
+          type="range"
+          min={0.5} max={3} step={0.5}
+          value={resolutionScale}
+          onChange={(e) => setResolutionScale(parseFloat(e.target.value))}
+          style={{ flex: 1, height: 14, accentColor: '#6af' }}
+        />
+        <span style={{ color: '#fff', width: 36, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+          {resolutionScale.toFixed(1)}×
         </span>
       </div>
 

@@ -67,6 +67,7 @@ interface GameStore {
   paletteName: string;       // user selection: 'random' or specific name
   paletteActive: string;     // actual palette in use (for display)
   gridOpacity: number;
+  resolutionScale: number;
 
   setPhase: (phase: GameStore['phase']) => void;
   setScore: (score: number) => void;
@@ -90,6 +91,7 @@ interface GameStore {
   setPaletteName: (name: string) => void;
   setPaletteActive: (name: string) => void;
   setGridOpacity: (opacity: number) => void;
+  setResolutionScale: (scale: number) => void;
 
   activeCharacterName: string | null;
   activeCharacterColor: string | null;
@@ -129,6 +131,7 @@ export const useGameStore = create<GameStore>((set) => ({
   paletteName: 'random',
   paletteActive: '',
   gridOpacity: 0.25,
+  resolutionScale: 1,
 
   setPhase: (phase) => set({ phase }),
   setScore: (score) => set({ score }),
@@ -164,6 +167,7 @@ export const useGameStore = create<GameStore>((set) => ({
   setPaletteName: (paletteName) => set({ paletteName }),
   setPaletteActive: (paletteActive) => set({ paletteActive }),
   setGridOpacity: (gridOpacity) => set({ gridOpacity }),
+  setResolutionScale: (resolutionScale) => set({ resolutionScale }),
 
   activeCharacterName: null,
   activeCharacterColor: null,

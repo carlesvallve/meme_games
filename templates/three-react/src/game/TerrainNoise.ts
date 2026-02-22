@@ -261,41 +261,44 @@ export function generateHeightmap(
   config: HeightmapStyleConfig,
   groundSize: number,
   seed?: number,
+  resolutionScale = 1,
 ): HeightmapResult {
-  const { resolution, maxHeight, algorithm, quantizeStep } = config;
+  const baseRes = config.resolution;
+  const { maxHeight, algorithm, quantizeStep } = config;
   const actualSeed = seed ?? (Date.now() & 0xffff);
-  const verts = resolution + 1;
-  const grid = new Float32Array(verts * verts);
+
+  // Always generate terrain at BASE resolution so the shape stays identical
+  // regardless of scale. Then upsample to final resolution for mesh detail.
+  const baseVerts = baseRes + 1;
+  const baseGrid = new Float32Array(baseVerts * baseVerts);
 
   if (algorithm === 'islands') {
-    generateIslands(grid, verts, resolution, maxHeight, actualSeed);
+    generateIslands(baseGrid, baseVerts, baseRes, maxHeight, actualSeed);
   } else if (algorithm === 'caves') {
-    generateCaves(grid, verts, resolution, maxHeight, actualSeed, config);
+    generateCaves(baseGrid, baseVerts, baseRes, maxHeight, actualSeed, config);
   } else if (algorithm === 'diamond-square') {
-    generateDiamondSquare(grid, verts, resolution, actualSeed);
-    applyMaskAndScale(grid, verts, resolution, maxHeight, config);
+    generateDiamondSquare(baseGrid, baseVerts, baseRes, actualSeed);
+    applyMaskAndScale(baseGrid, baseVerts, baseRes, maxHeight, config);
   } else {
-    // FBM
-    generateFBM(grid, verts, resolution, actualSeed, config);
-    applyMaskAndScale(grid, verts, resolution, maxHeight, config);
+    generateFBM(baseGrid, baseVerts, baseRes, actualSeed, config);
+    applyMaskAndScale(baseGrid, baseVerts, baseRes, maxHeight, config);
   }
 
   // Posterize: reduce to N discrete levels with random spacing.
   // Creates large flat plateaus with varied cliff heights (0.5m to 5m+).
   // Levels are randomly spaced so some jumps are small and others are sheer cliffs.
+  // Done at base resolution so terrain shape is resolution-independent.
   if (config.posterize > 0) {
     const levels = config.posterize;
     let maxH = 0;
-    for (let i = 0; i < grid.length; i++) {
-      if (grid[i] > maxH) maxH = grid[i];
+    for (let i = 0; i < baseGrid.length; i++) {
+      if (baseGrid[i] > maxH) maxH = baseGrid[i];
     }
     if (maxH > 0) {
       // Generate random threshold values, sorted, snapped to quantizeStep
       const rng = mulberry32(actualSeed + 9999);
       const thresholds: number[] = [0];
-      for (let i = 1; i < levels; i++) {
-        thresholds.push(rng());
-      }
+      for (let i = 1; i < levels; i++) thresholds.push(rng());
       thresholds.push(1);
       thresholds.sort((a, b) => a - b);
 
@@ -303,32 +306,57 @@ export function generateHeightmap(
       const step = quantizeStep > 0 ? quantizeStep : 0.5;
       const snapLevels = thresholds.map(t => Math.round(t * maxH / step) * step);
 
-      for (let i = 0; i < grid.length; i++) {
-        const normalized = grid[i] / maxH;
+      for (let i = 0; i < baseGrid.length; i++) {
+        const normalized = baseGrid[i] / maxH;
         // Find which band this value falls into
         let level = 0;
         for (let j = 1; j < thresholds.length; j++) {
-          if (normalized >= thresholds[j]) {
-            level = j;
-          } else {
-            break;
-          }
+          if (normalized >= thresholds[j]) level = j; else break;
         }
-        grid[i] = snapLevels[level];
+        baseGrid[i] = snapLevels[level];
       }
     }
   }
 
   // Quantize heights to grid step (snaps posterized levels to 0.5m grid)
   if (quantizeStep > 0) {
-    for (let i = 0; i < grid.length; i++) {
-      grid[i] = Math.round(grid[i] / quantizeStep) * quantizeStep;
+    for (let i = 0; i < baseGrid.length; i++) {
+      baseGrid[i] = Math.round(baseGrid[i] / quantizeStep) * quantizeStep;
+    }
+  }
+
+  // Upsample to final resolution (bilinear interpolation)
+  const resolution = Math.round(baseRes * resolutionScale);
+  const verts = resolution + 1;
+  let grid: Float32Array;
+
+  if (resolutionScale === 1) {
+    grid = baseGrid; // no upsampling needed
+  } else {
+    grid = new Float32Array(verts * verts);
+    for (let z = 0; z < verts; z++) {
+      for (let x = 0; x < verts; x++) {
+        // Map final grid coords to base grid coords
+        const bx = (x / resolution) * baseRes;
+        const bz = (z / resolution) * baseRes;
+        const ix = Math.min(Math.floor(bx), baseRes - 1);
+        const iz = Math.min(Math.floor(bz), baseRes - 1);
+        const fx = bx - ix;
+        const fz = bz - iz;
+        const h00 = baseGrid[iz * baseVerts + ix];
+        const h10 = baseGrid[iz * baseVerts + ix + 1];
+        const h01 = baseGrid[(iz + 1) * baseVerts + ix];
+        const h11 = baseGrid[(iz + 1) * baseVerts + ix + 1];
+        grid[z * verts + x] = h00 * (1 - fx) * (1 - fz) + h10 * fx * (1 - fz) +
+          h01 * (1 - fx) * fz + h11 * fx * fz;
+      }
     }
   }
 
   // Rolling micro-variation: add subtle FBM undulation to flat posterized surfaces.
   // This makes terrace/island/cave floors feel organic instead of perfectly flat.
   // fbm returns [0,1], so center around 0 with (noise - 0.5) for ± variation.
+  // Applied at final resolution using normalized coords (resolution-independent).
   if (config.posterize > 0 || algorithm === 'caves') {
     const rollingPerm = buildPerm(actualSeed + 4444);
     const rollingScale = 5.0;
@@ -344,12 +372,12 @@ export function generateHeightmap(
     }
   }
 
-  // Carve connectivity ramps for posterized terrain (terraces, islands, caves)
-  // Use a conservative slope threshold (0.75×) matching the NavGrid margin
+  // Carve connectivity ramps for posterized terrain (terraces, islands, caves).
+  // Use a generous slope threshold (1.5×) so rolling noise doesn't fragment terraces.
+  // Ramp carving uses a gentler slope to produce gradual paths.
+  // Applied at final resolution so ramps benefit from higher mesh detail.
   let rampCells = new Set<number>();
   if (config.posterize > 0) {
-    // Use generous slope for region labeling so rolling noise doesn't fragment terraces.
-    // Ramp carving uses a gentler slope to produce gradual paths.
     rampCells = ensureConnectivity(grid, verts, resolution, SLOPE_HEIGHT * 1.5, quantizeStep, config.maxHeight, actualSeed);
   }
 
@@ -872,6 +900,11 @@ function ensureConnectivity(
     // Use noise to vary ramp width per row and add height jitter for organic look
     const rampNoisePerm = buildPerm(seed + 7777 + iter * 31);
 
+    // Randomly pick ramp or stairs mode per connection
+    const STAIR_STEP = 0.5;  // vertical rise per stair step
+    const STAIR_TREAD = 2;   // cells per flat tread
+    const useStairs = valueNoise2D(bestLowX * 0.3, bestLowZ * 0.3, rampNoisePerm) > 0.5;
+
     for (let i = 0; i <= totalLen; i++) {
       let h: number;
       const slopeStart = PAD + pushBack;
@@ -879,25 +912,35 @@ function ensureConnectivity(
         h = rampLowH;
       } else if (i >= slopeStart + actualRampLen) {
         h = bestHighH;
+      } else if (useStairs) {
+        // Blocky stairs: flat treads of STAIR_TREAD cells, then a sharp 0.5m jump
+        const cellsIntoSlope = i - slopeStart;
+        const stepIndex = Math.floor(cellsIntoSlope / STAIR_TREAD);
+        h = rampLowH + stepIndex * STAIR_STEP;
+        h = Math.min(h, bestHighH);
       } else {
+        // Smooth ramp: linear interpolation
         const t = (i - slopeStart) / Math.max(1, actualRampLen - 1);
         h = rampLowH + (bestHighH - rampLowH) * t;
       }
       const rx = startX + bestDirX * i;
       const rz = startZ + bestDirZ * i;
 
-      // Vary width per row slightly: occasionally ±1 cell wider
+      // Vary width per row slightly: occasionally ±1 cell wider (ramps only)
       const widthNoise = valueNoise2D(i * 0.5, iter * 3.3, rampNoisePerm);
-      const rowHalfWidth = RAMP_HALF_WIDTH + (widthNoise > 0.7 ? 1 : 0); // mostly 1, sometimes 2
+      const rowHalfWidth = useStairs
+        ? RAMP_HALF_WIDTH  // stairs: consistent width for clean blocky look
+        : RAMP_HALF_WIDTH + (widthNoise > 0.7 ? 1 : 0);
 
-      // Sample the same rolling noise used on the main terrain, at the row center.
-      // Apply uniformly across the row so the ramp is flat side-to-side but undulates
-      // along its length matching the surrounding terrain's organic feel.
-      const rollingNoise = fbm(
-        rx / resolution * rollingScale, rz / resolution * rollingScale,
-        rollingPerm, 3, 2.0, 0.5,
-      );
-      const rowH = h + (rollingNoise - 0.5) * rollingAmp * 2;
+      // Rolling noise: ramps get organic undulation, stairs stay flat/blocky
+      let rowH = h;
+      if (!useStairs) {
+        const rollingNoise = fbm(
+          rx / resolution * rollingScale, rz / resolution * rollingScale,
+          rollingPerm, 3, 2.0, 0.5,
+        );
+        rowH = h + (rollingNoise - 0.5) * rollingAmp * 2;
+      }
 
       for (let w = -rowHalfWidth; w <= rowHalfWidth; w++) {
         const nx = rx + perpX * w;
