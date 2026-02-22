@@ -77,6 +77,8 @@ const PRESET_CONFIGS: Record<TerrainPreset, TerrainPresetConfig> = {
   },
 };
 
+const DEBUG_RAMPS = false;
+
 // ── Terrain class ───────────────────────────────────────────────────
 
 export class Terrain {
@@ -616,13 +618,14 @@ export class Terrain {
   private createHeightmapMesh(): void {
     const config = getHeightmapConfig(this.heightmapStyle);
     const groundSize = this.groundSize - 4; // usable area (2m margin each side)
-    const res = config.resolution;
+    const { resolutionScale } = useGameStore.getState();
+    const res = Math.round(config.resolution * resolutionScale);
     const verts = res + 1;
     const cellSize = groundSize / res;
     const halfGround = groundSize / 2;
 
     // Generate vertex-based heightmap
-    const result = generateHeightmap(config, groundSize);
+    const result = generateHeightmap(config, groundSize, undefined, resolutionScale);
     const heights = result.heights;
     const rampCells = result.rampCells;
     this.heightmapData = heights;
@@ -779,8 +782,7 @@ export class Terrain {
           }
         }
 
-        // DEBUG: color ramp cells red
-        if (rampCells.has(idx)) {
+        if (DEBUG_RAMPS && rampCells.has(idx)) {
           tmpColor.setRGB(0.9, 0.15, 0.1);
         }
 
@@ -868,15 +870,19 @@ export class Terrain {
       lineColors.push(c, c, c, c, c, c);
     };
 
-    // Draw all wireframe edges
+    // Draw wireframe edges at NavGrid intervals (~0.5m), not every mesh edge.
+    // At higher resolutions, skip mesh edges to keep grid density constant.
+    const gridSkip = Math.max(1, Math.round(resolutionScale));
     for (let z = 0; z < verts; z++) {
       for (let x = 0; x < verts; x++) {
         const idx = z * verts + x;
-        if (x < res) {
+        // Horizontal edge (along X): draw at every gridSkip rows
+        if (x < res && z % gridSkip === 0) {
           const n = idx + 1;
           pushLine(bx(idx), by(idx), bz(idx), idx, bx(n), by(n), bz(n), n);
         }
-        if (z < res) {
+        // Vertical edge (along Z): draw at every gridSkip columns
+        if (z < res && x % gridSkip === 0) {
           const n = idx + verts;
           pushLine(bx(idx), by(idx), bz(idx), idx, bx(n), by(n), bz(n), n);
         }
