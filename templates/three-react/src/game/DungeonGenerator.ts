@@ -66,13 +66,15 @@ export function generateDungeon(
 
   const doors: DoorDef[] = [];
   for (const d of result.doors || []) {
-    const gx = Math.round(d.x);
-    const gz = Math.round(d.z);
-    // Door must have walls (non-open cells) on both sides perpendicular to its orientation
-    const hasWalls = d.orientation === 'NS'
-      ? !isOpenCell(gx, gz - 1) && !isOpenCell(gx, gz + 1)
-      : !isOpenCell(gx - 1, gz) && !isOpenCell(gx + 1, gz);
-    if (!hasWalls) continue;
+    // Skip wall-flanking check when roomOwnership exists (wallGap=0 — walls are room-boundary based)
+    if (!result.roomOwnership) {
+      const gx = Math.round(d.x);
+      const gz = Math.round(d.z);
+      const hasWalls = d.orientation === 'NS'
+        ? !isOpenCell(gx, gz - 1) && !isOpenCell(gx, gz + 1)
+        : !isOpenCell(gx - 1, gz) && !isOpenCell(gx + 1, gz);
+      if (!hasWalls) continue;
+    }
 
     doors.push({
       x: -halfWorld + (d.x + 0.5) * cellSize,
@@ -335,7 +337,7 @@ export function generateAdjacentRooms(
   let rz = border;
   for (let i = 0; i < rows; i++) { rowStarts.push(rz); rz += rowHeights[i]; }
 
-  const inset = Math.max(1, wallGap);
+  const inset = Math.max(1, wallGap - 1);
 
   // Place rooms
   const roomGrid: (DungeonRoom | null)[][] = [];
@@ -803,6 +805,9 @@ export function convertToBoxDefs(
     return openGrid[gz * gridW + gx];
   };
 
+  const ownership = result.roomOwnership;
+  const halfThick = wallThick / 2;
+
   for (let gz = 0; gz < gridD; gz++) {
     for (let gx = 0; gx < gridW; gx++) {
       if (!openGrid[gz * gridW + gx]) continue;
@@ -811,26 +816,15 @@ export function convertToBoxDefs(
       const wz = toWorldZ(gz);
       const half = cellSize / 2;
 
-      // North wall (gz-1 is closed)
-      if (!isOpen(gx, gz - 1)) {
-        wallSegments.push({ x: wx, z: wz - half, w: cellSize, d: wallThick });
-      }
-      // South wall (gz+1 is closed)
-      if (!isOpen(gx, gz + 1)) {
-        wallSegments.push({ x: wx, z: wz + half, w: cellSize, d: wallThick });
-      }
-      // West wall (gx-1 is closed)
-      if (!isOpen(gx - 1, gz)) {
-        wallSegments.push({ x: wx - half, z: wz, w: wallThick, d: cellSize });
-      }
-      // East wall (gx+1 is closed)
-      if (!isOpen(gx + 1, gz)) {
-        wallSegments.push({ x: wx + half, z: wz, w: wallThick, d: cellSize });
-      }
+      // Standard walls: open cell next to closed/OOB
+      if (!isOpen(gx, gz - 1)) wallSegments.push({ x: wx, z: wz - half, w: cellSize, d: wallThick });
+      if (!isOpen(gx, gz + 1)) wallSegments.push({ x: wx, z: wz + half, w: cellSize, d: wallThick });
+      if (!isOpen(gx - 1, gz)) wallSegments.push({ x: wx - half, z: wz, w: wallThick, d: cellSize });
+      if (!isOpen(gx + 1, gz)) wallSegments.push({ x: wx + half, z: wz, w: wallThick, d: cellSize });
     }
   }
 
-  // Merge collinear wall segments
+  // Merge standard wall segments
   const mergedWalls = mergeWalls(wallSegments, wallThick, cellSize);
 
   for (const wall of mergedWalls) {
@@ -841,6 +835,44 @@ export function convertToBoxDefs(
       d: wall.d,
       h: wallHeight,
     });
+  }
+
+  // Room-boundary walls: offset inward toward each room
+  if (ownership) {
+    for (let gz = 0; gz < gridD; gz++) {
+      for (let gx = 0; gx < gridW; gx++) {
+        if (!openGrid[gz * gridW + gx]) continue;
+        const myRoom = ownership[gz * gridW + gx];
+        if (myRoom < 0) continue; // skip non-room and door cells (-2)
+
+        const wx = toWorldX(gx);
+        const wz = toWorldZ(gz);
+        const half = cellSize / 2;
+
+        const checkNeighbor = (nx: number, nz: number): boolean => {
+          if (!isOpen(nx, nz)) return false; // standard wall handles this
+          const nRoom = ownership[nz * gridW + nx];
+          return nRoom >= 0 && nRoom !== myRoom;
+        };
+
+        // North: different room → half-thick wall offset inward
+        if (gz > 0 && checkNeighbor(gx, gz - 1)) {
+          boxes.push({ x: wx, z: wz - half + halfThick / 2, w: cellSize, d: halfThick, h: wallHeight });
+        }
+        // South
+        if (gz + 1 < gridD && checkNeighbor(gx, gz + 1)) {
+          boxes.push({ x: wx, z: wz + half - halfThick / 2, w: cellSize, d: halfThick, h: wallHeight });
+        }
+        // West
+        if (gx > 0 && checkNeighbor(gx - 1, gz)) {
+          boxes.push({ x: wx - half + halfThick / 2, z: wz, w: halfThick, d: cellSize, h: wallHeight });
+        }
+        // East
+        if (gx + 1 < gridW && checkNeighbor(gx + 1, gz)) {
+          boxes.push({ x: wx + half - halfThick / 2, z: wz, w: halfThick, d: cellSize, h: wallHeight });
+        }
+      }
+    }
   }
 
   return boxes;

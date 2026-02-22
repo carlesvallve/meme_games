@@ -108,6 +108,18 @@ export class DoorSystem {
     stubRight.receiveShadow = true;
     group.add(stubRight);
 
+    // Lintel (upper band) spanning full opening width
+    const WALL_HEIGHT = 2.5;
+    const lintelH = WALL_HEIGHT - DOOR_HEIGHT;
+    if (lintelH > 0) {
+      const lintelGeo = new THREE.BoxGeometry(openingWidth, lintelH, DOOR_THICK);
+      const lintel = new THREE.Mesh(lintelGeo, stubMat);
+      lintel.position.set(0, DOOR_HEIGHT + lintelH / 2, 0);
+      lintel.castShadow = true;
+      lintel.receiveShadow = true;
+      group.add(lintel);
+    }
+
     const pivots: THREE.Group[] = [];
 
     if (isDouble) {

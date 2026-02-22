@@ -1,17 +1,8 @@
 import { Behavior, type BehaviorAgent, type BehaviorContext, type BehaviorStatus } from './Behavior';
 import type { WaypointMeta } from '../AStar';
+import type { MovementParams } from '../Character';
 
-export interface RoamingOptions {
-  /** Movement speed */
-  speed?: number;
-  /** Step height for terrain traversal */
-  stepHeight?: number;
-  /** Max climbable slope height per cell */
-  slopeHeight?: number;
-  /** Capsule radius for collision */
-  capsuleRadius?: number;
-  /** Hop height while walking */
-  hopHeight?: number;
+export interface RoamingBehaviorOptions {
   /** Min radius for random destination */
   radiusMin?: number;
   /** Max radius for random destination */
@@ -28,12 +19,7 @@ export interface RoamingOptions {
   worldMargin?: number;
 }
 
-const DEFAULTS: Required<RoamingOptions> = {
-  speed: 4,
-  stepHeight: 0.8,
-  slopeHeight: 1.5,
-  capsuleRadius: 0.25,
-  hopHeight: 0.1,
+const BEHAVIOR_DEFAULTS: Required<RoamingBehaviorOptions> = {
   radiusMin: 3,
   radiusMax: 8,
   idleMin: 1,
@@ -49,7 +35,8 @@ const STUCK_TIME_LIMIT = 1.0;   // seconds without progress before giving up
 const STUCK_MIN_DISTANCE = 0.15; // must move at least this far to count as progress
 
 export class Roaming extends Behavior {
-  private opts: Required<RoamingOptions>;
+  private movementParams: MovementParams;
+  private opts: Required<RoamingBehaviorOptions>;
   private state: RoamState = 'idle';
   private idleTimer = 0;
   private waypoints: { x: number; z: number }[] = [];
@@ -61,9 +48,10 @@ export class Roaming extends Behavior {
   private lastProgressZ = 0;
   private isOnLadder = false;
 
-  constructor(ctx: BehaviorContext, options?: RoamingOptions) {
+  constructor(ctx: BehaviorContext, movementParams: MovementParams, options?: RoamingBehaviorOptions) {
     super(ctx);
-    this.opts = { ...DEFAULTS, ...options };
+    this.movementParams = movementParams;
+    this.opts = { ...BEHAVIOR_DEFAULTS, ...options };
     this.idleTimer = this.randomIdle();
   }
 
@@ -160,7 +148,8 @@ export class Roaming extends Behavior {
     const dist = Math.sqrt(dx * dx + dz * dz);
     const isLast = this.waypointIndex === this.waypoints.length - 1;
 
-    const reach = isLast ? 0.02 : this.opts.waypointReach;
+    const mp = this.movementParams;
+    const reach = isLast ? mp.arrivalReach : this.opts.waypointReach;
 
     if (dist < reach) {
       this.waypointIndex++;
@@ -203,13 +192,13 @@ export class Roaming extends Behavior {
     const nz = dz / dist;
     // Clamp speed so the character decelerates into the final waypoint
     // and never overshoots it
-    let speed = this.opts.speed;
+    let speed = mp.speed;
     if (isLast) {
       const maxStep = dist / dt;
       speed = Math.min(speed, Math.max(0.5, maxStep));
     }
-    agent.move(nx, nz, speed, this.opts.stepHeight, this.opts.capsuleRadius, dt, this.opts.slopeHeight);
-    agent.applyHop(this.opts.hopHeight);
+    agent.move(nx, nz, speed, mp.stepHeight, mp.capsuleRadius, dt, mp.slopeHeight);
+    agent.applyHop(mp.hopHeight);
   }
 
   private resetStuck(agent: BehaviorAgent): void {

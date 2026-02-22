@@ -23,7 +23,8 @@ const PLAYER_PARAMS: SliderDef<keyof PlayerParams>[] = [
   { key: 'speed', label: 'Speed', min: 1, max: 16, step: 0.5 },
   { key: 'stepHeight', label: 'Step Height', min: 0, max: 2, step: 0.1 },
   { key: 'slopeHeight', label: 'Slope Height', min: 0, max: 4, step: 0.1 },
-  { key: 'capsuleRadius', label: 'Capsule Radius', min: 0.1, max: 1.5, step: 0.05 },
+  { key: 'capsuleRadius', label: 'Capsule Radius', min: 0.05, max: 1.5, step: 0.05 },
+  { key: 'arrivalReach', label: 'Arrival Reach', min: 0.02, max: 0.5, step: 0.01 },
   { key: 'hopHeight', label: 'Hop Intensity', min: 0, max: 0.5, step: 0.01 },
   { key: 'magnetRadius', label: 'Magnet Radius', min: 0, max: 10, step: 0.5 },
   { key: 'magnetSpeed', label: 'Magnet Speed', min: 1, max: 32, step: 1 },
@@ -68,6 +69,19 @@ const panelStyle = {
   flexDirection: 'column' as const,
   gap: 4,
   minWidth: 220,
+};
+
+const resetBtnStyle = {
+  marginTop: 4,
+  padding: '4px 12px',
+  background: 'rgba(255,100,100,0.15)',
+  color: '#f88',
+  border: '1px solid rgba(255,100,100,0.3)',
+  borderRadius: 4,
+  cursor: 'pointer' as const,
+  fontSize: 11,
+  fontWeight: 600,
+  width: '100%',
 };
 
 const LAYER_OPTIONS: { label: string; value: number }[] = [
@@ -347,24 +361,28 @@ function ScenePanel() {
         </span>
       </div>
 
-      {/* Regenerate button */}
-      <button
-        onClick={() => regenerate?.()}
-        style={{
-          padding: '6px 12px',
-          background: 'rgba(100,220,120,0.2)',
-          color: '#8f8',
-          border: '1px solid rgba(100,220,120,0.4)',
-          borderRadius: 4,
-          cursor: 'pointer',
-          fontSize: 11,
-          fontWeight: 600,
-          letterSpacing: 0.5,
-          width: '100%',
-        }}
-      >
-        Regenerate
-      </button>
+      {/* Buttons */}
+      <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
+        <button onClick={() => useGameStore.getState().onResetSceneParams?.()} style={{ ...resetBtnStyle, marginTop: 0, flex: 1 }}>
+          Reset
+        </button>
+        <button
+          onClick={() => regenerate?.()}
+          style={{
+            flex: 1,
+            padding: '4px 12px',
+            background: 'rgba(100,220,120,0.2)',
+            color: '#8f8',
+            border: '1px solid rgba(100,220,120,0.4)',
+            borderRadius: 4,
+            cursor: 'pointer',
+            fontSize: 11,
+            fontWeight: 600,
+          }}
+        >
+          Regenerate
+        </button>
+      </div>
     </div>
   );
 }
@@ -417,6 +435,9 @@ export function SettingsPanel() {
               </span>
             </div>
           ))}
+          <button onClick={() => useGameStore.getState().onResetPlayerParams?.()} style={resetBtnStyle}>
+            Reset Defaults
+          </button>
         </div>
       )}
 
@@ -442,6 +463,9 @@ export function SettingsPanel() {
             value={cameraParams.collisionLayers}
             onChange={(v) => setCameraParam('collisionLayers', v)}
           />
+          <button onClick={() => useGameStore.getState().onResetCameraParams?.()} style={resetBtnStyle}>
+            Reset Defaults
+          </button>
         </div>
       )}
 
@@ -514,6 +538,9 @@ export function SettingsPanel() {
               ))}
             </>)}
           </div>
+          <button onClick={() => useGameStore.getState().onResetLightParams?.()} style={resetBtnStyle}>
+            Reset Defaults
+          </button>
         </div>
       )}
 
