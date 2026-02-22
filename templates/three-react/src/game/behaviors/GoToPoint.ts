@@ -1,23 +1,10 @@
 import { Behavior, type BehaviorAgent, type BehaviorContext, type BehaviorStatus } from './Behavior';
 import type { WaypointMeta } from '../AStar';
+import type { MovementParams } from '../Character';
 
-export interface GoToPointOptions {
-  speed?: number;
-  stepHeight?: number;
-  slopeHeight?: number;
-  capsuleRadius?: number;
-  hopHeight?: number;
+export interface GoToPointBehaviorOptions {
   waypointReach?: number;
 }
-
-const DEFAULTS: Required<GoToPointOptions> = {
-  speed: 4,
-  stepHeight: 0.8,
-  slopeHeight: 1.5,
-  capsuleRadius: 0.25,
-  hopHeight: 0.1,
-  waypointReach: 0.3,
-};
 
 const STUCK_TIME_LIMIT = 1.5;
 const STUCK_MIN_DISTANCE = 0.15;
@@ -27,7 +14,8 @@ const STUCK_MIN_DISTANCE = 0.15;
  * Used for point-and-click NPC control.
  */
 export class GoToPoint extends Behavior {
-  private opts: Required<GoToPointOptions>;
+  private movementParams: MovementParams;
+  private waypointReach: number;
   private waypoints: { x: number; z: number }[] = [];
   private rawWaypoints: { x: number; z: number }[] = [];
   private waypointMeta: WaypointMeta[] = [];
@@ -38,9 +26,10 @@ export class GoToPoint extends Behavior {
   private lastProgressZ = 0;
   private arrived = false;
 
-  constructor(ctx: BehaviorContext, private goalX: number, private goalZ: number, options?: GoToPointOptions) {
+  constructor(ctx: BehaviorContext, movementParams: MovementParams, private goalX: number, private goalZ: number, options?: GoToPointBehaviorOptions) {
     super(ctx);
-    this.opts = { ...DEFAULTS, ...options };
+    this.movementParams = movementParams;
+    this.waypointReach = options?.waypointReach ?? 0.3;
   }
 
   update(agent: BehaviorAgent, dt: number): BehaviorStatus {
@@ -95,7 +84,8 @@ export class GoToPoint extends Behavior {
     const dist = Math.sqrt(dx * dx + dz * dz);
     const isLast = this.waypointIndex === this.waypoints.length - 1;
 
-    const reach = isLast ? 0.02 : this.opts.waypointReach;
+    const mp = this.movementParams;
+    const reach = isLast ? mp.arrivalReach : this.waypointReach;
 
     if (dist < reach) {
       this.waypointIndex++;
@@ -140,13 +130,13 @@ export class GoToPoint extends Behavior {
     const nz = dz / dist;
     // Clamp speed so the character decelerates into the final waypoint
     // and never overshoots it
-    let speed = this.opts.speed;
+    let speed = mp.speed;
     if (isLast) {
       const maxStep = dist / dt; // speed that would land exactly on target this frame
       speed = Math.min(speed, Math.max(0.5, maxStep));
     }
-    agent.move(nx, nz, speed, this.opts.stepHeight, this.opts.capsuleRadius, dt, this.opts.slopeHeight);
-    agent.applyHop(this.opts.hopHeight);
+    agent.move(nx, nz, speed, mp.stepHeight, mp.capsuleRadius, dt, mp.slopeHeight);
+    agent.applyHop(mp.hopHeight);
 
     return 'running';
   }

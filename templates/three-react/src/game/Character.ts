@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { useGameStore } from '../store';
+import { useGameStore, loadCharacterParams } from '../store';
 import { createCharacterMesh } from './characters';
 import type { CharacterType } from './characters';
 import { Entity, Layer } from './Entity';
@@ -12,6 +12,15 @@ import { IdleBehavior } from './behaviors/IdleBehavior';
 import { PlayerControl, type PlayerControlDeps } from './behaviors/PlayerControl';
 import { audioSystem } from '../utils/AudioSystem';
 import type { LadderDef } from './Ladder';
+
+export interface MovementParams {
+  speed: number;
+  stepHeight: number;
+  slopeHeight: number;
+  capsuleRadius: number;
+  arrivalReach: number;
+  hopHeight: number;
+}
 
 export function lerpAngle(current: number, target: number, t: number): number {
   let diff = target - current;
@@ -91,6 +100,9 @@ export class Character implements BehaviorAgent {
   protected footSfxTimer = 0;
   private climbState: ClimbState | null = null;
 
+  /** Per-character movement parameters (mutable, shared by reference with behaviors) */
+  params: MovementParams;
+
   torchLight: THREE.PointLight;
   torchLightEntity: Entity;
   fillLight: THREE.PointLight;
@@ -148,8 +160,24 @@ export class Character implements BehaviorAgent {
     this.fillLight.castShadow = false;
     scene.add(this.fillLight);
 
-    // Default behavior: roaming
-    this.defaultBehavior = new Roaming({ navGrid, ladderDefs });
+    // Initialize per-character movement params: load from localStorage or fall back to store defaults
+    const savedParams = loadCharacterParams(type);
+    if (savedParams) {
+      this.params = { ...savedParams };
+    } else {
+      const pp = useGameStore.getState().playerParams;
+      this.params = {
+        speed: pp.speed,
+        stepHeight: pp.stepHeight,
+        slopeHeight: pp.slopeHeight,
+        capsuleRadius: pp.capsuleRadius,
+        arrivalReach: pp.arrivalReach,
+        hopHeight: pp.hopHeight,
+      };
+    }
+
+    // Default behavior: roaming (receives shared reference to this.params)
+    this.defaultBehavior = new Roaming({ navGrid, ladderDefs }, this.params);
     this.behavior = this.defaultBehavior;
 
     // Debug materials
@@ -203,10 +231,21 @@ export class Character implements BehaviorAgent {
     this.behavior = this.defaultBehavior;
   }
 
+  /** Reset movement params to current store defaults. */
+  resetParams(): void {
+    const pp = useGameStore.getState().playerParams;
+    this.params.speed = pp.speed;
+    this.params.stepHeight = pp.stepHeight;
+    this.params.slopeHeight = pp.slopeHeight;
+    this.params.capsuleRadius = pp.capsuleRadius;
+    this.params.arrivalReach = pp.arrivalReach;
+    this.params.hopHeight = pp.hopHeight;
+  }
+
   /** Set a click-to-move goal via A* pathfinding. */
   goTo(worldX: number, worldZ: number): void {
     this.clearDebugVis();
-    this.behavior = new GoToPoint({ navGrid: this.navGrid, ladderDefs: this.ladderDefs }, worldX, worldZ);
+    this.behavior = new GoToPoint({ navGrid: this.navGrid, ladderDefs: this.ladderDefs }, this.params, worldX, worldZ);
   }
 
   getCameraTarget(): { x: number; y: number; z: number } {

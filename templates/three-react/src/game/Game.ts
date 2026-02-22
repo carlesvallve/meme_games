@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { useGameStore } from '../store';
+import { useGameStore, DEFAULT_PLAYER_PARAMS, DEFAULT_CAMERA_PARAMS, DEFAULT_LIGHT_PRESET, DEFAULT_TORCH_PARAMS, DEFAULT_PARTICLE_TOGGLES, DEFAULT_SCENE_SETTINGS, saveCharacterParams, clearCharacterParams } from '../store';
 import { Input } from './Input';
 import { Camera } from './Camera';
 import { createScene, applyLightPreset } from './Scene';
@@ -201,8 +201,26 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     return {
       getInput: () => cachedInputState,
       getCameraAngleY: () => cam.getAngleY(),
-      getParams: () => useGameStore.getState().playerParams,
+      getParams: () => activeCharacter!.params,
     };
+  }
+
+  /** Sync the active character's movement params from the store (for settings sliders). */
+  let lastSyncedPlayerParams: ReturnType<typeof useGameStore.getState>['playerParams'] | null = null;
+  function syncActiveCharacterParams(): void {
+    if (!activeCharacter) return;
+    const pp = useGameStore.getState().playerParams;
+    // Only sync + save when the store's playerParams object actually changed (slider moved)
+    if (pp === lastSyncedPlayerParams) return;
+    lastSyncedPlayerParams = pp;
+    const p = activeCharacter.params;
+    p.speed = pp.speed;
+    p.stepHeight = pp.stepHeight;
+    p.slopeHeight = pp.slopeHeight;
+    p.capsuleRadius = pp.capsuleRadius;
+    p.arrivalReach = pp.arrivalReach;
+    p.hopHeight = pp.hopHeight;
+    saveCharacterParams(activeCharacter.characterType, p);
   }
 
   function selectCharacter(char: Character | null): void {
@@ -223,6 +241,16 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       char.setPlayerControlled(makePlayerControlDeps());
       speechSystem.setCharacter(char.characterType);
       speechSystem.setPlayerMesh(char.mesh);
+
+      // Load this character's movement params into the store so sliders reflect them
+      const p = char.params;
+      const store = useGameStore.getState();
+      store.setPlayerParam('speed', p.speed);
+      store.setPlayerParam('stepHeight', p.stepHeight);
+      store.setPlayerParam('slopeHeight', p.slopeHeight);
+      store.setPlayerParam('capsuleRadius', p.capsuleRadius);
+      store.setPlayerParam('arrivalReach', p.arrivalReach);
+      store.setPlayerParam('hopHeight', p.hopHeight);
     }
 
     // Load new character's inventory
@@ -444,6 +472,56 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       terrain.applyPalette(palette, name);
       useGameStore.getState().setPaletteActive(name);
     },
+    onResetPlayerParams: () => {
+      if (!activeCharacter) return;
+      const d = DEFAULT_PLAYER_PARAMS;
+      activeCharacter.params.speed = d.speed;
+      activeCharacter.params.stepHeight = d.stepHeight;
+      activeCharacter.params.slopeHeight = d.slopeHeight;
+      activeCharacter.params.capsuleRadius = d.capsuleRadius;
+      activeCharacter.params.arrivalReach = d.arrivalReach;
+      activeCharacter.params.hopHeight = d.hopHeight;
+      clearCharacterParams(activeCharacter.characterType);
+      const store = useGameStore.getState();
+      store.setPlayerParam('speed', d.speed);
+      store.setPlayerParam('stepHeight', d.stepHeight);
+      store.setPlayerParam('slopeHeight', d.slopeHeight);
+      store.setPlayerParam('capsuleRadius', d.capsuleRadius);
+      store.setPlayerParam('arrivalReach', d.arrivalReach);
+      store.setPlayerParam('hopHeight', d.hopHeight);
+      store.setPlayerParam('magnetRadius', d.magnetRadius);
+      store.setPlayerParam('magnetSpeed', d.magnetSpeed);
+    },
+    onResetCameraParams: () => {
+      const d = DEFAULT_CAMERA_PARAMS;
+      const store = useGameStore.getState();
+      for (const key of Object.keys(d) as (keyof typeof d)[]) {
+        store.setCameraParam(key, d[key]);
+      }
+    },
+    onResetLightParams: () => {
+      const store = useGameStore.getState();
+      store.setLightPreset(DEFAULT_LIGHT_PRESET);
+      if (!store.torchEnabled !== !true) store.toggleTorch(); // ensure torch is on
+      const td = DEFAULT_TORCH_PARAMS;
+      for (const key of Object.keys(td) as (keyof typeof td)[]) {
+        store.setTorchParam(key, td[key]);
+      }
+    },
+    onResetSceneParams: () => {
+      const d = DEFAULT_SCENE_SETTINGS;
+      const store = useGameStore.getState();
+      store.setTerrainPreset(d.terrainPreset);
+      store.setHeightmapStyle(d.heightmapStyle);
+      store.setPaletteName(d.paletteName);
+      store.setWallGap(d.wallGap);
+      store.setGridOpacity(d.gridOpacity);
+      store.setResolutionScale(d.resolutionScale);
+      const dp = DEFAULT_PARTICLE_TOGGLES;
+      for (const key of Object.keys(dp) as (keyof typeof dp)[]) {
+        if (store.particleToggles[key] !== dp[key]) store.toggleParticle(key);
+      }
+    },
   });
 
   // Resize handler
@@ -470,6 +548,9 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     }
 
     if (phase === 'playing' && activeCharacter) {
+      // Sync active character's movement params from settings sliders
+      syncActiveCharacterParams();
+
       // Update all characters uniformly
       for (const char of characters) {
         char.update(dt);
