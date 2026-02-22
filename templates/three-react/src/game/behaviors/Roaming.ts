@@ -30,8 +30,8 @@ export interface RoamingOptions {
 
 const DEFAULTS: Required<RoamingOptions> = {
   speed: 4,
-  stepHeight: 0.5,
-  slopeHeight: 1.0,
+  stepHeight: 0.8,
+  slopeHeight: 1.5,
   capsuleRadius: 0.25,
   hopHeight: 0.1,
   radiusMin: 3,

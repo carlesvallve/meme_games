@@ -5,6 +5,7 @@ import { Camera } from './Camera';
 import { createScene, applyLightPreset } from './Scene';
 import type { LightPreset } from '../store';
 import { Terrain } from './Terrain';
+import { randomPalette } from './ColorPalettes';
 import { CollectibleSystem } from './Collectible';
 import { ChestSystem } from './Chest';
 import { LootSystem } from './Loot';
@@ -28,6 +29,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   // Scene
   const { scene, lights: sceneLights } = createScene();
   let currentLightPreset: LightPreset = useGameStore.getState().lightPreset;
+  let currentGridOpacity = useGameStore.getState().gridOpacity;
   applyLightPreset(sceneLights, currentLightPreset);
 
   // Camera
@@ -41,10 +43,12 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   const input = new Input();
 
   // Terrain + dependent systems (mutable for regeneration)
-  const { terrainPreset: initPreset, heightmapStyle: initStyle } = useGameStore.getState();
-  let terrain = new Terrain(scene, initPreset, initStyle);
+  const { terrainPreset: initPreset, heightmapStyle: initStyle, paletteName: initPalette } = useGameStore.getState();
+  let terrain = new Terrain(scene, initPreset, initStyle, initPalette);
+  useGameStore.getState().setPaletteActive(terrain.getPaletteName());
   const { playerParams: initParams } = useGameStore.getState();
   let navGrid = terrain.buildNavGrid(initParams.stepHeight, initParams.capsuleRadius, 0.5, initParams.slopeHeight);
+  terrain.setGridOpacity(useGameStore.getState().gridOpacity);
   let collectibles = new CollectibleSystem(scene, terrain);
   let lootSystem = new LootSystem(scene, terrain);
   let chestSystem = new ChestSystem(scene, terrain, lootSystem);
@@ -79,11 +83,13 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     scene.remove(terrain.group);
 
     // Read current settings from store
-    const { terrainPreset, heightmapStyle, playerParams: pp } = useGameStore.getState();
+    const { terrainPreset, heightmapStyle, playerParams: pp, paletteName: palPick } = useGameStore.getState();
 
     // Rebuild
-    terrain = new Terrain(scene, terrainPreset, heightmapStyle);
+    terrain = new Terrain(scene, terrainPreset, heightmapStyle, palPick);
+    useGameStore.getState().setPaletteActive(terrain.getPaletteName());
     navGrid = terrain.buildNavGrid(pp.stepHeight, pp.capsuleRadius, 0.5, pp.slopeHeight);
+    terrain.setGridOpacity(useGameStore.getState().gridOpacity);
     collectibles = new CollectibleSystem(scene, terrain);
     lootSystem = new LootSystem(scene, terrain);
     chestSystem = new ChestSystem(scene, terrain, lootSystem);
@@ -430,6 +436,11 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     onRegenerateScene: () => {
       regenerateScene();
     },
+    onRandomizePalette: () => {
+      const { name, palette } = randomPalette();
+      terrain.applyPalette(palette, name);
+      useGameStore.getState().setPaletteActive(name);
+    },
   });
 
   // Resize handler
@@ -470,6 +481,13 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       if (preset !== currentLightPreset) {
         currentLightPreset = preset;
         applyLightPreset(sceneLights, preset);
+      }
+
+      // Sync grid opacity
+      const gridOp = useGameStore.getState().gridOpacity;
+      if (gridOp !== currentGridOpacity) {
+        currentGridOpacity = gridOp;
+        terrain.setGridOpacity(gridOp);
       }
 
       // Camera follows active character (or debug ladder)
@@ -554,6 +572,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     lastTime = time;
 
     update(dt);
+    terrain.updateWater(dt, renderer, scene, cam.camera);
     renderer.render(scene, cam.camera);
   }
 

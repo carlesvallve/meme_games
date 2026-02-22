@@ -3,11 +3,13 @@ import { useGameStore, type PlayerParams, type CameraParams, type TorchParams, t
 import { Layer } from '../game/Entity';
 import type { TerrainPreset } from '../game/Terrain';
 import type { HeightmapStyle } from '../game/TerrainNoise';
+import { palettes } from '../game/ColorPalettes';
 
 type ActivePanel = 'player' | 'camera' | 'light' | 'scene' | null;
 
 const TERRAIN_PRESETS: TerrainPreset[] = ['scattered', 'terraced', 'heightmap'];
 const HEIGHTMAP_STYLES: HeightmapStyle[] = ['rolling', 'terraces', 'islands', 'caves'];
+const PALETTE_NAMES = ['random', ...Object.keys(palettes)];
 
 interface SliderDef<K> {
   key: K;
@@ -175,6 +177,12 @@ function ScenePanel() {
   const setHeightmapStyle = useGameStore((s) => s.setHeightmapStyle);
   const regenerate = useGameStore((s) => s.onRegenerateScene);
   const heightmapThumb = useGameStore((s) => s.heightmapThumb);
+  const paletteName = useGameStore((s) => s.paletteName);
+  const paletteActive = useGameStore((s) => s.paletteActive);
+  const setPaletteName = useGameStore((s) => s.setPaletteName);
+  const gridOpacity = useGameStore((s) => s.gridOpacity);
+  const setGridOpacity = useGameStore((s) => s.setGridOpacity);
+  const randomizePalette = useGameStore((s) => s.onRandomizePalette);
 
   return (
     <div style={{ ...panelStyle, marginBottom: 4 }}>
@@ -236,6 +244,65 @@ function ScenePanel() {
           </div>
         </div>
       )}
+
+      {/* Palette dropdown */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+        <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Palette</span>
+        <select
+          value={paletteName}
+          onChange={(e) => setPaletteName(e.target.value)}
+          style={{
+            flex: 1,
+            padding: '3px 6px',
+            background: 'rgba(255,255,255,0.08)',
+            color: '#ccc',
+            border: '1px solid rgba(255,255,255,0.2)',
+            borderRadius: 3,
+            fontSize: 11,
+            cursor: 'pointer',
+            textTransform: 'capitalize',
+          }}
+        >
+          {PALETTE_NAMES.map((name) => (
+            <option key={name} value={name} style={{ background: '#1a1a2a', color: '#ccc' }}>
+              {name}
+            </option>
+          ))}
+        </select>
+        {paletteActive && (
+          <span
+            onClick={() => randomizePalette?.()}
+            style={{
+              color: '#6af',
+              fontSize: 10,
+              flexShrink: 0,
+              textTransform: 'capitalize',
+              cursor: 'pointer',
+              padding: '2px 4px',
+              borderRadius: 3,
+              background: 'rgba(100,170,255,0.1)',
+            }}
+            title="Click to randomize palette"
+          >
+            {paletteActive}
+          </span>
+        )}
+      </div>
+
+      {/* Grid opacity slider */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+        <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Grid</span>
+        <input
+          type="range"
+          min={0} max={1} step={0.05}
+          value={gridOpacity}
+          onChange={(e) => setGridOpacity(parseFloat(e.target.value))}
+          style={{ flex: 1, height: 14, accentColor: '#6af' }}
+        />
+        <span style={{ color: '#fff', width: 36, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+          {gridOpacity.toFixed(2)}
+        </span>
+      </div>
 
       {/* Regenerate button */}
       <button

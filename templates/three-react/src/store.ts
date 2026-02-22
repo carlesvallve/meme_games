@@ -64,6 +64,9 @@ interface GameStore {
   torchParams: TorchParams;
   terrainPreset: TerrainPreset;
   heightmapStyle: HeightmapStyle;
+  paletteName: string;       // user selection: 'random' or specific name
+  paletteActive: string;     // actual palette in use (for display)
+  gridOpacity: number;
 
   setPhase: (phase: GameStore['phase']) => void;
   setScore: (score: number) => void;
@@ -84,6 +87,9 @@ interface GameStore {
   setTorchParam: <K extends keyof TorchParams>(key: K, value: TorchParams[K]) => void;
   setTerrainPreset: (preset: TerrainPreset) => void;
   setHeightmapStyle: (style: HeightmapStyle) => void;
+  setPaletteName: (name: string) => void;
+  setPaletteActive: (name: string) => void;
+  setGridOpacity: (opacity: number) => void;
 
   activeCharacterName: string | null;
   activeCharacterColor: string | null;
@@ -96,6 +102,7 @@ interface GameStore {
   onPauseToggle: (() => void) | null;
   onRestart: (() => void) | null;
   onRegenerateScene: (() => void) | null;
+  onRandomizePalette: (() => void) | null;
 }
 
 export const useGameStore = create<GameStore>((set) => ({
@@ -112,13 +119,16 @@ export const useGameStore = create<GameStore>((set) => ({
   potions: 0,
   speechBubbles: [],
   particleToggles: { dust: true, lightRain: false, rain: false, debris: false },
-  playerParams: { speed: 4, stepHeight: 0.5, slopeHeight: 1.0, capsuleRadius: 0.25, hopHeight: 0.1, magnetRadius: 2, magnetSpeed: 16 },
+  playerParams: { speed: 4, stepHeight: 0.8, slopeHeight: 1.5, capsuleRadius: 0.25, hopHeight: 0.1, magnetRadius: 2, magnetSpeed: 16 },
   cameraParams: { minDistance: 5, maxDistance: 25, pitchMin: -80, pitchMax: -10, rotationSpeed: 0.005, zoomSpeed: 0.01, collisionLayers: Layer.None },
   lightPreset: 'default' as LightPreset,
   torchEnabled: true,
   torchParams: { intensity: 2.5, distance: 8, offsetForward: 0.3, offsetRight: 0.25, offsetUp: 1.0, color: '#ff9944', flicker: 0.3 },
   terrainPreset: 'heightmap' as TerrainPreset,
   heightmapStyle: 'islands' as HeightmapStyle,
+  paletteName: 'random',
+  paletteActive: '',
+  gridOpacity: 0.25,
 
   setPhase: (phase) => set({ phase }),
   setScore: (score) => set({ score }),
@@ -151,6 +161,9 @@ export const useGameStore = create<GameStore>((set) => ({
     })),
   setTerrainPreset: (terrainPreset) => set({ terrainPreset }),
   setHeightmapStyle: (heightmapStyle) => set({ heightmapStyle }),
+  setPaletteName: (paletteName) => set({ paletteName }),
+  setPaletteActive: (paletteActive) => set({ paletteActive }),
+  setGridOpacity: (gridOpacity) => set({ gridOpacity }),
 
   activeCharacterName: null,
   activeCharacterColor: null,
@@ -163,4 +176,5 @@ export const useGameStore = create<GameStore>((set) => ({
   onPauseToggle: null,
   onRestart: null,
   onRegenerateScene: null,
+  onRandomizePalette: null,
 }));

@@ -9,6 +9,7 @@ import type { LadderDef } from './Ladder';
 export interface HeightmapResult {
   heights: Float32Array;
   ladders: LadderDef[];
+  rampCells: Set<number>;
 }
 
 // ── Seeded permutation table ────────────────────────────────────────
@@ -234,7 +235,7 @@ const HEIGHTMAP_STYLES: Record<HeightmapStyle, HeightmapStyleConfig> = {
   },
   caves: {
     resolution: 72,
-    maxHeight: 5.0,
+    maxHeight: 8.0,
     octaves: 3,
     lacunarity: 2.0,
     persistence: 0.45,
@@ -325,17 +326,38 @@ export function generateHeightmap(
     }
   }
 
+  // Rolling micro-variation: add subtle FBM undulation to flat posterized surfaces.
+  // This makes terrace/island/cave floors feel organic instead of perfectly flat.
+  // fbm returns [0,1], so center around 0 with (noise - 0.5) for ± variation.
+  if (config.posterize > 0 || algorithm === 'caves') {
+    const rollingPerm = buildPerm(actualSeed + 4444);
+    const rollingScale = 5.0;
+    const rollingAmp = 1.2; // ±1.2m — organic undulation on all terraces
+    for (let z = 0; z < verts; z++) {
+      for (let x = 0; x < verts; x++) {
+        const noise = fbm(
+          x / resolution * rollingScale, z / resolution * rollingScale,
+          rollingPerm, 3, 2.0, 0.5,
+        );
+        grid[z * verts + x] += (noise - 0.5) * rollingAmp * 2;
+      }
+    }
+  }
+
   // Carve connectivity ramps for posterized terrain (terraces, islands, caves)
   // Use a conservative slope threshold (0.75×) matching the NavGrid margin
+  let rampCells = new Set<number>();
   if (config.posterize > 0) {
-    ensureConnectivity(grid, verts, SLOPE_HEIGHT * 0.75, quantizeStep, config.maxHeight);
+    // Use generous slope for region labeling so rolling noise doesn't fragment terraces.
+    // Ramp carving uses a gentler slope to produce gradual paths.
+    rampCells = ensureConnectivity(grid, verts, resolution, SLOPE_HEIGHT * 1.5, quantizeStep, config.maxHeight, actualSeed);
   }
 
   // Ladder detection is now handled at the NavGrid level (Terrain.buildNavGrid)
   // which uses actual walkability checks rather than vertex-level connectivity.
   const ladders: LadderDef[] = [];
 
-  return { heights: grid, ladders };
+  return { heights: grid, ladders, rampCells };
 }
 
 // ── FBM generation ──────────────────────────────────────────────────
@@ -561,7 +583,7 @@ function generateCaves(
   }
 
   // Ensure walls have a minimum height so caves feel enclosed
-  const minWall = maxHeight * 0.35;
+  const minWall = maxHeight * 0.5;
   for (let i = 0; i < baseGrid.length; i++) {
     grid[i] = Math.max(minWall, baseGrid[i]);
   }
@@ -573,7 +595,7 @@ function generateCaves(
   // Step 3: Generate floor noise — small elevation changes inside carved caves
   // Uses a different FBM with low octaves, quantized to 0.5m for terrace-like steps
   const floorPerm = buildPerm(seed + 5555);
-  const floorMaxHeight = maxHeight * 0.25; // floor variation up to 25% of wall height
+  const floorMaxHeight = maxHeight * 0.15; // floor variation — keep floors low for deep caverns
   const floorNoiseScale = 5.0;
 
   // Step 4: Carve caves — blend between wall height and floor height based on CA
@@ -616,13 +638,18 @@ function generateCaves(
 }
 
 // ── Heightmap connectivity ramps ────────────────────────────────────
-// Post-processing pass that carves gradual ramps between disconnected
+// Post-processing pass that carves small wedge ramps between disconnected
 // elevation zones so player/NPCs can reach all non-ceiling regions.
+// Ramps are compact (3×3 to 3×7 cells) — small triangular blocks at cliff edges.
 
 const SLOPE_HEIGHT = 1.0;   // max rise per vertex step (matches playerParams)
 const HEIGHT_CEILING_FRAC = 0.85; // regions above this fraction of maxH stay disconnected
-const RAMP_WIDTH = 2;       // ramp half-width in vertices (5 verts total = 2.5m)
-const MAX_RAMP_ITER = 20;
+const MAX_RAMP_ITER = 30;
+const RAMP_HALF_WIDTH = 1;  // 3 cells wide (center ± 1)
+const RAMP_SLOPE = 0.25;    // max height rise per cell along the ramp (very gentle)
+
+/** Max height difference that ramps will bridge. Taller cliffs are left for ladders. */
+const MAX_RAMP_HEIGHT = 2.5;
 
 /** BFS flood-fill that labels connected regions.
  *  Two vertices connect if |h1-h2| <= slopeHeight and both are below ceiling.
@@ -637,7 +664,6 @@ function labelRegions(
 
   for (let i = 0; i < n; i++) {
     if (labels[i] !== -1 || grid[i] >= ceilingH) continue;
-    // BFS from vertex i
     labels[i] = regionId;
     queue.length = 0;
     queue.push(i);
@@ -647,8 +673,7 @@ function labelRegions(
       const cx = cur % verts;
       const cz = (cur - cx) / verts;
       const h = grid[cur];
-      // 4-connected neighbors
-      const dirs = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+      const dirs: [number, number][] = [[-1, 0], [1, 0], [0, -1], [0, 1]];
       for (const [dx, dz] of dirs) {
         const nx = cx + dx;
         const nz = cz + dz;
@@ -683,7 +708,7 @@ function buildBoundaryIndex(
       const lab = labels[i];
       if (lab < 0) continue;
       let isBorder = false;
-      const dirs = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+      const dirs: [number, number][] = [[-1, 0], [1, 0], [0, -1], [0, 1]];
       for (const [dx, dz] of dirs) {
         const nx = x + dx;
         const nz = z + dz;
@@ -700,244 +725,194 @@ function buildBoundaryIndex(
   return borders;
 }
 
-/** Find the closest pair of border vertices between spawnRegion and any other region.
- *  Returns { srcIdx, dstIdx, targetRegion } or null if all regions connected. */
-function findClosestBorderPair(
-  borders: Map<number, number[]>, spawnRegion: number, labels: Int32Array, verts: number,
-): { srcIdx: number; dstIdx: number; targetRegion: number } | null {
-  const spawnBorder = borders.get(spawnRegion);
-  if (!spawnBorder || spawnBorder.length === 0) return null;
-
-  let bestDist = Infinity;
-  let bestSrc = -1;
-  let bestDst = -1;
-  let bestRegion = -1;
-
-  for (const [region, rBorder] of borders) {
-    if (region === spawnRegion || rBorder.length === 0) continue;
-    // Check that this region isn't already the spawn region (labels may have merged)
-    if (labels[rBorder[0]] === spawnRegion) continue;
-
-    for (const si of spawnBorder) {
-      const sx = si % verts;
-      const sz = (si - sx) / verts;
-      for (const di of rBorder) {
-        const dx = di % verts;
-        const dz = (di - dx) / verts;
-        const dist = (sx - dx) * (sx - dx) + (sz - dz) * (sz - dz);
-        if (dist < bestDist) {
-          bestDist = dist;
-          bestSrc = si;
-          bestDst = di;
-          bestRegion = region;
-        }
-      }
-    }
-  }
-
-  return bestRegion >= 0 ? { srcIdx: bestSrc, dstIdx: bestDst, targetRegion: bestRegion } : null;
-}
-
-/** Bresenham line from (x0,z0) to (x1,z1). Returns array of [x,z] pairs. */
-function bresenhamLine(x0: number, z0: number, x1: number, z1: number): [number, number][] {
-  const points: [number, number][] = [];
-  let dx = Math.abs(x1 - x0);
-  let dz = Math.abs(z1 - z0);
-  const sx = x0 < x1 ? 1 : -1;
-  const sz = z0 < z1 ? 1 : -1;
-  let err = dx - dz;
-  let x = x0, z = z0;
-
-  while (true) {
-    points.push([x, z]);
-    if (x === x1 && z === z1) break;
-    const e2 = 2 * err;
-    if (e2 > -dz) { err -= dz; x += sx; }
-    if (e2 < dx) { err += dx; z += sz; }
-  }
-  return points;
-}
-
-/** Carve a ramp along the given path with linear height interpolation and width expansion.
- *  Uses smooth blending at edges to avoid steep gradients at ramp borders. */
-function carveRampPath(
-  grid: Float32Array, verts: number, path: [number, number][],
-  slopeHeight: number, rampWidth: number, quantizeStep: number,
-): void {
-  if (path.length < 2) return;
-
-  const startH = grid[path[0][1] * verts + path[0][0]];
-  const endH = grid[path[path.length - 1][1] * verts + path[path.length - 1][0]];
-
-  // Track all modified vertices for re-quantization
-  const modified = new Set<number>();
-
-  for (let i = 0; i < path.length; i++) {
-    const t = path.length > 1 ? i / (path.length - 1) : 0;
-    const targetH = startH + (endH - startH) * t;
-    const [px, pz] = path[i];
-
-    // Determine perpendicular direction for width expansion
-    let perpX = 0, perpZ = 1; // default: expand along Z
-    if (i < path.length - 1) {
-      const [nextX, nextZ] = path[i + 1];
-      const dirX = nextX - px;
-      const dirZ = nextZ - pz;
-      if (dirX !== 0 && dirZ !== 0) {
-        // Diagonal: expand in both axes (X and Z offsets)
-        perpX = 1; perpZ = 0;
-      } else {
-        // Cardinal: perpendicular
-        perpX = dirZ === 0 ? 0 : -Math.sign(dirZ);
-        perpZ = dirX === 0 ? 0 : Math.sign(dirX);
-      }
-    }
-
-    // Carve center + width expansion
-    for (let dw = -rampWidth; dw <= rampWidth; dw++) {
-      const nx = px + dw * perpX;
-      const nz = pz + dw * perpZ;
-      if (nx < 0 || nx >= verts || nz < 0 || nz >= verts) continue;
-
-      const idx = nz * verts + nx;
-      const absDw = Math.abs(dw);
-      if (absDw === 0) {
-        // Center: set to interpolated height
-        grid[idx] = targetH;
-      } else {
-        // Graduated blending: inner edges blend more, outer edges blend less
-        // dw=1 → 75% ramp, dw=2 → 40% ramp
-        const blend = absDw === 1 ? 0.75 : 0.4;
-        grid[idx] = grid[idx] * (1 - blend) + targetH * blend;
-      }
-      modified.add(idx);
-
-      // Also expand diagonally for diagonal paths to ensure full coverage
-      if (perpX !== 0 || perpZ !== 0) {
-        const nx2 = px + dw * (perpX === 0 ? 1 : 0);
-        const nz2 = pz + dw * (perpZ === 0 ? 1 : 0);
-        if (nx2 >= 0 && nx2 < verts && nz2 >= 0 && nz2 < verts) {
-          const idx2 = nz2 * verts + nx2;
-          if (absDw === 0) {
-            grid[idx2] = targetH;
-          } else {
-            const blend = absDw === 1 ? 0.75 : 0.4;
-            grid[idx2] = grid[idx2] * (1 - blend) + targetH * blend;
-          }
-          modified.add(idx2);
-        }
-      }
-    }
-  }
-
-  // Enforce max slope along the ramp center after interpolation
-  // Forward pass
-  for (let i = 1; i < path.length; i++) {
-    const prevIdx = path[i - 1][1] * verts + path[i - 1][0];
-    const curIdx = path[i][1] * verts + path[i][0];
-    if (grid[curIdx] - grid[prevIdx] > slopeHeight) {
-      grid[curIdx] = grid[prevIdx] + slopeHeight;
-    }
-    if (grid[prevIdx] - grid[curIdx] > slopeHeight) {
-      grid[curIdx] = grid[prevIdx] - slopeHeight;
-    }
-  }
-  // Backward pass
-  for (let i = path.length - 2; i >= 0; i--) {
-    const nextIdx = path[i + 1][1] * verts + path[i + 1][0];
-    const curIdx = path[i][1] * verts + path[i][0];
-    if (grid[curIdx] - grid[nextIdx] > slopeHeight) {
-      grid[curIdx] = grid[nextIdx] + slopeHeight;
-    }
-    if (grid[nextIdx] - grid[curIdx] > slopeHeight) {
-      grid[curIdx] = grid[nextIdx] - slopeHeight;
-    }
-  }
-
-  // Re-quantize all modified cells
-  if (quantizeStep > 0) {
-    for (const idx of modified) {
-      grid[idx] = Math.round(grid[idx] / quantizeStep) * quantizeStep;
-    }
-  }
-}
-
-/** Max height difference that ramps will bridge. Taller cliffs are left for ladders. */
-const MAX_RAMP_HEIGHT = 2.0;
-
 /** Ensure non-ceiling elevation zones are reachable from the spawn region.
- *  Carves ramps for small height differences only. Tall cliffs are left for ladders. */
+ *  Places small wedge ramps (3×3 to 3×7) at cliff edges between terraces.
+ *  Returns set of all modified vertex indices (ramp cells). */
 function ensureConnectivity(
-  grid: Float32Array, verts: number,
-  slopeHeight: number, quantizeStep: number, maxHeight: number,
-): void {
+  grid: Float32Array, verts: number, resolution: number,
+  slopeHeight: number, _quantizeStep: number, maxHeight: number, seed: number,
+): Set<number> {
   const ceilingH = maxHeight * HEIGHT_CEILING_FRAC;
+  // Same rolling noise as the main terrain pass — used to re-apply undulation to ramp cells
+  const rollingPerm = buildPerm(seed + 4444);
+  const rollingScale = 5.0;
+  const rollingAmp = 0.6; // gentler than terrain's ±1.2m to keep ramps walkable
   const spawnVertex = Math.floor(verts / 2);
-
-  // Track region pairs we've skipped (too tall for ramps)
-  const skippedRegionPairs = new Set<string>();
+  const allRampCells = new Set<number>();
+  const EDGE_MARGIN = 3;
+  const dirs4: [number, number][] = [[-1, 0], [1, 0], [0, -1], [0, 1]];
 
   for (let iter = 0; iter < MAX_RAMP_ITER; iter++) {
     const { labels, regionCount } = labelRegions(grid, verts, slopeHeight, ceilingH);
-
     const spawnLabel = labels[spawnVertex * verts + spawnVertex];
     if (spawnLabel < 0) break;
 
-    // Collect all non-spawn regions
-    const otherRegions = new Set<number>();
+    // Count region sizes and find disconnected regions
+    const regionSizes = new Map<number, number>();
     for (let i = 0; i < labels.length; i++) {
       if (labels[i] >= 0 && labels[i] !== spawnLabel) {
-        otherRegions.add(labels[i]);
+        regionSizes.set(labels[i], (regionSizes.get(labels[i]) || 0) + 1);
       }
     }
-    if (otherRegions.size === 0) break;
+    if (regionSizes.size === 0) break; // all connected
 
-    const borders = buildBoundaryIndex(labels, verts, regionCount);
-    const spawnBorder = borders.get(spawnLabel);
-    if (!spawnBorder || spawnBorder.length === 0) break;
+    // Scan for the best cliff-edge crossing to place a small wedge ramp.
+    // We look for adjacent vertex pairs where one is spawn-connected and the other isn't.
+    let bestScore = Infinity;
+    let bestLowX = 0, bestLowZ = 0;
+    let bestDirX = 0, bestDirZ = 0;
+    let bestLowH = 0, bestHighH = 0;
 
-    // Find closest border pair that hasn't been skipped
-    let bestDist = Infinity;
-    let bestSrc = -1, bestDst = -1, bestRegion = -1;
+    for (let z = EDGE_MARGIN; z < verts - EDGE_MARGIN; z++) {
+      for (let x = EDGE_MARGIN; x < verts - EDGE_MARGIN; x++) {
+        const idx = z * verts + x;
+        const lab = labels[idx];
+        if (lab < 0) continue;
 
-    for (const region of otherRegions) {
-      const pairKey = `${Math.min(spawnLabel, region)},${Math.max(spawnLabel, region)}`;
-      if (skippedRegionPairs.has(pairKey)) continue;
+        for (const [dx, dz] of dirs4) {
+          const nx = x + dx, nz = z + dz;
+          if (nx < EDGE_MARGIN || nx >= verts - EDGE_MARGIN ||
+              nz < EDGE_MARGIN || nz >= verts - EDGE_MARGIN) continue;
+          const nIdx = nz * verts + nx;
+          const nLab = labels[nIdx];
+          if (nLab < 0 || nLab === lab) continue;
 
-      const rBorder = borders.get(region);
-      if (!rBorder || rBorder.length === 0) continue;
+          // One must be spawn-connected, other must be disconnected
+          const isSpawnSide = lab === spawnLabel;
+          const isNeighborSpawn = nLab === spawnLabel;
+          if (!isSpawnSide && !isNeighborSpawn) continue;
 
-      for (const si of spawnBorder) {
-        const sx = si % verts, sz = (si - sx) / verts;
-        for (const di of rBorder) {
-          const dx = di % verts, dz = (di - dx) / verts;
-          const dist = (sx - dx) * (sx - dx) + (sz - dz) * (sz - dz);
-          if (dist < bestDist) {
-            bestDist = dist; bestSrc = si; bestDst = di; bestRegion = region;
+          const targetLab = isSpawnSide ? nLab : lab;
+          if ((regionSizes.get(targetLab) || 0) < 4) continue; // skip tiny regions
+
+          const hA = grid[idx];
+          const hB = grid[nIdx];
+          const heightDiff = Math.abs(hA - hB);
+          if (heightDiff > MAX_RAMP_HEIGHT || heightDiff < 0.3) continue;
+
+          // Determine low/high side and ramp direction (from low toward high)
+          const lowH = Math.min(hA, hB);
+          const highH = Math.max(hA, hB);
+          const lowIsA = hA <= hB;
+          const lowX = lowIsA ? x : nx;
+          const lowZ = lowIsA ? z : nz;
+          // Direction from low toward high (cardinal: exactly ±1 in one axis)
+          const rdx = lowIsA ? dx : -dx;
+          const rdz = lowIsA ? dz : -dz;
+
+          // Check room: ramp extends backward from cliff into low terrace
+          const rampLen = Math.max(3, Math.ceil(heightDiff / RAMP_SLOPE));
+          const backX = lowX - rdx * (rampLen + 6); // max pushBack(4) + pad(2)
+          const backZ = lowZ - rdz * (rampLen + 6);
+          const fwdX = lowX + rdx * 2; // pad past cliff
+          const fwdZ = lowZ + rdz * 2;
+          if (backX < 1 || backX >= verts - 1 || backZ < 1 || backZ >= verts - 1 ||
+              fwdX < 1 || fwdX >= verts - 1 || fwdZ < 1 || fwdZ >= verts - 1) continue;
+
+          // Score: prefer flat surroundings and smaller height differences
+          let flatness = 0;
+          for (const [ddx, ddz] of dirs4) {
+            const fx = lowX + ddx, fz = lowZ + ddz;
+            if (fx >= 0 && fx < verts && fz >= 0 && fz < verts) {
+              flatness += Math.abs(grid[fz * verts + fx] - lowH);
+            }
+            const hfx = lowX + rdx + ddx, hfz = lowZ + rdz + ddz;
+            if (hfx >= 0 && hfx < verts && hfz >= 0 && hfz < verts) {
+              flatness += Math.abs(grid[hfz * verts + hfx] - highH);
+            }
+          }
+
+          const score = flatness * 2 + heightDiff;
+          if (score < bestScore) {
+            bestScore = score;
+            bestLowX = lowX; bestLowZ = lowZ;
+            bestDirX = rdx; bestDirZ = rdz;
+            bestLowH = lowH; bestHighH = highH;
           }
         }
       }
     }
 
-    if (bestRegion < 0) break; // all remaining regions are skipped (too tall)
+    if (bestScore === Infinity) break; // no valid crossing found
 
-    const hSrc = grid[bestSrc];
-    const hDst = grid[bestDst];
-    const heightDiff = Math.abs(hSrc - hDst);
+    // Ramp geometry
+    const heightDiff = bestHighH - bestLowH;
+    const rampLen = Math.max(3, Math.ceil(heightDiff / RAMP_SLOPE));
+    const perpX = -bestDirZ;
+    const perpZ = bestDirX;
+    const PAD = 2; // flat padding at entry/exit
 
-    if (heightDiff > MAX_RAMP_HEIGHT) {
-      // Too tall for a ramp — skip and leave for ladders
-      const pairKey = `${Math.min(spawnLabel, bestRegion)},${Math.max(spawnLabel, bestRegion)}`;
-      skippedRegionPairs.add(pairKey);
-      continue;
+    // Push the ramp start AWAY from the wall, back into the low terrace.
+    // This makes the ramp "grow" from the low side up to the cliff rather than
+    // cutting into the high side. Random offset 2-4 cells for variety.
+    const pushBack = 2 + (iter % 3); // 2, 3, or 4 cells back from cliff edge
+
+    // Ramp start: pushBack + rampLen cells behind the cliff on the low side
+    // [PAD flat low] [rampLen slope] [PAD flat high past cliff]
+    const startX = bestLowX - bestDirX * (rampLen + PAD + pushBack);
+    const startZ = bestLowZ - bestDirZ * (rampLen + PAD + pushBack);
+    const endX = bestLowX + bestDirX * PAD;
+    const endZ = bestLowZ + bestDirZ * PAD;
+
+    // Bounds check
+    const inBounds = (bx: number, bz: number) =>
+      bx >= 0 && bx < verts && bz >= 0 && bz < verts;
+    if (!inBounds(startX, startZ) || !inBounds(endX, endZ)) break;
+
+    // Sample actual ground height at ramp start — the cliff-edge bestLowH may be
+    // elevated by rolling noise above the true terrace floor.
+    const actualLowH = grid[startZ * verts + startX];
+    const rampLowH = Math.min(bestLowH, actualLowH);
+
+    // Recompute ramp length with corrected height diff
+    const actualDiff = bestHighH - rampLowH;
+    const actualRampLen = Math.max(3, Math.ceil(actualDiff / RAMP_SLOPE));
+    const totalLen = PAD + pushBack + actualRampLen + PAD;
+
+    // Use noise to vary ramp width per row and add height jitter for organic look
+    const rampNoisePerm = buildPerm(seed + 7777 + iter * 31);
+
+    for (let i = 0; i <= totalLen; i++) {
+      let h: number;
+      const slopeStart = PAD + pushBack;
+      if (i < slopeStart) {
+        h = rampLowH;
+      } else if (i >= slopeStart + actualRampLen) {
+        h = bestHighH;
+      } else {
+        const t = (i - slopeStart) / Math.max(1, actualRampLen - 1);
+        h = rampLowH + (bestHighH - rampLowH) * t;
+      }
+      const rx = startX + bestDirX * i;
+      const rz = startZ + bestDirZ * i;
+
+      // Vary width per row slightly: occasionally ±1 cell wider
+      const widthNoise = valueNoise2D(i * 0.5, iter * 3.3, rampNoisePerm);
+      const rowHalfWidth = RAMP_HALF_WIDTH + (widthNoise > 0.7 ? 1 : 0); // mostly 1, sometimes 2
+
+      // Sample the same rolling noise used on the main terrain, at the row center.
+      // Apply uniformly across the row so the ramp is flat side-to-side but undulates
+      // along its length matching the surrounding terrain's organic feel.
+      const rollingNoise = fbm(
+        rx / resolution * rollingScale, rz / resolution * rollingScale,
+        rollingPerm, 3, 2.0, 0.5,
+      );
+      const rowH = h + (rollingNoise - 0.5) * rollingAmp * 2;
+
+      for (let w = -rowHalfWidth; w <= rowHalfWidth; w++) {
+        const nx = rx + perpX * w;
+        const nz = rz + perpZ * w;
+        if (nx < 0 || nx >= verts || nz < 0 || nz >= verts) continue;
+        const cellIdx = nz * verts + nx;
+        grid[cellIdx] = rowH;
+        allRampCells.add(cellIdx);
+      }
     }
 
-    // Carve ramp
-    const srcX = bestSrc % verts, srcZ = (bestSrc - srcX) / verts;
-    const dstX = bestDst % verts, dstZ = (bestDst - dstX) / verts;
-    const path = bresenhamLine(srcX, srcZ, dstX, dstZ);
-    carveRampPath(grid, verts, path, slopeHeight, RAMP_WIDTH, quantizeStep);
+    console.log(`[Ramp ${iter + 1}] ${heightDiff.toFixed(1)}m, ${rampLen} slope cells, pushBack=${pushBack} at (${bestLowX},${bestLowZ}) dir=(${bestDirX},${bestDirZ})`);
   }
+
+  return allRampCells;
 }
 
 // ── Ladder detection ────────────────────────────────────────────────
