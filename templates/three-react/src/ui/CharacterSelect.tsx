@@ -1,18 +1,14 @@
 import { useGameStore } from '../store';
-import { CHARACTER_TEAM_COLORS, CHARACTER_NAMES } from '../game/characters';
-import type { CharacterType } from '../game/characters';
+import { CHARACTER_TEAM_COLORS, getSlots, voxRoster } from '../game/characters';
 
-const CHARACTERS: CharacterType[] = ['boy', 'girl', 'robot', 'dog'];
-
-const ICONS: Record<CharacterType, string> = {
-  boy: '\u2694\ufe0f',
-  girl: '\u2728',
-  robot: '\u2699\ufe0f',
-  dog: '\ud83d\udc3e',
+const CATEGORY_ICON: Record<string, string> = {
+  hero: '\u2694\ufe0f',
+  enemy: '\ud83d\udc79',
 };
 
 export function CharacterSelect() {
   const selectCharacter = useGameStore((s) => s.selectCharacter);
+  const slots = getSlots();
 
   return (
     <div
@@ -54,13 +50,14 @@ export function CharacterSelect() {
           width: '90%',
         }}
       >
-        {CHARACTERS.map((type) => {
-          const color = CHARACTER_TEAM_COLORS[type];
-          const name = CHARACTER_NAMES[type];
+        {slots.map((slot) => {
+          const color = CHARACTER_TEAM_COLORS[slot];
+          const entry = voxRoster[slot];
+          const icon = CATEGORY_ICON[entry.category] ?? '\u2694\ufe0f';
           return (
             <button
-              key={type}
-              onClick={() => selectCharacter(type)}
+              key={slot}
+              onClick={() => selectCharacter(slot)}
               style={{
                 display: 'flex',
                 flexDirection: 'column',
@@ -90,7 +87,7 @@ export function CharacterSelect() {
               }}
             >
               <div style={{ fontSize: 36, marginBottom: 8 }}>
-                {ICONS[type]}
+                {icon}
               </div>
               <div
                 style={{
@@ -109,7 +106,7 @@ export function CharacterSelect() {
                   letterSpacing: 1,
                 }}
               >
-                {name}
+                {entry.name}
               </div>
               <div
                 style={{
@@ -120,7 +117,7 @@ export function CharacterSelect() {
                   letterSpacing: 1,
                 }}
               >
-                {type}
+                {entry.category}
               </div>
             </button>
           );

@@ -68,10 +68,12 @@ export const DEFAULT_PARTICLE_TOGGLES: ParticleToggles = {
 };
 
 export const DEFAULT_SCENE_SETTINGS = {
-  terrainPreset: 'heightmap' as TerrainPreset,
+  terrainPreset: 'voxelDungeon' as TerrainPreset,
   heightmapStyle: 'islands' as HeightmapStyle,
   paletteName: 'random',
   wallGap: 1,
+  roomSpacing: 3,
+  tileSize: 1.5,
   gridOpacity: 0.25,
   resolutionScale: 1,
 };
@@ -79,7 +81,6 @@ export const DEFAULT_SCENE_SETTINGS = {
 // ── localStorage persistence ──────────────────────────────────────────
 
 const SETTINGS_KEY = 'dcrawler:settings';
-const CHARACTERS_KEY = 'dcrawler:characters';
 
 interface SavedSettings {
   playerParams?: PlayerParams;
@@ -91,6 +92,8 @@ interface SavedSettings {
   heightmapStyle?: HeightmapStyle;
   paletteName?: string;
   wallGap?: number;
+  roomSpacing?: number;
+  tileSize?: number;
   gridOpacity?: number;
   resolutionScale?: number;
   particleToggles?: ParticleToggles;
@@ -116,6 +119,8 @@ function saveSettings(): void {
     heightmapStyle: s.heightmapStyle,
     paletteName: s.paletteName,
     wallGap: s.wallGap,
+    roomSpacing: s.roomSpacing,
+    tileSize: s.tileSize,
     gridOpacity: s.gridOpacity,
     resolutionScale: s.resolutionScale,
     particleToggles: s.particleToggles,
@@ -123,60 +128,6 @@ function saveSettings(): void {
   try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(data)); } catch { /* ignore */ }
 }
 
-/** Movement-only subset of PlayerParams, used for per-character storage. */
-interface StoredMovementParams {
-  speed: number;
-  stepHeight: number;
-  slopeHeight: number;
-  capsuleRadius: number;
-  arrivalReach: number;
-  hopHeight: number;
-}
-
-export function loadCharacterParams(type: string): StoredMovementParams | null {
-  try {
-    const raw = localStorage.getItem(CHARACTERS_KEY);
-    if (!raw) return null;
-    const all = JSON.parse(raw);
-    return all[type] ?? null;
-  } catch { return null; }
-}
-
-export function saveCharacterParams(type: string, params: StoredMovementParams): void {
-  try {
-    const raw = localStorage.getItem(CHARACTERS_KEY);
-    const all: Record<string, StoredMovementParams> = raw ? JSON.parse(raw) : {};
-    const d = DEFAULT_PLAYER_PARAMS;
-    const isDefault =
-      params.speed === d.speed && params.stepHeight === d.stepHeight &&
-      params.slopeHeight === d.slopeHeight && params.capsuleRadius === d.capsuleRadius &&
-      params.arrivalReach === d.arrivalReach && params.hopHeight === d.hopHeight;
-    if (isDefault) {
-      delete all[type];
-    } else {
-      all[type] = { speed: params.speed, stepHeight: params.stepHeight, slopeHeight: params.slopeHeight, capsuleRadius: params.capsuleRadius, arrivalReach: params.arrivalReach, hopHeight: params.hopHeight };
-    }
-    if (Object.keys(all).length === 0) {
-      localStorage.removeItem(CHARACTERS_KEY);
-    } else {
-      localStorage.setItem(CHARACTERS_KEY, JSON.stringify(all));
-    }
-  } catch { /* ignore */ }
-}
-
-export function clearCharacterParams(type: string): void {
-  try {
-    const raw = localStorage.getItem(CHARACTERS_KEY);
-    if (!raw) return;
-    const all = JSON.parse(raw);
-    delete all[type];
-    if (Object.keys(all).length === 0) {
-      localStorage.removeItem(CHARACTERS_KEY);
-    } else {
-      localStorage.setItem(CHARACTERS_KEY, JSON.stringify(all));
-    }
-  } catch { /* ignore */ }
-}
 
 // ── Store ─────────────────────────────────────────────────────────────
 
@@ -204,6 +155,8 @@ interface GameStore {
   paletteName: string;       // user selection: 'random' or specific name
   paletteActive: string;     // actual palette in use (for display)
   wallGap: number;
+  roomSpacing: number;
+  tileSize: number;
   gridOpacity: number;
   resolutionScale: number;
 
@@ -229,6 +182,8 @@ interface GameStore {
   setPaletteName: (name: string) => void;
   setPaletteActive: (name: string) => void;
   setWallGap: (gap: number) => void;
+  setRoomSpacing: (spacing: number) => void;
+  setTileSize: (size: number) => void;
   setGridOpacity: (gridOpacity: number) => void;
   setResolutionScale: (scale: number) => void;
 
@@ -277,6 +232,8 @@ export const useGameStore = create<GameStore>((set) => ({
   paletteName: saved.paletteName ?? DEFAULT_SCENE_SETTINGS.paletteName,
   paletteActive: '',
   wallGap: saved.wallGap ?? DEFAULT_SCENE_SETTINGS.wallGap,
+  roomSpacing: saved.roomSpacing ?? DEFAULT_SCENE_SETTINGS.roomSpacing,
+  tileSize: saved.tileSize ?? DEFAULT_SCENE_SETTINGS.tileSize,
   gridOpacity: saved.gridOpacity ?? DEFAULT_SCENE_SETTINGS.gridOpacity,
   resolutionScale: saved.resolutionScale ?? DEFAULT_SCENE_SETTINGS.resolutionScale,
 
@@ -314,6 +271,8 @@ export const useGameStore = create<GameStore>((set) => ({
   setPaletteName: (paletteName) => set({ paletteName }),
   setPaletteActive: (paletteActive) => set({ paletteActive }),
   setWallGap: (wallGap) => set({ wallGap }),
+  setRoomSpacing: (roomSpacing) => set({ roomSpacing }),
+  setTileSize: (tileSize) => set({ tileSize }),
   setGridOpacity: (gridOpacity) => set({ gridOpacity }),
   setResolutionScale: (resolutionScale) => set({ resolutionScale }),
 

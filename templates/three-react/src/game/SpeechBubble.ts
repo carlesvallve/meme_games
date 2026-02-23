@@ -1,9 +1,11 @@
 import * as THREE from 'three';
 import { useGameStore } from '../store';
-import { getRandomThought } from './thoughtBubbles';
 import { entityRegistry, Layer } from './Entity';
-import { CHARACTER_HEIGHTS, type CharacterType } from './characters';
 import type { SpeechBubbleData } from '../types';
+import type { Character } from './Character';
+
+/** Height offset above the character mesh for speech bubble placement */
+const BUBBLE_Y_OFFSET = 0.7;
 
 interface ActiveBubble {
   id: number;
@@ -12,25 +14,24 @@ interface ActiveBubble {
   duration: number;
   fadeIn: number;
   fadeOut: number;
+  /** The character this bubble belongs to */
+  character: Character;
 }
 
 export class SpeechBubbleSystem {
   private bubbles: ActiveBubble[] = [];
-  private timer = 0;
-  private nextDelay = 0;
   private idCounter = 0;
-  private characterType: CharacterType = 'boy';
-  private playerMesh: THREE.Object3D | null = null;
   private camera: THREE.Camera | null = null;
+  private characters: Character[] = [];
   private screenWidth = window.innerWidth;
   private screenHeight = window.innerHeight;
   private raycaster = new THREE.Raycaster();
   private _dir = new THREE.Vector3();
-  private occluded = false;
-  private occludedAlpha = 1;
+
+  /** Per-character timer for staggered spawning */
+  private charTimers = new Map<Character, { timer: number; nextDelay: number }>();
 
   constructor() {
-    this.nextDelay = 5 + Math.random() * 6;
     window.addEventListener('resize', this.onResize);
   }
 
@@ -39,26 +40,46 @@ export class SpeechBubbleSystem {
     this.screenHeight = window.innerHeight;
   };
 
-  setCharacter(type: CharacterType): void {
-    this.characterType = type;
-  }
-
-  setPlayerMesh(mesh: THREE.Object3D): void {
-    this.playerMesh = mesh;
-  }
-
   setCamera(camera: THREE.Camera): void {
     this.camera = camera;
   }
 
-  update(dt: number): void {
-    this.timer += dt;
+  /** Register all characters for speech bubbles */
+  setCharacters(characters: Character[]): void {
+    this.characters = characters;
+    // Initialize timers for new characters
+    for (const char of characters) {
+      if (!this.charTimers.has(char)) {
+        this.charTimers.set(char, {
+          timer: 0,
+          // Stagger initial delays so they don't all talk at once
+          nextDelay: 3 + Math.random() * 10,
+        });
+      }
+    }
+    // Clean up removed characters
+    for (const key of this.charTimers.keys()) {
+      if (!characters.includes(key)) {
+        this.charTimers.delete(key);
+      }
+    }
+  }
 
-    // Spawn new bubble
-    if (this.timer >= this.nextDelay) {
-      this.timer = 0;
-      this.nextDelay = 8 + Math.random() * 8;
-      this.spawnBubble();
+  update(dt: number): void {
+    // Spawn bubbles per character
+    for (const char of this.characters) {
+      const state = this.charTimers.get(char);
+      if (!state) continue;
+
+      state.timer += dt;
+      if (state.timer >= state.nextDelay) {
+        state.timer = 0;
+        // NPCs talk less frequently than the player character
+        state.nextDelay = char.selected
+          ? 6 + Math.random() * 8
+          : 10 + Math.random() * 15;
+        this.spawnBubble(char);
+      }
     }
 
     // Update existing bubbles
@@ -73,23 +94,57 @@ export class SpeechBubbleSystem {
     this.pushToStore();
   }
 
-  private spawnBubble(): void {
-    const text = getRandomThought(this.characterType);
+  /**
+   * Force-fade any current bubble on a character and schedule a new one
+   * after a short delay. Call this when a character's skin changes.
+   */
+  onSkinChanged(char: Character): void {
+    // Trigger fade-out on any existing bubble for this character
+    for (const b of this.bubbles) {
+      if (b.character === char) {
+        // Jump to the fade-out region so it fades out quickly
+        b.duration = b.age + 0.4;
+        b.fadeOut = 0.4;
+      }
+    }
+    // Schedule a new bubble from the new personality shortly after
+    const state = this.charTimers.get(char);
+    if (state) {
+      state.timer = 0;
+      state.nextDelay = 1.0 + Math.random() * 0.5;
+    }
+  }
+
+  private spawnBubble(char: Character): void {
+    const entry = char.voxEntry;
+    // Use exclamations pool for the first bubble after a skin change (short delay),
+    // otherwise mix thoughts + sounds
+    const state = this.charTimers.get(char);
+    const isIntro = state && state.nextDelay < 2;
+    const pool = entry
+      ? (isIntro ? entry.exclamations : [...entry.thoughts, ...entry.sounds])
+      : ['...'];
+    const text = pool[Math.floor(Math.random() * pool.length)];
+
+    // Only allow one active bubble per character
+    this.bubbles = this.bubbles.filter(b => b.character !== char);
+
     this.bubbles.push({
       id: this.idCounter++,
       text,
       age: 0,
       duration: 4,
       fadeIn: 0.3,
-      fadeOut: 0.3,
+      fadeOut: 0.5,
+      character: char,
     });
   }
 
-  private isPlayerOccluded(playerPos: THREE.Vector3): boolean {
+  private isOccluded(worldPos: THREE.Vector3): boolean {
     if (!this.camera) return false;
 
     const camPos = this.camera.position;
-    this._dir.copy(playerPos).sub(camPos);
+    this._dir.copy(worldPos).sub(camPos);
     const dist = this._dir.length();
     if (dist < 0.01) return false;
     this._dir.divideScalar(dist);
@@ -104,42 +159,39 @@ export class SpeechBubbleSystem {
   }
 
   private pushToStore(): void {
-    if (!this.playerMesh || !this.camera) {
+    if (!this.camera) {
       useGameStore.getState().setSpeechBubbles([]);
       return;
     }
 
     const result: SpeechBubbleData[] = [];
     const pos = new THREE.Vector3();
-    this.playerMesh.getWorldPosition(pos);
-    // Position above head — height varies per character type
-    const charHeight = CHARACTER_HEIGHTS[this.characterType] ?? 0.8;
-    pos.y += charHeight + 0.15;
-
-    const projected = pos.clone().project(this.camera);
-
-    // Convert NDC to screen coords
-    const x = (projected.x * 0.5 + 0.5) * this.screenWidth;
-    const y = (1 - (projected.y * 0.5 + 0.5)) * this.screenHeight;
-
-    // Behind camera check
-    if (projected.z > 1) {
-      useGameStore.getState().setSpeechBubbles([]);
-      return;
-    }
-
-    // Fade out when occluded by architecture
-    this.occluded = this.isPlayerOccluded(pos);
-    const fadeSpeed = 8;
-    const targetAlpha = this.occluded ? 0 : 1;
-    this.occludedAlpha += (targetAlpha - this.occludedAlpha) * Math.min(1, fadeSpeed * 0.016);
-
-    if (this.occludedAlpha < 0.01) {
-      useGameStore.getState().setSpeechBubbles([]);
-      return;
-    }
 
     for (const b of this.bubbles) {
+      const mesh = b.character.mesh;
+      mesh.getWorldPosition(pos);
+      pos.y += BUBBLE_Y_OFFSET;
+
+      const projected = pos.clone().project(this.camera);
+
+      // Behind camera — skip
+      if (projected.z > 1) continue;
+
+      const x = (projected.x * 0.5 + 0.5) * this.screenWidth;
+      const y = (1 - (projected.y * 0.5 + 0.5)) * this.screenHeight;
+
+      // Fade for occlusion
+      const occluded = this.isOccluded(pos);
+      let occlusionAlpha = occluded ? 0.15 : 1;
+
+      // Fade for distance (NPCs further away get dimmer)
+      if (!b.character.selected) {
+        const camDist = pos.distanceTo(this.camera.position);
+        const distAlpha = THREE.MathUtils.clamp(1 - (camDist - 5) / 15, 0.1, 1);
+        occlusionAlpha *= distAlpha;
+      }
+
+      // Age-based fade
       let opacity = 1;
       if (b.age < b.fadeIn) {
         opacity = b.age / b.fadeIn;
@@ -151,8 +203,8 @@ export class SpeechBubbleSystem {
         id: b.id,
         text: b.text,
         x,
-        y: y - 20, // Offset slightly above the projected point
-        opacity: Math.max(0, Math.min(1, opacity * this.occludedAlpha)),
+        y: y - 10,
+        opacity: Math.max(0, Math.min(1, opacity * occlusionAlpha)),
       });
     }
 

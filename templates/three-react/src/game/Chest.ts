@@ -71,7 +71,7 @@ function buildChestLidModel(): VoxelModel {
   return { size: { x: 4, y: 1, z: 3 }, voxels };
 }
 
-const VOXEL_SCALE = 0.14;
+const VOXEL_SCALE = 0.09;
 
 export class ChestSystem {
   private chests: ChestObj[] = [];

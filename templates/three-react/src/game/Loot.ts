@@ -11,13 +11,15 @@ interface LootItem {
   grounded: boolean;
   bounceCount: number;
   age: number;
+  delay: number;         // stagger before ejection starts
   gracePeriod: number;
   collected: boolean;
   type: 'coin' | 'potion';
   value: number;
 }
 
-const GRAVITY = 15;
+const GRAVITY = 20;
+const DRAG = 3.5;       // air drag — kills velocity fast for a punchy burst
 const BOUNCE_Y = -0.35;
 const BOUNCE_XZ = 0.6;
 const SETTLE_THRESHOLD = 0.5;
@@ -37,8 +39,8 @@ export class LootSystem {
     this.scene = scene;
     this.terrain = terrain;
 
-    this.coinGeo = new THREE.OctahedronGeometry(0.12, 0);
-    this.potionGeo = new THREE.SphereGeometry(0.1, 6, 4);
+    this.coinGeo = new THREE.OctahedronGeometry(0.08, 0);
+    this.potionGeo = new THREE.SphereGeometry(0.07, 6, 4);
 
     this.coinMat = new THREE.MeshStandardMaterial({
       color: 0xffd700,
@@ -69,18 +71,19 @@ export class LootSystem {
 
       const mesh = new THREE.Mesh(geo, mat);
       mesh.position.copy(position);
-      mesh.position.y += 0.5; // start above chest
+      mesh.position.y += 0.3; // start above chest
       mesh.castShadow = true;
+      mesh.visible = false; // hidden until delay expires
       this.scene.add(mesh);
 
-      const entity = new Entity(mesh, { layer: Layer.Collectible, radius: 0.12 });
+      const entity = new Entity(mesh, { layer: Layer.Collectible, radius: 0.08 });
 
       // Random ejection angle
       const angle = Math.random() * Math.PI * 2;
-      const hSpeed = 1.5 + Math.random() * 2;
+      const hSpeed = 2.5 + Math.random() * 2.0;
       const vel = new THREE.Vector3(
         Math.cos(angle) * hSpeed,
-        3 + Math.random() * 2, // upward
+        4.0 + Math.random() * 2.0, // punchy upward — drag keeps it below walls
         Math.sin(angle) * hSpeed,
       );
 
@@ -91,6 +94,7 @@ export class LootSystem {
         grounded: false,
         bounceCount: 0,
         age: 0,
+        delay: i * 0.04 + Math.random() * 0.03, // stagger each item
         gracePeriod: 1.2 + Math.random() * 0.6,
         collected: false,
         type,
@@ -110,8 +114,19 @@ export class LootSystem {
 
       item.age += dt;
 
+      // Stagger delay — hold before ejection
+      if (item.delay > 0) {
+        item.delay -= dt;
+        continue;
+      }
+      if (!item.mesh.visible) item.mesh.visible = true;
+
       // Physics (if not grounded)
       if (!item.grounded) {
+        // Air drag — decays horizontal + vertical velocity for a punchy burst
+        const dragFactor = Math.exp(-DRAG * dt);
+        item.vel.x *= dragFactor;
+        item.vel.z *= dragFactor;
         item.vel.y -= GRAVITY * dt;
         item.mesh.position.x += item.vel.x * dt;
         item.mesh.position.y += item.vel.y * dt;
@@ -123,7 +138,7 @@ export class LootSystem {
 
         // Floor check
         const terrainY = this.terrain.getTerrainY(item.mesh.position.x, item.mesh.position.z);
-        const floorY = terrainY + 0.12; // mesh radius
+        const floorY = terrainY + 0.08; // mesh radius
 
         if (item.mesh.position.y <= floorY) {
           item.mesh.position.y = floorY;
