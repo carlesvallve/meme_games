@@ -101,6 +101,7 @@ const ROOM_TEMPLATES: RoomTemplate[] = [
     { category: 'torch_wall', count: 3 },
     { category: 'banner', count: 2 },
     { category: 'pot', count: 2 },
+    { category: 'bookcase_small', count: 1 },
   ]},
   // ── Jail ──
   { name: 'jail', minSize: 3, weight: 2, props: [
@@ -109,6 +110,7 @@ const ROOM_TEMPLATES: RoomTemplate[] = [
     { category: 'pot', count: 2 },
     { category: 'torch_wall', count: 3 },
     { category: 'barrel', count: 1 },
+    { category: 'bookcase_small', count: 1 },
   ]},
   // ── Treasure Room ──
   { name: 'treasure', minSize: 3, weight: 1, props: [
@@ -195,6 +197,7 @@ const ROOM_TEMPLATES: RoomTemplate[] = [
     { category: 'pot', count: 3 },
     { category: 'torch_wall', count: 3 },
     { category: 'chest', count: 1 },
+    { category: 'bookcase_small', count: 1 },
   ]},
   // ── Guard Post ──
   { name: 'guard', minSize: 3, weight: 3, props: [
@@ -212,6 +215,7 @@ const ROOM_TEMPLATES: RoomTemplate[] = [
     { category: 'pot', count: 3 },
     { category: 'torch_wall', count: 2 },
     { category: 'bottle', count: 2 },
+    { category: 'bookcase_small', count: 1 },
   ]},
   // ── Torch Gallery ── (corridors / connector rooms)
   { name: 'gallery', minSize: 3, weight: 2, props: [
@@ -227,6 +231,7 @@ const ROOM_TEMPLATES: RoomTemplate[] = [
     { category: 'torch_wall', count: 2 },
     { category: 'book', count: 2 },
     { category: 'bottle', count: 2 },
+    { category: 'bookcase_small', count: 1 },
   ]},
   // ── Tomb Vault ── (large crypt)
   { name: 'tomb_vault', minSize: 5, weight: 1, props: [
@@ -235,6 +240,7 @@ const ROOM_TEMPLATES: RoomTemplate[] = [
     { category: 'torch_wall', count: 4 },
     { category: 'banner', count: 3 },
     { category: 'chest', count: 1 },
+    { category: 'bookcase_large', count: 2 },
   ]},
   // ── Kitchen ──
   { name: 'kitchen', minSize: 3, weight: 2, props: [
