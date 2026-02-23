@@ -62,7 +62,11 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   terrain.setGridOpacity(useGameStore.getState().gridOpacity);
   let collectibles = new CollectibleSystem(scene, terrain);
   let lootSystem = new LootSystem(scene, terrain);
-  let chestSystem = new ChestSystem(scene, terrain, lootSystem);
+  const usePropChestsOnly = initPreset === 'voxelDungeon';
+  let chestSystem = new ChestSystem(scene, terrain, lootSystem, usePropChestsOnly);
+  if (usePropChestsOnly) {
+    terrain.setPropChestRegistrar((list) => list.forEach(({ position, mesh, entity, openGeo }) => chestSystem.registerPropChest(position, mesh, entity, openGeo)));
+  }
 
   // Speech bubbles
   const speechSystem = new SpeechBubbleSystem();
@@ -104,7 +108,11 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     terrain.setGridOpacity(useGameStore.getState().gridOpacity);
     collectibles = new CollectibleSystem(scene, terrain);
     lootSystem = new LootSystem(scene, terrain);
-    chestSystem = new ChestSystem(scene, terrain, lootSystem);
+    const usePropChestsOnlyRegen = terrainPreset === 'voxelDungeon';
+    chestSystem = new ChestSystem(scene, terrain, lootSystem, usePropChestsOnlyRegen);
+    if (usePropChestsOnlyRegen) {
+      terrain.setPropChestRegistrar((list) => list.forEach(({ position, mesh, entity, openGeo }) => chestSystem.registerPropChest(position, mesh, entity, openGeo)));
+    }
 
     // Re-spawn characters if a character was selected
     if (lastSelectedCharacter) {

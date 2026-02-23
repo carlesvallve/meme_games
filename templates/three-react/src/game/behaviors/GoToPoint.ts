@@ -25,6 +25,7 @@ export class GoToPoint extends Behavior {
   private lastProgressX = 0;
   private lastProgressZ = 0;
   private arrived = false;
+  private tweening = false;
 
   constructor(ctx: BehaviorContext, movementParams: MovementParams, private goalX: number, private goalZ: number, options?: GoToPointBehaviorOptions) {
     super(ctx);
@@ -36,6 +37,25 @@ export class GoToPoint extends Behavior {
     if (this.arrived) {
       agent.updateIdle(dt);
       return 'done';
+    }
+
+    // Tween to exact goal position after reaching arrival threshold
+    if (this.tweening) {
+      const dx = this.goalX - agent.getX();
+      const dz = this.goalZ - agent.getZ();
+      const dist = Math.sqrt(dx * dx + dz * dz);
+      if (dist < 0.01) {
+        this.arrived = true;
+        agent.updateIdle(dt);
+        return 'done';
+      }
+      const mp = this.movementParams;
+      const nx = dx / dist;
+      const nz = dz / dist;
+      // Slow approach speed so it looks like a smooth settle
+      const tweenSpeed = Math.min(mp.speed * 0.5, dist / dt);
+      agent.move(nx, nz, tweenSpeed, mp.stepHeight, mp.capsuleRadius, dt, mp.slopeHeight);
+      return 'running';
     }
 
     // Lazy path computation on first update
@@ -91,9 +111,9 @@ export class GoToPoint extends Behavior {
       this.waypointIndex++;
       this.resetStuck(agent);
       if (this.waypointIndex >= this.waypoints.length) {
-        this.arrived = true;
-        agent.updateIdle(dt);
-        return 'done';
+        // Enter tween phase to settle on exact goal position
+        this.tweening = true;
+        return 'running';
       }
 
       // After arriving at a waypoint, check if the NEXT waypoint is a ladder arrival cell.

@@ -156,6 +156,8 @@ export class Terrain {
   // Door system (only for rooms preset)
   private doorSystem: DoorSystem | null = null;
   private propSystem: DungeonPropSystem | null = null;
+  /** Called when voxel dungeon props are ready; used to register prop chests with ChestSystem */
+  private propChestRegistrar: ((list: { position: THREE.Vector3; mesh: THREE.Mesh; entity: Entity; openGeo?: THREE.BufferGeometry }[]) => void) | null = null;
 
   constructor(scene: THREE.Scene, preset: TerrainPreset = 'scattered', heightmapStyle: HeightmapStyle = 'rolling', palettePick: string = 'random') {
     this.preset = preset;
@@ -1224,8 +1226,38 @@ export class Terrain {
         this.groundSize,
         output.walkMask.openGrid,
         output.walkMask.gridW,
+        output.gridDoors,
       );
+
+      // Register prop debris boxes for physical collision (keyboard movement)
+      const propDebris = this.propSystem.getDebrisBoxes();
+      this.debris.push(...propDebris);
+
+      // Block the single center nav cell for each floor prop so characters can't walk through them.
+      if (this.navGrid && this.propSystem) {
+        const halfWorld = this.groundSize / 2;
+        const propCells = this.propSystem.getPropGridCells();
+        const blocked: { gx: number; gz: number }[] = [];
+        for (const { gx, gz } of propCells) {
+          const wx = -halfWorld + (gx + 0.5) * cellSize;
+          const wz = -halfWorld + (gz + 0.5) * cellSize;
+          const nav = this.navGrid.worldToGrid(wx, wz);
+          blocked.push(nav);
+        }
+        this.navGrid.applyBlockedCells(blocked);
+      }
+
+      // Register interactive prop chests with ChestSystem (voxel dungeon)
+      if (this.propChestRegistrar && this.propSystem) {
+        const chests = this.propSystem.getInteractiveChests();
+        if (chests.length > 0) this.propChestRegistrar(chests);
+      }
     });
+  }
+
+  /** Set callback to run when voxel dungeon prop chests are placed (so Game can register them with ChestSystem). */
+  setPropChestRegistrar(cb: ((list: { position: THREE.Vector3; mesh: THREE.Mesh; entity: Entity; openGeo?: THREE.BufferGeometry }[]) => void) | null): void {
+    this.propChestRegistrar = cb;
   }
 
   private createTerracedDebris(): void {
@@ -1923,67 +1955,76 @@ export class Terrain {
 
       const terrainY = this.getTerrainY(rx, rz, sampleR);
 
+      // Resolve slope collision first, then push out of debris
+      let resultX = rx;
+      let resultZ = rz;
+      let resultY = terrainY;
+
       if (oldX !== undefined && oldZ !== undefined) {
         const mx = rx - oldX;
         const mz = rz - oldZ;
         const moveLen = Math.sqrt(mx * mx + mz * mz);
 
         if (moveLen > 0.0001) {
-          // Sample gradient ahead of movement direction (at the "wall face")
-          // to detect steep slopes before we step onto them
           const aheadX = rx + (mx / moveLen) * eps;
           const aheadZ = rz + (mz / moveLen) * eps;
           const grad = gradientAt(aheadX, aheadZ);
 
-          // Slope is gentle enough → allow
-          if (grad.mag <= maxSlope) {
-            return { x: rx, z: rz, y: terrainY };
-          }
+          if (grad.mag > maxSlope) {
+            const nx = grad.gx / grad.mag;
+            const nz = grad.gz / grad.mag;
+            const dot = (mx / moveLen) * nx + (mz / moveLen) * nz;
+            const absDot = Math.abs(dot);
 
-          // Steep slope: block movement both uphill AND downhill (treat as wall).
-          // Only allow movement perpendicular to the gradient (along the contour).
-          const nx = grad.gx / grad.mag;
-          const nz = grad.gz / grad.mag;
-          const dot = (mx / moveLen) * nx + (mz / moveLen) * nz;
-          const absDot = Math.abs(dot);
+            if (absDot > 0.05) {
+              // Moving into steep slope — slide along contour
+              const slideX = Math.max(-halfBound, Math.min(halfBound, oldX + mx - dot * moveLen * nx));
+              const slideZ = Math.max(-halfBound, Math.min(halfBound, oldZ + mz - dot * moveLen * nz));
+              const slideY = this.getTerrainY(slideX, slideZ, sampleR);
+              const slideGrad = gradientAt(slideX, slideZ);
 
-          if (absDot <= 0.05) {
-            // Moving purely along the contour → allow
-            return { x: rx, z: rz, y: terrainY };
-          }
-
-          // Moving into steep slope (up or down) — slide along contour
-          const slideX = Math.max(-halfBound, Math.min(halfBound, oldX + mx - dot * moveLen * nx));
-          const slideZ = Math.max(-halfBound, Math.min(halfBound, oldZ + mz - dot * moveLen * nz));
-          const slideY = this.getTerrainY(slideX, slideZ, sampleR);
-          const slideGrad = gradientAt(slideX, slideZ);
-
-          if (slideGrad.mag <= maxSlope) {
-            return { x: slideX, z: slideZ, y: slideY };
-          }
-
-          // Check if sliding direction also pushes into a slope (up or down)
-          const smx = slideX - oldX;
-          const smz = slideZ - oldZ;
-          const smLen = Math.sqrt(smx * smx + smz * smz);
-          if (smLen > 0.0001) {
-            const sdot = (smx / smLen) * (slideGrad.gx / slideGrad.mag) +
-                         (smz / smLen) * (slideGrad.gz / slideGrad.mag);
-            if (Math.abs(sdot) <= 0.05) {
-              return { x: slideX, z: slideZ, y: slideY };
+              if (slideGrad.mag <= maxSlope) {
+                resultX = slideX; resultZ = slideZ; resultY = slideY;
+              } else {
+                const smx = slideX - oldX;
+                const smz = slideZ - oldZ;
+                const smLen = Math.sqrt(smx * smx + smz * smz);
+                if (smLen > 0.0001) {
+                  const sdot = (smx / smLen) * (slideGrad.gx / slideGrad.mag) +
+                               (smz / smLen) * (slideGrad.gz / slideGrad.mag);
+                  if (Math.abs(sdot) <= 0.05) {
+                    resultX = slideX; resultZ = slideZ; resultY = slideY;
+                  } else {
+                    // Fully blocked — stay put
+                    resultX = oldX; resultZ = oldZ; resultY = currentY;
+                  }
+                } else {
+                  resultX = oldX; resultZ = oldZ; resultY = currentY;
+                }
+              }
             }
+            // else absDot <= 0.05: moving along contour, allow (resultX/Z already = rx/rz)
           }
-
-          // Fully blocked (e.g. concave corner) — stay put
-          return { x: oldX, z: oldZ, y: currentY };
+          // else gentle slope, allow (resultX/Z already = rx/rz)
         }
       }
 
-      // No old position or no movement — just allow
-      return { x: rx, z: rz, y: terrainY };
+      // Push out of debris (props, doors, etc.)
+      const pushed = this.pushOutOfDebris(resultX, resultZ, currentY, stepHeight, radius);
+      return { x: pushed.x, z: pushed.z, y: resultY };
     }
 
     // Box-based: iterative push-out (static + dynamic debris)
+    ({ x: rx, z: rz } = this.pushOutOfDebris(rx, rz, currentY, stepHeight, radius));
+
+    const terrainY = this.getTerrainY(rx, rz, radius * 0.5);
+    const y = terrainY - currentY <= stepHeight ? terrainY : currentY;
+
+    return { x: rx, z: rz, y };
+  }
+
+  /** Push position out of any debris boxes (static + dynamic) */
+  private pushOutOfDebris(rx: number, rz: number, currentY: number, stepHeight: number, radius: number): { x: number; z: number } {
     const allDebris = this.dynamicDebris.length > 0
       ? [...this.debris, ...this.dynamicDebris]
       : this.debris;
@@ -2040,11 +2081,7 @@ export class Terrain {
         }
       }
     }
-
-    const terrainY = this.getTerrainY(rx, rz, radius * 0.5);
-    const y = terrainY - currentY <= stepHeight ? terrainY : currentY;
-
-    return { x: rx, z: rz, y };
+    return { x: rx, z: rz };
   }
 
   /** Check if point is fully on top of a box surface (not on an edge) */

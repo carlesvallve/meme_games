@@ -4,10 +4,12 @@ import { Layer } from '../game/Entity';
 import type { TerrainPreset } from '../game/Terrain';
 import type { HeightmapStyle } from '../game/TerrainNoise';
 import { palettes } from '../game/ColorPalettes';
+import { getPropCategories } from '../game/VoxDungeonDB';
 
 type ActivePanel = 'player' | 'camera' | 'light' | 'scene' | null;
 
 const TERRAIN_PRESETS: TerrainPreset[] = ['scattered', 'terraced', 'heightmap', 'dungeon', 'rooms', 'voxelDungeon'];
+const PROP_CATEGORIES = getPropCategories().sort();
 const HEIGHTMAP_STYLES: HeightmapStyle[] = ['rolling', 'terraces', 'islands', 'caves'];
 const PALETTE_NAMES = ['random', ...Object.keys(palettes)];
 
@@ -204,6 +206,9 @@ function ScenePanel() {
   const setTileSize = useGameStore((s) => s.setTileSize);
   const resolutionScale = useGameStore((s) => s.resolutionScale);
   const setResolutionScale = useGameStore((s) => s.setResolutionScale);
+  const testProp = useGameStore((s) => s.testProp);
+  const setTestProp = useGameStore((s) => s.setTestProp);
+  const propCategories = PROP_CATEGORIES;
   const remesh = useGameStore((s) => s.onRemesh);
   const randomizePalette = useGameStore((s) => s.onRandomizePalette);
 
@@ -316,6 +321,30 @@ function ScenePanel() {
           <span style={{ color: '#fff', width: 36, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
             {tileSize}m
           </span>
+        </div>
+      )}
+
+      {/* Test Prop dropdown — only for voxelDungeon */}
+      {terrainPreset === 'voxelDungeon' && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+          <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Test Prop</span>
+          <select
+            value={testProp}
+            onChange={(e) => setTestProp(e.target.value)}
+            style={{
+              flex: 1,
+              padding: '3px 6px',
+              background: 'rgba(255,255,255,0.08)',
+              color: '#ccc',
+              border: '1px solid rgba(255,255,255,0.2)',
+              borderRadius: 3,
+            }}
+          >
+            <option value="">All (templates)</option>
+            {propCategories.map((cat) => (
+              <option key={cat} value={cat}>{cat}</option>
+            ))}
+          </select>
         </div>
       )}
 
