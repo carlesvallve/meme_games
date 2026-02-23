@@ -26,7 +26,7 @@ export interface DungeonTileEntry {
 
 // ── Prop types ──
 
-export type PropPlacement = 'corner' | 'wall' | 'center' | 'anywhere';
+export type PropPlacement = 'corner' | 'wall' | 'center' | 'anywhere' | 'wall_mount';
 
 export interface DungeonPropEntry {
   id: string;
@@ -36,8 +36,11 @@ export interface DungeonPropEntry {
   baseHeight: number;
   /** Collision radius (at tileSize=1). */
   radius: number;
-  /** Where in the room this prop prefers to go */
+  /** Where in the room this prop prefers to go.
+   *  'wall_mount' = embedded in wall surface (banners, wall torches), doesn't occupy floor cell. */
   placement: PropPlacement;
+  /** For wall_mount props: Y offset from floor (fraction of wall height, e.g. 0.5 = midway up wall) */
+  mountHeight?: number;
   /** Scales with dungeon tileSize (architectural feel) */
   scalesWithDungeon?: boolean;
   /** Can be destroyed by the player */
@@ -48,6 +51,8 @@ export interface DungeonPropEntry {
   interactive?: boolean;
   /** Snaps flush against wall, facing same direction as wall normal */
   wallAligned?: boolean;
+  /** For chests: path to closed/locked VOX; placement uses this, open uses voxPath */
+  voxPathClosed?: string;
 }
 
 // ── Paths ──
@@ -126,36 +131,36 @@ const ALL_PROPS: DungeonPropEntry[] = [
   // ── Light sources ──
 
   // Ground torches (Dungeon A)
-  { id: 'ground_torch_a_lit',  category: 'torch_ground', voxPath: `${P}/Torch/Ground%20Torch%20A%20(Dungeon%20A)/VOX/ground_torch_a_a_lit.vox`,  baseHeight: 0.6, radius: 0.15, placement: 'corner', lightSource: true },
-  { id: 'ground_torch_b_lit',  category: 'torch_ground', voxPath: `${P}/Torch/Ground%20Torch%20A%20(Dungeon%20A)/VOX/ground_torch_a_b_lit.vox`,  baseHeight: 0.6, radius: 0.15, placement: 'corner', lightSource: true },
+  { id: 'ground_torch_a_lit',  category: 'torch_ground', voxPath: `${P}/Torch/Ground%20Torch%20A%20(Dungeon%20A)/VOX/ground_torch_a_a_lit.vox`,  baseHeight: 0.45, radius: 0.1, placement: 'corner', lightSource: true },
+  { id: 'ground_torch_b_lit',  category: 'torch_ground', voxPath: `${P}/Torch/Ground%20Torch%20A%20(Dungeon%20A)/VOX/ground_torch_a_b_lit.vox`,  baseHeight: 0.45, radius: 0.1, placement: 'corner', lightSource: true },
 
-  // Wall torches
-  { id: 'wall_torch_a', category: 'torch_wall', voxPath: `${P}/Torch/Wall%20Torch%20A%20(Wood)/VOX/wall_torch_a_a.vox`, baseHeight: 0.4, radius: 0.1, placement: 'wall', lightSource: true },
-  { id: 'wall_torch_b', category: 'torch_wall', voxPath: `${P}/Torch/Wall%20Torch%20A%20(Wood)/VOX/wall_torch_a_b.vox`, baseHeight: 0.4, radius: 0.1, placement: 'wall', lightSource: true },
+  // Wall torches — mounted on wall surface
+  { id: 'wall_torch_a', category: 'torch_wall', voxPath: `${P}/Torch/Wall%20Torch%20A%20(Wood)/VOX/wall_torch_a_a.vox`, baseHeight: 0.4, radius: 0.1, placement: 'wall_mount', mountHeight: 0.495, lightSource: true, scalesWithDungeon: true, wallAligned: true },
+  { id: 'wall_torch_b', category: 'torch_wall', voxPath: `${P}/Torch/Wall%20Torch%20A%20(Wood)/VOX/wall_torch_a_b.vox`, baseHeight: 0.4, radius: 0.1, placement: 'wall_mount', mountHeight: 0.495, lightSource: true, scalesWithDungeon: true, wallAligned: true },
 
   // Large candelabrum
-  { id: 'candelabrum_large_a', category: 'candelabrum', voxPath: `${P}/Candelabrum/Large%20Candelabrum%20A%20(Metal)/VOX/large_candelabrum_a.vox`, baseHeight: 0.8, radius: 0.15, placement: 'corner', lightSource: true },
-  { id: 'candelabrum_large_b', category: 'candelabrum', voxPath: `${P}/Candelabrum/Large%20Candelabrum%20C%20(Gold)/VOX/large_candelabrum_c.vox`,  baseHeight: 0.8, radius: 0.15, placement: 'corner', lightSource: true },
+  { id: 'candelabrum_large_a', category: 'candelabrum', voxPath: `${P}/Candelabrum/Large%20Candelabrum%20A%20(Metal)/VOX/large_candelabrum_a.vox`, baseHeight: 0.55, radius: 0.1, placement: 'corner', lightSource: true },
+  { id: 'candelabrum_large_b', category: 'candelabrum', voxPath: `${P}/Candelabrum/Large%20Candelabrum%20C%20(Gold)/VOX/large_candelabrum_c.vox`,  baseHeight: 0.55, radius: 0.1, placement: 'corner', lightSource: true },
 
   // Small candelabrum (table-top)
-  { id: 'candelabrum_small_a', category: 'candelabrum_small', voxPath: `${P}/Candelabrum/Small%20Candelabrum%20A%20(Metal)/VOX/small_candelabrum_a.vox`, baseHeight: 0.35, radius: 0.1, placement: 'center', lightSource: true },
+  { id: 'candelabrum_small_a', category: 'candelabrum_small', voxPath: `${P}/Candelabrum/Small%20Candelabrum%20A%20(Metal)/VOX/small_candelabrum_a.vox`, baseHeight: 0.25, radius: 0.08, placement: 'center', lightSource: true },
 
   // ── Destroyable ──
 
   // Barrels
-  { id: 'barrel_a', category: 'barrel', voxPath: `${P}/Barrel/Barrel%20A%20(Wood)/VOX/barrel_a_closed.vox`,     baseHeight: 0.5, radius: 0.2, placement: 'wall', destroyable: true },
-  { id: 'barrel_b', category: 'barrel', voxPath: `${P}/Barrel/Barrel%20B%20(Dark%20Wood)/VOX/barrel_b_closed.vox`, baseHeight: 0.5, radius: 0.2, placement: 'wall', destroyable: true },
-  { id: 'barrel_tnt', category: 'barrel', voxPath: `${P}/Barrel/TNT%20Barrel/VOX/tnt_barrel_closed.vox`,        baseHeight: 0.5, radius: 0.2, placement: 'wall', destroyable: true },
+  { id: 'barrel_a', category: 'barrel', voxPath: `${P}/Barrel/Barrel%20A%20(Wood)/VOX/barrel_a_closed.vox`,     baseHeight: 0.35, radius: 0.15, placement: 'wall', destroyable: true },
+  { id: 'barrel_b', category: 'barrel', voxPath: `${P}/Barrel/Barrel%20B%20(Dark%20Wood)/VOX/barrel_b_closed.vox`, baseHeight: 0.35, radius: 0.15, placement: 'wall', destroyable: true },
+  { id: 'barrel_tnt', category: 'barrel', voxPath: `${P}/Barrel/TNT%20Barrel/VOX/tnt_barrel_closed.vox`,        baseHeight: 0.35, radius: 0.15, placement: 'wall', destroyable: true },
 
   // Boxes / crates
-  { id: 'box_a', category: 'box', voxPath: `${P}/Box/Box%20A%20(Wood)/VOX/box_a_a.vox`,           baseHeight: 0.4, radius: 0.2, placement: 'wall', destroyable: true },
-  { id: 'box_b', category: 'box', voxPath: `${P}/Box/Box%20B%20(Dark%20Wood)/VOX/box_b_a.vox`,     baseHeight: 0.4, radius: 0.2, placement: 'wall', destroyable: true },
-  { id: 'box_c', category: 'box', voxPath: `${P}/Box/Box%20C%20(Darkest%20Wood)/VOX/box_c_a.vox`, baseHeight: 0.4, radius: 0.2, placement: 'wall', destroyable: true },
+  { id: 'box_a', category: 'box', voxPath: `${P}/Box/Box%20A%20(Wood)/VOX/box_a_a.vox`,           baseHeight: 0.28, radius: 0.15, placement: 'wall', destroyable: true },
+  { id: 'box_b', category: 'box', voxPath: `${P}/Box/Box%20B%20(Dark%20Wood)/VOX/box_b_a.vox`,     baseHeight: 0.28, radius: 0.15, placement: 'wall', destroyable: true },
+  { id: 'box_c', category: 'box', voxPath: `${P}/Box/Box%20C%20(Darkest%20Wood)/VOX/box_c_a.vox`, baseHeight: 0.28, radius: 0.15, placement: 'wall', destroyable: true },
 
   // Pots
-  { id: 'pot_a', category: 'pot', voxPath: `${P}/Pot/Pot%20A%20(Clay)/VOX/pot_a.vox`,       baseHeight: 0.3, radius: 0.12, placement: 'corner', destroyable: true },
-  { id: 'pot_b', category: 'pot', voxPath: `${P}/Pot/Pot%20B%20(Dark%20Clay)/VOX/pot_b.vox`, baseHeight: 0.3, radius: 0.12, placement: 'corner', destroyable: true },
-  { id: 'pot_d', category: 'pot', voxPath: `${P}/Pot/Pot%20D%20(Metal)/VOX/pot_d.vox`,       baseHeight: 0.3, radius: 0.12, placement: 'anywhere', destroyable: true },
+  { id: 'pot_a', category: 'pot', voxPath: `${P}/Pot/Pot%20A%20(Clay)/VOX/pot_a.vox`,       baseHeight: 0.25, radius: 0.08, placement: 'wall', destroyable: true },
+  { id: 'pot_b', category: 'pot', voxPath: `${P}/Pot/Pot%20B%20(Dark%20Clay)/VOX/pot_b.vox`, baseHeight: 0.25, radius: 0.08, placement: 'wall', destroyable: true },
+  { id: 'pot_d', category: 'pot', voxPath: `${P}/Pot/Pot%20D%20(Metal)/VOX/pot_d.vox`,       baseHeight: 0.25, radius: 0.08, placement: 'wall', destroyable: true },
 
   // ── Scales with dungeon (architectural) ──
 
@@ -164,10 +169,10 @@ const ALL_PROPS: DungeonPropEntry[] = [
   { id: 'altar_b', category: 'altar', voxPath: `${P}/Altar/Altar%20A%20(Dungeon%20A)/VOX/altar_a_b.vox`, baseHeight: 0.6, radius: 0.3, placement: 'center', scalesWithDungeon: true, interactive: true },
 
   // Banners
-  { id: 'banner_red',    category: 'banner', voxPath: `${P}/Banner/Banner%20A%20(U-Shaped)/VOX/banner_a_red.vox`,    baseHeight: 0.8, radius: 0.1, placement: 'wall', scalesWithDungeon: true, wallAligned: true },
-  { id: 'banner_blue',   category: 'banner', voxPath: `${P}/Banner/Banner%20A%20(U-Shaped)/VOX/banner_a_blue.vox`,   baseHeight: 0.8, radius: 0.1, placement: 'wall', scalesWithDungeon: true, wallAligned: true },
-  { id: 'banner_green',  category: 'banner', voxPath: `${P}/Banner/Banner%20A%20(U-Shaped)/VOX/banner_a_green.vox`,  baseHeight: 0.8, radius: 0.1, placement: 'wall', scalesWithDungeon: true, wallAligned: true },
-  { id: 'banner_yellow', category: 'banner', voxPath: `${P}/Banner/Banner%20A%20(U-Shaped)/VOX/banner_a_yellow.vox`, baseHeight: 0.8, radius: 0.1, placement: 'wall', scalesWithDungeon: true, wallAligned: true },
+  { id: 'banner_red',    category: 'banner', voxPath: `${P}/Banner/Banner%20A%20(U-Shaped)/VOX/banner_a_red.vox`,    baseHeight: 0.8, radius: 0.1, placement: 'wall_mount', mountHeight: 0.395, scalesWithDungeon: true, wallAligned: true },
+  { id: 'banner_blue',   category: 'banner', voxPath: `${P}/Banner/Banner%20A%20(U-Shaped)/VOX/banner_a_blue.vox`,   baseHeight: 0.8, radius: 0.1, placement: 'wall_mount', mountHeight: 0.395, scalesWithDungeon: true, wallAligned: true },
+  { id: 'banner_green',  category: 'banner', voxPath: `${P}/Banner/Banner%20A%20(U-Shaped)/VOX/banner_a_green.vox`,  baseHeight: 0.8, radius: 0.1, placement: 'wall_mount', mountHeight: 0.395, scalesWithDungeon: true, wallAligned: true },
+  { id: 'banner_yellow', category: 'banner', voxPath: `${P}/Banner/Banner%20A%20(U-Shaped)/VOX/banner_a_yellow.vox`, baseHeight: 0.8, radius: 0.1, placement: 'wall_mount', mountHeight: 0.395, scalesWithDungeon: true, wallAligned: true },
 
   // Large bookcases
   { id: 'bookcase_large_a', category: 'bookcase_large', voxPath: `${P}/Bookcase/Large%20Bookcase%20A%20(Wood)/VOX/large_bookcase_a.vox`, baseHeight: 0.9, radius: 0.3, placement: 'wall', scalesWithDungeon: true, wallAligned: true },
@@ -176,8 +181,8 @@ const ALL_PROPS: DungeonPropEntry[] = [
   { id: 'bookcase_small_a', category: 'bookcase_small', voxPath: `${P}/Bookcase/Small%20Bookcase%20A%20(Wood)/VOX/small_bookcase_a.vox`, baseHeight: 0.6, radius: 0.25, placement: 'wall', scalesWithDungeon: true, wallAligned: true },
 
   // Tombs
-  { id: 'tomb_a', category: 'tomb', voxPath: `${P}/Tomb/Tomb%20A%20(Dungeon%20A)/VOX/tomb_a_a.vox`, baseHeight: 0.5, radius: 0.3, placement: 'center', scalesWithDungeon: true },
-  { id: 'tomb_b', category: 'tomb', voxPath: `${P}/Tomb/Tomb%20A%20(Dungeon%20A)/VOX/tomb_a_b.vox`, baseHeight: 0.5, radius: 0.3, placement: 'center', scalesWithDungeon: true },
+  { id: 'tomb_a', category: 'tomb', voxPath: `${P}/Tomb/Tomb%20A%20(Dungeon%20A)/VOX/tomb_a_a.vox`, baseHeight: 0.3, radius: 0.2, placement: 'center', scalesWithDungeon: true },
+  { id: 'tomb_b', category: 'tomb', voxPath: `${P}/Tomb/Tomb%20A%20(Dungeon%20A)/VOX/tomb_a_b.vox`, baseHeight: 0.3, radius: 0.2, placement: 'center', scalesWithDungeon: true },
 
   // Gates
   { id: 'gate_a', category: 'gate', voxPath: `${P}/Gate/Gate%20A%20(Metal)/VOX/gate_a.vox`, baseHeight: 1.0, radius: 0.3, placement: 'wall', scalesWithDungeon: true, interactive: true },
@@ -187,25 +192,25 @@ const ALL_PROPS: DungeonPropEntry[] = [
   { id: 'spike_b', category: 'trap_spike', voxPath: `${P}/Trap/Spike/Spike%20A%20(Metal)/VOX/spike_a_b.vox`, baseHeight: 0.15, radius: 0.3, placement: 'center', scalesWithDungeon: true, interactive: true },
 
   // Wall grates
-  { id: 'wall_grate_a', category: 'wall_grate', voxPath: `${P}/Wall%20Grate/Wall%20Grate%20A%20(Metal)/VOX/wall_grate_a.vox`, baseHeight: 0.6, radius: 0.1, placement: 'wall', scalesWithDungeon: true },
+  { id: 'wall_grate_a', category: 'wall_grate', voxPath: `${P}/Wall%20Grate/Wall%20Grate%20A%20(Metal)/VOX/wall_grate_a.vox`, baseHeight: 0.6, radius: 0.1, placement: 'wall_mount', mountHeight: 0.395, scalesWithDungeon: true, wallAligned: true },
 
   // ── Regular furniture (fixed scale) ──
 
   // Small tables
-  { id: 'table_small_a', category: 'table_small', voxPath: `${P}/Table/Small%20Table%20A%20(Wood)/VOX/small_table_a.vox`, baseHeight: 0.45, radius: 0.25, placement: 'center' },
+  { id: 'table_small_a', category: 'table_small', voxPath: `${P}/Table/Small%20Table%20A%20(Wood)/VOX/small_table_a.vox`, baseHeight: 0.2, radius: 0.15, placement: 'center' },
 
   // Large tables
-  { id: 'table_large_a', category: 'table_large', voxPath: `${P}/Table/Large%20Table%20A%20(Wood)/VOX/large_table_a.vox`, baseHeight: 0.45, radius: 0.35, placement: 'center' },
+  { id: 'table_large_a', category: 'table_large', voxPath: `${P}/Table/Large%20Table%20A%20(Wood)/VOX/large_table_a.vox`, baseHeight: 0.22, radius: 0.2, placement: 'center' },
 
   // Chairs
-  { id: 'chair_a', category: 'chair', voxPath: `${P}/Chair/Chair%20A%20(Wood)/VOX/chair_a.vox`, baseHeight: 0.45, radius: 0.15, placement: 'center' },
+  { id: 'chair_a', category: 'chair', voxPath: `${P}/Chair/Chair%20A%20(Wood)/VOX/chair_a.vox`, baseHeight: 0.3, radius: 0.1, placement: 'center' },
 
   // Small benches
-  { id: 'bench_small_a', category: 'bench', voxPath: `${P}/Bench/Small%20Bench%20A%20(Wood)/VOX/small_bench_a.vox`, baseHeight: 0.35, radius: 0.2, placement: 'wall' },
+  { id: 'bench_small_a', category: 'bench', voxPath: `${P}/Bench/Small%20Bench%20A%20(Wood)/VOX/small_bench_a.vox`, baseHeight: 0.25, radius: 0.15, placement: 'wall' },
 
-  // Treasure chests
-  { id: 'chest_a', category: 'chest', voxPath: `${P}/Treasure%20Chests/Treasure%20Chest%20A%20(Wood)/VOX/treasure_chest_a_unlocked.vox`, baseHeight: 0.3, radius: 0.2, placement: 'wall', interactive: true },
-  { id: 'chest_d', category: 'chest', voxPath: `${P}/Treasure%20Chests/Treasure%20Chest%20D%20(Gold)/VOX/treasure_chest_d_unlocked.vox`, baseHeight: 0.3, radius: 0.2, placement: 'wall', interactive: true },
+  // Treasure chests: closed for placement, open (voxPath) when interacted; fixed scale, face into room
+  { id: 'chest_a', category: 'chest', voxPath: `${P}/Treasure%20Chests/Treasure%20Chest%20A%20(Wood)/VOX/treasure_chest_a_unlocked.vox`, voxPathClosed: `${P}/Treasure%20Chests/Treasure%20Chest%20A%20(Wood)/VOX/treasure_chest_a_locked.vox`, baseHeight: 0.3, radius: 0.18, placement: 'wall', wallAligned: true, interactive: true },
+  { id: 'chest_d', category: 'chest', voxPath: `${P}/Treasure%20Chests/Treasure%20Chest%20D%20(Gold)/VOX/treasure_chest_d_unlocked.vox`, voxPathClosed: `${P}/Treasure%20Chests/Treasure%20Chest%20D%20(Gold)/VOX/treasure_chest_d_locked.vox`, baseHeight: 0.3, radius: 0.18, placement: 'wall', wallAligned: true, interactive: true },
 
   // Books (tiny, table-top decoration)
   { id: 'book_a', category: 'book', voxPath: `${P}/Book/Book%20A%20(Red)/VOX/book_a.vox`,     baseHeight: 0.1, radius: 0.05, placement: 'anywhere' },
@@ -225,7 +230,7 @@ const ALL_PROPS: DungeonPropEntry[] = [
   { id: 'potion_c', category: 'potion', voxPath: `${P}/Potion/Potion%20C%20(Blue)/VOX/potion_c.vox`,    baseHeight: 0.1, radius: 0.04, placement: 'anywhere' },
 
   // Signpost
-  { id: 'signpost_a', category: 'signpost', voxPath: `${P}/Signpost/Signpost%20A%20(Wood)/VOX/signpost_a.vox`, baseHeight: 0.6, radius: 0.1, placement: 'anywhere' },
+  { id: 'signpost_a', category: 'signpost', voxPath: `${P}/Signpost/Signpost%20A%20(Wood)/VOX/signpost_a.vox`, baseHeight: 0.4, radius: 0.08, placement: 'anywhere' },
 ];
 
 // ── Tile grouped registry ──

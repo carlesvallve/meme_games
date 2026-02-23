@@ -76,6 +76,7 @@ export const DEFAULT_SCENE_SETTINGS = {
   tileSize: 1.5,
   gridOpacity: 0.25,
   resolutionScale: 1,
+  testProp: '' as string,  // empty = normal templates, category name = spawn only that
 };
 
 // ── localStorage persistence ──────────────────────────────────────────
@@ -96,6 +97,7 @@ interface SavedSettings {
   tileSize?: number;
   gridOpacity?: number;
   resolutionScale?: number;
+  testProp?: string;
   particleToggles?: ParticleToggles;
 }
 
@@ -123,6 +125,7 @@ function saveSettings(): void {
     tileSize: s.tileSize,
     gridOpacity: s.gridOpacity,
     resolutionScale: s.resolutionScale,
+    testProp: s.testProp,
     particleToggles: s.particleToggles,
   };
   try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(data)); } catch { /* ignore */ }
@@ -159,6 +162,7 @@ interface GameStore {
   tileSize: number;
   gridOpacity: number;
   resolutionScale: number;
+  testProp: string;
 
   setPhase: (phase: GameStore['phase']) => void;
   setScore: (score: number) => void;
@@ -186,6 +190,7 @@ interface GameStore {
   setTileSize: (size: number) => void;
   setGridOpacity: (gridOpacity: number) => void;
   setResolutionScale: (scale: number) => void;
+  setTestProp: (prop: string) => void;
 
   activeCharacterName: string | null;
   activeCharacterColor: string | null;
@@ -236,6 +241,7 @@ export const useGameStore = create<GameStore>((set) => ({
   tileSize: saved.tileSize ?? DEFAULT_SCENE_SETTINGS.tileSize,
   gridOpacity: saved.gridOpacity ?? DEFAULT_SCENE_SETTINGS.gridOpacity,
   resolutionScale: saved.resolutionScale ?? DEFAULT_SCENE_SETTINGS.resolutionScale,
+  testProp: saved.testProp ?? DEFAULT_SCENE_SETTINGS.testProp,
 
   setPhase: (phase) => set({ phase }),
   setScore: (score) => set({ score }),
@@ -275,6 +281,7 @@ export const useGameStore = create<GameStore>((set) => ({
   setTileSize: (tileSize) => set({ tileSize }),
   setGridOpacity: (gridOpacity) => set({ gridOpacity }),
   setResolutionScale: (resolutionScale) => set({ resolutionScale }),
+  setTestProp: (testProp) => set({ testProp }),
 
   activeCharacterName: null,
   activeCharacterColor: null,

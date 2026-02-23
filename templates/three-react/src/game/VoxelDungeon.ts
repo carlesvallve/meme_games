@@ -225,6 +225,26 @@ export async function loadVoxelDungeonVisuals(
     }
   }
 
+  // ── Pass 3: Nav-cell grid overlay ──
+  // Full-coverage GridHelper matching nav cell size, sitting on the floor surface.
+  {
+    const gridY = cellSize / 15 + 0.01;
+    let navN = Math.max(1, Math.round(cellSize / 0.5));
+    if (navN > 1 && navN % 2 === 0) navN++;
+    const navSize = cellSize / navN;
+    const divisions = Math.round(groundSize / navSize);
+
+    const grid = new THREE.GridHelper(groundSize, divisions, 0x000000, 0x000000);
+    grid.position.y = gridY;
+    const mats = Array.isArray(grid.material) ? grid.material : [grid.material];
+    for (const mat of mats) {
+      mat.transparent = true;
+      mat.opacity = 0.9;
+      mat.depthWrite = false;
+    }
+    group.add(grid);
+  }
+
   console.log(`[VoxelDungeon] ${groundCount} ground + ${wallCount} wall tiles`);
 }
 

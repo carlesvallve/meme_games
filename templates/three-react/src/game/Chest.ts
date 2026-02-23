@@ -14,6 +14,8 @@ interface ChestObj {
   fadeTimer: number;      // starts after lid fully open
   removed: boolean;
   baseY: number;
+  /** Prop chest (voxel dungeon): mesh + parent for removal, or openGeo for swap-to-open */
+  propRef?: { mesh: THREE.Mesh; parent: THREE.Object3D; openGeo?: THREE.BufferGeometry };
 }
 
 // Palette indices
@@ -78,7 +80,7 @@ export class ChestSystem {
   private readonly scene: THREE.Scene;
   private readonly terrain: Terrain;
   private readonly lootSystem: LootSystem;
-  private readonly count = 8;
+  private readonly count: number;
   private readonly interactDist = 1.2;
   private readonly openSpeed = 3; // 1/seconds to fully open
 
@@ -88,10 +90,11 @@ export class ChestSystem {
   private readonly fadeDuration = 0.3; // seconds to fade out
   private material: THREE.MeshStandardMaterial;
 
-  constructor(scene: THREE.Scene, terrain: Terrain, lootSystem: LootSystem) {
+  constructor(scene: THREE.Scene, terrain: Terrain, lootSystem: LootSystem, usePropChestsOnly = false) {
     this.scene = scene;
     this.terrain = terrain;
     this.lootSystem = lootSystem;
+    this.count = usePropChestsOnly ? 0 : 8;
 
     this.bodyGeo = buildVoxelGeometry(buildChestBodyModel(), chestPalette, VOXEL_SCALE);
     this.lidGeo = buildVoxelGeometry(buildChestLidModel(), chestPalette, VOXEL_SCALE);
@@ -104,6 +107,27 @@ export class ChestSystem {
     for (let i = 0; i < this.count; i++) {
       this.spawnChest();
     }
+  }
+
+  /** Register a chest placed by DungeonPropSystem (voxel dungeon). Closed mesh → swap to openGeo on interact, spawn loot. */
+  registerPropChest(position: THREE.Vector3, mesh: THREE.Mesh, entity: Entity, openGeo?: THREE.BufferGeometry): void {
+    const group = new THREE.Group();
+    group.position.copy(position);
+    const lidPivot = new THREE.Object3D();
+    group.add(lidPivot);
+    const parent = mesh.parent;
+    if (!parent) return;
+    this.chests.push({
+      group,
+      entity,
+      opened: false,
+      openTimer: 0,
+      lidPivot,
+      fadeTimer: 0,
+      removed: false,
+      baseY: position.y,
+      propRef: { mesh, parent, openGeo },
+    });
   }
 
   private readonly spawnClearance = 1.2;
@@ -168,7 +192,14 @@ export class ChestSystem {
 
       // Animate lid if opening
       if (chest.opened) {
+        // Prop chests (voxel dungeon): geometry already swapped on open, just stay there
+        if (chest.propRef) {
+          chest.removed = true;
+          continue;
+        }
+
         if (chest.openTimer < 1) {
+          // Standard chest: animate lid pivot
           chest.openTimer = Math.min(1, chest.openTimer + dt * this.openSpeed);
           const t = 1 - Math.pow(1 - chest.openTimer, 3);
           chest.lidPivot.rotation.x = -t * 1.7;
@@ -186,7 +217,6 @@ export class ChestSystem {
             chest.group.traverse((child) => {
               if (child instanceof THREE.Mesh) {
                 if (!child.material.transparent) {
-                  // Clone material for this chest so we don't affect others
                   child.material = child.material.clone();
                   child.material.transparent = true;
                 }
@@ -205,8 +235,9 @@ export class ChestSystem {
       }
 
       // Check player proximity (XZ distance) and elevation
-      const dx = playerPos.x - chest.group.position.x;
-      const dz = playerPos.z - chest.group.position.z;
+      const chestPos = chest.propRef ? chest.propRef.mesh.position : chest.group.position;
+      const dx = playerPos.x - chestPos.x;
+      const dz = playerPos.z - chestPos.z;
       const dy = Math.abs(playerPos.y - chest.baseY);
       const dist = Math.sqrt(dx * dx + dz * dz);
 
@@ -216,7 +247,15 @@ export class ChestSystem {
         opened++;
 
         // Spawn loot at chest position
-        this.lootSystem.spawnLoot(chest.group.position);
+        const lootPos = chest.propRef ? chest.propRef.mesh.position.clone() : chest.group.position;
+        this.lootSystem.spawnLoot(lootPos);
+
+        // Prop chest (voxel dungeon): swap to open geometry immediately
+        if (chest.propRef?.openGeo) {
+          const { mesh, openGeo } = chest.propRef;
+          if (mesh.geometry) mesh.geometry.dispose();
+          mesh.geometry = openGeo;
+        }
       }
     }
 
@@ -225,8 +264,10 @@ export class ChestSystem {
 
   dispose(): void {
     for (const chest of this.chests) {
-      chest.entity.destroy();
-      this.scene.remove(chest.group);
+      if (!chest.removed) {
+        chest.entity.destroy();
+        this.scene.remove(chest.group);
+      }
     }
     this.chests.length = 0;
     this.bodyGeo.dispose();

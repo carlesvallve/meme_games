@@ -295,6 +295,55 @@ export class NavGrid {
     }
   }
 
+  /**
+   * Block specific nav cells (e.g. cells containing voxel props).
+   * Recomputes passability and spawn region.
+   */
+  applyBlockedCells(cells: ReadonlyArray<{ gx: number; gz: number }>): void {
+    const { width, height } = this;
+    for (const { gx, gz } of cells) {
+      if (gx < 0 || gx >= width || gz < 0 || gz >= height) continue;
+      const cell = this.cells[gz * width + gx];
+      if (cell) {
+        cell.blocked = true;
+        cell.passable = 0;
+      }
+    }
+
+    // Recompute passability (neighbors may have lost a direction)
+    for (let gz = 0; gz < height; gz++) {
+      for (let gx = 0; gx < width; gx++) {
+        const cell = this.cells[gz * width + gx];
+        if (cell.blocked) continue;
+        let mask = 0;
+        for (let dir = 0; dir < 8; dir++) {
+          const ngx = gx + DIR_DGX[dir];
+          const ngz = gz + DIR_DGZ[dir];
+          if (ngx < 0 || ngx >= width || ngz < 0 || ngz >= height) continue;
+          const neighbor = this.cells[ngz * width + ngx];
+          if (neighbor.blocked) continue;
+          if (Math.abs(cell.surfaceHeight - neighbor.surfaceHeight) > this.stepHeight) continue;
+          if (dir % 2 === 1) {
+            const [c1, c2] = DIAGONAL_CARDINALS[dir];
+            const n1gx = gx + DIR_DGX[c1], n1gz = gz + DIR_DGZ[c1];
+            const n2gx = gx + DIR_DGX[c2], n2gz = gz + DIR_DGZ[c2];
+            if (n1gx < 0 || n1gx >= width || n1gz < 0 || n1gz >= height) continue;
+            if (n2gx < 0 || n2gx >= width || n2gz < 0 || n2gz >= height) continue;
+            const adj1 = this.cells[n1gz * width + n1gx];
+            const adj2 = this.cells[n2gz * width + n2gx];
+            if (adj1.blocked || adj2.blocked) continue;
+            if (Math.abs(cell.surfaceHeight - adj1.surfaceHeight) > this.stepHeight) continue;
+            if (Math.abs(cell.surfaceHeight - adj2.surfaceHeight) > this.stepHeight) continue;
+          }
+          mask |= 1 << dir;
+        }
+        cell.passable = mask;
+      }
+    }
+
+    this.bakeSpawnRegion();
+  }
+
   /** Return the world position of a random cell in the spawn region, or null if none. */
   getRandomSpawnCell(): { x: number; z: number; surfaceHeight: number } | null {
     if (!this.regionLabels || this.spawnRegionLabel < 0) return null;
