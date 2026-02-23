@@ -266,14 +266,31 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     pointerNDC.y = -(clientY / window.innerHeight) * 2 + 1;
     raycaster.setFromCamera(pointerNDC, cam.camera);
 
-    const terrainMesh = terrain.getTerrainMesh();
     let hitPoint: THREE.Vector3 | null = null;
 
-    if (terrainMesh) {
-      const hits = raycaster.intersectObject(terrainMesh, false);
-      if (hits.length > 0) hitPoint = hits[0].point;
+    // Box meshes first (scattered/terraced) — single recursive call on the group
+    const boxGroup = terrain.getBoxGroup();
+    if (boxGroup.children.length > 0) {
+      const boxHits = raycaster.intersectObject(boxGroup, true);
+      // Skip LineSegments (grid overlays), only accept Mesh hits
+      for (const h of boxHits) {
+        if ((h.object as THREE.Mesh).isMesh && h.object.type === 'Mesh') {
+          hitPoint = h.point;
+          break;
+        }
+      }
     }
 
+    // Terrain surface mesh (heightmap or floor plane) — only if no box hit
+    if (!hitPoint) {
+      const terrainMesh = terrain.getTerrainMesh();
+      if (terrainMesh) {
+        const hits = raycaster.intersectObject(terrainMesh, false);
+        if (hits.length > 0) hitPoint = hits[0].point;
+      }
+    }
+
+    // Fallback: flat y=0 plane
     if (!hitPoint) {
       const flatPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
       if (raycaster.ray.intersectPlane(flatPlane, _planeHit)) {

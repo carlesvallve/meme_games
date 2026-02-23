@@ -114,6 +114,7 @@ export class Terrain {
   readonly group = new THREE.Group();
   private debris: DebrisBox[] = [];
   private debrisEntities: Entity[] = [];
+  private boxGroup = new THREE.Group(); // visible box meshes for click raycast
   private readonly groundSize = 50;
   readonly preset: TerrainPreset;
   private readonly heightmapStyle: HeightmapStyle;
@@ -174,6 +175,7 @@ export class Terrain {
     if (preset !== 'heightmap' && preset !== 'voxelDungeon') {
       this.createGridLines();
     }
+    this.group.add(this.boxGroup);
     this.createDebris();
     scene.add(this.group);
   }
@@ -1466,7 +1468,7 @@ export class Terrain {
     mesh.position.set(x, h / 2, z);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
-    this.group.add(mesh);
+    this.boxGroup.add(mesh);
 
     const entity = new Entity(mesh, {
       layer: Layer.Architecture,
@@ -1477,7 +1479,7 @@ export class Terrain {
 
     const gridLines = this.createBoxGrid(w, h, d, baseColor);
     gridLines.position.copy(mesh.position);
-    this.group.add(gridLines);
+    this.boxGroup.add(gridLines);
 
     this.debris.push({ x, z, halfW: hw, halfD: hd, height: h });
     return true;
@@ -1512,7 +1514,7 @@ export class Terrain {
     mesh.position.set(x, 0, z);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
-    this.group.add(mesh);
+    this.boxGroup.add(mesh);
 
     const entity = new Entity(mesh, {
       layer: Layer.Architecture,
@@ -1523,7 +1525,7 @@ export class Terrain {
 
     const gridLines = this.createSlopeGrid(w, h, d, slopeDir, baseColor);
     gridLines.position.copy(mesh.position);
-    this.group.add(gridLines);
+    this.boxGroup.add(gridLines);
 
     this.debris.push({ x, z, halfW: hw, halfD: hd, height: h, slopeDir });
     return true;
@@ -1897,10 +1899,16 @@ export class Terrain {
     return this.doorSystem;
   }
 
-  /** The raycastable terrain surface mesh (heightmap or ground plane). */
+  /** The raycastable terrain surface mesh (heightmap, floor plane, or water). */
   getTerrainMesh(): THREE.Mesh | null {
-    return this.heightmapMesh;
+    return this.heightmapMesh ?? this.waterMesh;
   }
+
+  /** Group containing visible box/ramp meshes (scattered/terraced). Empty for other modes. */
+  getBoxGroup(): THREE.Group {
+    return this.boxGroup;
+  }
+
 
   /** Get the ground/debris height at a point, optionally expanded by a radius */
   getTerrainY(x: number, z: number, radius = 0): number {
