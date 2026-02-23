@@ -111,6 +111,16 @@ export class GoToPoint extends Behavior {
       this.waypointIndex++;
       this.resetStuck(agent);
       if (this.waypointIndex >= this.waypoints.length) {
+        // Skip tweening if the goal cell is adjacent to any blocked cell —
+        // tweening toward the exact position would fight wall/debris collision.
+        const navGrid = this.ctx.navGrid;
+        const { gx: goalGx, gz: goalGz } = navGrid.worldToGrid(this.goalX, this.goalZ);
+        const perfectFit = navGrid.hasBlockedNeighbor(goalGx, goalGz);
+        if (perfectFit) {
+          this.arrived = true;
+          agent.updateIdle(dt);
+          return 'done';
+        }
         // Enter tween phase to settle on exact goal position
         this.tweening = true;
         return 'running';

@@ -15,7 +15,7 @@ import { useGameStore } from '../store';
 import { randomPalette, palettes } from './ColorPalettes';
 import type { TerrainPalette } from './ColorPalettes';
 
-const HALF = 0.5;
+const HALF = 0.25;
 function snapHalf(v: number): number { return Math.max(HALF, Math.round(v / HALF) * HALF); }
 /** Snap position so that box edges align to HALF boundaries given its half-size */
 function snapPos(v: number, halfSize: number): number {
@@ -50,12 +50,12 @@ const PRESET_CONFIGS: Record<TerrainPreset, TerrainPresetConfig> = {
   /** Original scattered debris — mostly low rubble with 20% tall walls */
   scattered: {
     count: 150,
-    spawnClear: 3,
+    spawnClear: 1.5,
     generateBox() {
-      const w = snapHalf(0.4 + Math.random() * 1.8);
-      const d = snapHalf(0.4 + Math.random() * 1.8);
+      const w = snapHalf(0.2 + Math.random() * 0.9);
+      const d = snapHalf(0.2 + Math.random() * 0.9);
       const isTall = Math.random() < 0.2;
-      const h = snapHalf(isTall ? 2 + Math.random() * 3.5 : 0.3 + Math.random() * 0.8);
+      const h = snapHalf(isTall ? 1 + Math.random() * 1.75 : 0.15 + Math.random() * 0.4);
       return { w, d, h };
     },
     generatePos(w, _d, _h, halfGround) {
@@ -182,6 +182,21 @@ export class Terrain {
     const size = this.groundSize;
     const geo = new THREE.PlaneGeometry(size, size, 64, 64);
     geo.rotateX(-Math.PI / 2);
+
+    // Scattered / terraced: solid floor plane instead of water
+    if (this.preset === 'scattered' || this.preset === 'terraced') {
+      const floorMat = new THREE.MeshStandardMaterial({
+        color: this.palette.flat,
+        roughness: 0.95,
+        metalness: 0.05,
+      });
+      const floor = new THREE.Mesh(geo, floorMat);
+      floor.position.y = -0.01;
+      floor.receiveShadow = true;
+      this.waterMesh = floor; // reuse field for raycasting
+      this.group.add(floor);
+      return;
+    }
 
     // Depth render target for foam around all objects
     const depthTarget = new THREE.WebGLRenderTarget(1024, 1024, {
@@ -930,10 +945,10 @@ export class Terrain {
       lineColors.push(c, c, c, c, c, c);
     };
 
-    // Draw grid at fixed NavGrid intervals (base resolution), independent of mesh resolution.
+    // Draw grid at fixed 0.25m NavGrid intervals, independent of mesh resolution.
     // Sample the heightmap to get Y at each grid intersection, so the grid works at any scale.
-    const baseRes = Math.round(res / resolutionScale);
-    const navCellSize = groundSize / baseRes;
+    const navCellSize = 0.25;
+    const baseRes = Math.round(groundSize / navCellSize);
 
     for (let gz = 0; gz <= baseRes; gz++) {
       for (let gx = 0; gx <= baseRes; gx++) {
@@ -1093,11 +1108,11 @@ export class Terrain {
     const actualDY = cliffHighY - cliffLowY;
     const ladderLength = Math.sqrt(actualHorizDist * actualHorizDist + actualDY * actualDY);
 
-    const rungSpacing = 0.4;
+    const rungSpacing = 0.2;
     const rungCount = Math.max(1, Math.floor(ladderLength / rungSpacing));
-    const railWidth = 0.5;
-    const railThickness = 0.08;
-    const rungThickness = 0.06;
+    const railWidth = 0.25;
+    const railThickness = 0.04;
+    const rungThickness = 0.03;
 
     const mat = new THREE.MeshStandardMaterial({
       color: 0x8B6914,
@@ -1107,11 +1122,11 @@ export class Terrain {
       emissiveIntensity: 0.3,
     });
 
-    const railGeo = new THREE.BoxGeometry(railThickness, ladderLength + 0.3, railThickness);
+    const railGeo = new THREE.BoxGeometry(railThickness, ladderLength + 0.15, railThickness);
     const rungGeo = new THREE.BoxGeometry(railWidth, rungThickness, rungThickness);
 
     // Place ladder at the cliff face (offset slightly outward)
-    const offsetFromWall = 0.12;
+    const offsetFromWall = 0.06;
     const midX = (cliffLowX + cliffHighX) / 2 + ladder.facingDX * offsetFromWall;
     const midZ = (cliffLowZ + cliffHighZ) / 2 + ladder.facingDZ * offsetFromWall;
     const midY = (cliffLowY + cliffHighY) / 2;
@@ -1233,16 +1248,12 @@ export class Terrain {
       const propDebris = this.propSystem.getDebrisBoxes();
       this.debris.push(...propDebris);
 
-      // Block the single center nav cell for each floor prop so characters can't walk through them.
+      // Block the nav cell at each prop's actual world position (accounts for wall push offset).
       if (this.navGrid && this.propSystem) {
-        const halfWorld = this.groundSize / 2;
-        const propCells = this.propSystem.getPropGridCells();
+        const propPositions = this.propSystem.getPropWorldPositions();
         const blocked: { gx: number; gz: number }[] = [];
-        for (const { gx, gz } of propCells) {
-          const wx = -halfWorld + (gx + 0.5) * cellSize;
-          const wz = -halfWorld + (gz + 0.5) * cellSize;
-          const nav = this.navGrid.worldToGrid(wx, wz);
-          blocked.push(nav);
+        for (const { x, z } of propPositions) {
+          blocked.push(this.navGrid.worldToGrid(x, z));
         }
         this.navGrid.applyBlockedCells(blocked);
       }
@@ -1262,7 +1273,7 @@ export class Terrain {
 
   private createTerracedDebris(): void {
     const halfGround = this.groundSize / 2 - 2;
-    const spawnClear = 4;
+    const spawnClear = 2;
 
     const clusterCount = 5 + Math.floor(Math.random() * 4);
     const anchors: { x: number; z: number }[] = [];
@@ -1272,9 +1283,9 @@ export class Terrain {
       for (let attempt = 0; attempt < 20; attempt++) {
         ax = (Math.random() - 0.5) * halfGround * 1.6;
         az = (Math.random() - 0.5) * halfGround * 1.6;
-        if (Math.abs(ax) < spawnClear + 2 && Math.abs(az) < spawnClear + 2) continue;
+        if (Math.abs(ax) < spawnClear + 1 && Math.abs(az) < spawnClear + 1) continue;
         const tooClose = anchors.some(a =>
-          Math.abs(ax - a.x) < 6 && Math.abs(az - a.z) < 6
+          Math.abs(ax - a.x) < 3 && Math.abs(az - a.z) < 3
         );
         if (!tooClose) break;
       }
@@ -1285,14 +1296,14 @@ export class Terrain {
       const spread = 0.4 + Math.random() * 0.6;
 
       for (let step = 0; step < maxSteps; step++) {
-        const h = snapHalf((step + 1) * 0.5);
+        const h = snapHalf((step + 1) * 0.25);
         const ringBoxes = Math.max(1, Math.floor((maxSteps - step) * (2 + Math.random())));
 
         for (let b = 0; b < ringBoxes; b++) {
-          const w = snapHalf(1 + Math.random() * 2);
-          const d = snapHalf(1 + Math.random() * 2);
+          const w = snapHalf(0.5 + Math.random() * 1);
+          const d = snapHalf(0.5 + Math.random() * 1);
 
-          const ringRadius = (maxSteps - step) * 1.2 + Math.random() * 1.5;
+          const ringRadius = (maxSteps - step) * 0.6 + Math.random() * 0.75;
           const angle = baseAngle + (b / ringBoxes) * Math.PI * 2 * spread +
             (Math.random() - 0.5) * 0.5;
           const bx = snapPos(ax + Math.cos(angle) * ringRadius, w / 2);
@@ -1305,9 +1316,9 @@ export class Terrain {
         }
       }
 
-      const peakW = snapHalf(1 + Math.random() * 1.5);
-      const peakD = snapHalf(1 + Math.random() * 1.5);
-      const peakH = snapHalf((maxSteps + 1) * 0.5);
+      const peakW = snapHalf(0.5 + Math.random() * 0.75);
+      const peakD = snapHalf(0.5 + Math.random() * 0.75);
+      const peakH = snapHalf((maxSteps + 1) * 0.25);
       const px = snapPos(ax, peakW / 2);
       const pz = snapPos(az, peakD / 2);
       if (Math.abs(px) < halfGround && Math.abs(pz) < halfGround) {
@@ -1317,10 +1328,10 @@ export class Terrain {
 
     const fillerCount = 60;
     for (let i = 0; i < fillerCount; i++) {
-      const w = snapHalf(0.5 + Math.random() * 1.5);
-      const d = snapHalf(0.5 + Math.random() * 1.5);
+      const w = snapHalf(0.25 + Math.random() * 0.75);
+      const d = snapHalf(0.25 + Math.random() * 0.75);
       const isTall = Math.random() < 0.15;
-      const h = snapHalf(isTall ? 2 + Math.random() * 2.5 : 0.3 + Math.random() * 0.5);
+      const h = snapHalf(isTall ? 1 + Math.random() * 1.25 : 0.15 + Math.random() * 0.25);
       const x = snapPos((Math.random() - 0.5) * halfGround * 2, w / 2);
       const z = snapPos((Math.random() - 0.5) * halfGround * 2, d / 2);
       if (Math.abs(x) < spawnClear && Math.abs(z) < spawnClear) continue;
@@ -1345,17 +1356,28 @@ export class Terrain {
 
     for (const box of boxes) {
       if (rampsPlaced >= MAX_RAMPS) break;
-      if (box.height < 0.5 || box.height > 2.0) continue;
+      if (box.height < 0.25 || box.height > 1.0) continue;
       if (box.slopeDir !== undefined) continue;
 
       for (const probe of probes) {
         if (rampsPlaced >= MAX_RAMPS) break;
         if (Math.random() > 0.4) continue;
 
-        const rampLen = snapHalf(1.5 + Math.random() * 1.5);
+        // Probe ahead to measure the drop first, then size ramp to match (~45°)
+        const probeLen = 2.0; // max look-ahead
+        const probeX = box.x + probe.dx * (box.halfW + probeLen / 2);
+        const probeZ = box.z + probe.dz * (box.halfD + probeLen / 2);
+        const probeLowY = this.getTerrainY(
+          probeX + probe.dx * probeLen / 2,
+          probeZ + probe.dz * probeLen / 2, 0.1);
+        const estDrop = box.height - probeLowY;
+        if (estDrop < 0.15 || estDrop > 1.25) continue;
+
+        // Ramp length ≈ drop for ~45° slope (snap to grid)
+        const rampLen = snapHalf(Math.max(HALF, estDrop));
         const rampW = snapHalf(Math.min(
           probe.dx !== 0 ? box.halfD * 2 : box.halfW * 2,
-          1 + Math.random() * 1.5,
+          0.5 + Math.random() * 0.75,
         ));
 
         let rx: number, rz: number;
@@ -1383,7 +1405,7 @@ export class Terrain {
         const lowTerrainY = this.getTerrainY(lowEndX, lowEndZ, 0.1);
 
         const drop = box.height - lowTerrainY;
-        if (drop < 0.3 || drop > 2.5) continue;
+        if (drop < 0.15 || drop > 1.25) continue;
 
         const rampHalfW = (probe.dx !== 0 ? sizeAlongProbe : sizePerpProbe) / 2;
         const rampHalfD = (probe.dz !== 0 ? sizeAlongProbe : sizePerpProbe) / 2;
@@ -1404,7 +1426,7 @@ export class Terrain {
         const w = probe.dx !== 0 ? sizeAlongProbe : sizePerpProbe;
         const d = probe.dz !== 0 ? sizeAlongProbe : sizePerpProbe;
         const rh = snapHalf(drop);
-        if (rh < 0.5) continue;
+        if (rh < 0.25) continue;
 
         if (this.placeSlopeBox(rx, rz, w, d, rh, probe.slopeDir)) {
           rampsPlaced++;
@@ -1513,12 +1535,14 @@ export class Terrain {
     const grid = new NavGrid(navGroundSize, navGroundSize, cellSize);
     if (this.heightmapData) {
       grid.buildFromHeightmap(this.heightmapData, this.heightmapRes, this.heightmapGroundSize, stepHeight, slopeHeight);
+    } else if (this.walkMask) {
+      // Dungeon with walkMask: the mask IS the truth. Build a flat grid (no debris),
+      // then let walkMask define exactly which cells are open/blocked.
+      grid.build([], stepHeight, 0);
+      grid.applyWalkMask(this.walkMask.openGrid, this.walkMask.gridW, this.walkMask.gridD, this.walkMask.cellSize, navGroundSize);
     } else {
+      // Free-form terrain (scattered, terraced): use debris boxes for blocking
       grid.build(this.debris, stepHeight, capsuleRadius);
-      // For dungeon/rooms, block nav cells outside the dungeon walkable area
-      if (this.walkMask) {
-        grid.applyWalkMask(this.walkMask.openGrid, this.walkMask.gridW, this.walkMask.gridD, this.walkMask.cellSize, navGroundSize);
-      }
     }
 
     // Register ladder nav-links.

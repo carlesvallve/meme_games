@@ -340,6 +340,7 @@ export class DungeonPropSystem {
   private props: PlacedProp[] = [];
   private labels: THREE.Sprite[] = [];
   private readonly parent: THREE.Object3D;
+  private cellSize = 0.75;
 
   constructor(parent: THREE.Object3D) {
     this.parent = parent;
@@ -354,6 +355,7 @@ export class DungeonPropSystem {
     gridDoors?: { x: number; z: number; orientation: 'NS' | 'EW' }[],
     wallHeight = 2.5,
   ): Promise<void> {
+    this.cellSize = cellSize;
     const halfWorld = groundSize / 2;
     const floorY = cellSize / 15; // VOX ground tile thickness
     const toWorldX = (gx: number) => -halfWorld + (gx + 0.5) * cellSize;
@@ -544,20 +546,12 @@ export class DungeonPropSystem {
           mesh.position.set(wx, floorY, wz);
 
           // Rotation — use stored wallSide from findCell for deterministic wall-facing
-          if (entry.wallAligned && cell.wallSide) {
-            mesh.rotation.y = WALL_ROT[cell.wallSide];
-            // Push toward wall — wallAligned props sit flush against wall
-            const push = WALL_PUSH[cell.wallSide];
-            const wallOffset = cellSize * 0.3;
-            mesh.position.x += push[0] * wallOffset;
-            mesh.position.z += push[1] * wallOffset;
-          } else if ((entry.placement === 'corner' || entry.placement === 'wall') && cell.wallSide) {
-            // Non-wallAligned edge props: face into room, nudge toward wall
+          // Push wall-aligned props toward the wall within their cell (stay inside cell bounds)
+          if ((entry.wallAligned || entry.placement === 'corner' || entry.placement === 'wall') && cell.wallSide) {
             mesh.rotation.y = WALL_ROT[cell.wallSide];
             const push = WALL_PUSH[cell.wallSide];
-            const nudge = cellSize * 0.15;
-            mesh.position.x += push[0] * nudge;
-            mesh.position.z += push[1] * nudge;
+            mesh.position.x += push[0] * cellSize * 0.35;
+            mesh.position.z += push[1] * cellSize * 0.35;
           } else {
             mesh.rotation.y = (Math.floor(Math.random() * 4)) * Math.PI / 2;
           }
@@ -583,11 +577,11 @@ export class DungeonPropSystem {
           // Track as surface for small item placement
           const surfaceH = SURFACE_CATEGORIES[entry.category];
           if (surfaceH !== undefined) {
-            const scale = entry.scalesWithDungeon ? cellSize : 1;
+            const surfScale = entry.scalesWithDungeon ? cellSize : 1;
             surfaces.push({
               wx: mesh.position.x,
               wz: mesh.position.z,
-              surfaceY: floorY + surfaceH * scale,
+              surfaceY: floorY + surfaceH * surfScale,
               used: 0,
               maxItems: entry.category.includes('large') ? 3 : 2,
               rotation: mesh.rotation.y,
@@ -891,16 +885,26 @@ export class DungeonPropSystem {
       .map(p => p.gridCell);
   }
 
+  /** Actual world positions of floor props (accounts for wall push offsets).
+   *  Use these for nav cell blocking instead of tile grid coords. */
+  getPropWorldPositions(): { x: number; z: number }[] {
+    return this.props
+      .filter(p => p.entry.placement !== 'wall_mount' && !SMALL_ITEM_CATEGORIES.has(p.entry.category))
+      .map(p => ({ x: p.mesh.position.x, z: p.mesh.position.z }));
+  }
+
   /** Get debris boxes for physical collision (keyboard movement).
-   *  Excludes wall_mount and small decorative items. */
-  getDebrisBoxes(): { x: number; z: number; halfW: number; halfD: number; height: number }[] {
+   *  Excludes wall_mount and small decorative items.
+   *  Each prop occupies exactly 1 nav cell — debris box is half-cellSize on each side. */
+  getDebrisBoxes(): { x: number; z: number; halfW: number; halfD: number; height: number; exact?: boolean }[] {
     return this.props
       .filter(p => p.entry.placement !== 'wall_mount' && !SMALL_ITEM_CATEGORIES.has(p.entry.category))
       .map(p => {
         const pos = p.mesh.position;
-        const scale = p.entry.scalesWithDungeon ? p.entity.radius : p.entity.radius;
-        const r = Math.max(scale, 0.1);
-        return { x: pos.x, z: pos.z, halfW: r, halfD: r, height: pos.y + 2 };
+        // Small debris box for physical collision — must not bleed into adjacent nav cells
+        // Height must exceed stepHeight (0.8) so characters can't step over props
+        const half = 0.1;
+        return { x: pos.x, z: pos.z, halfW: half, halfD: half, height: 2.0, exact: true };
       });
   }
 

@@ -16,7 +16,7 @@ export class CollectibleSystem {
   private collectibles: CollectibleObj[] = [];
   private readonly scene: THREE.Scene;
   private readonly terrain: Terrain;
-  private readonly pickupRadius = 0.4;
+  private readonly pickupRadius = 0.2;
   private readonly count = 15;
   private totalCollected = 0;
 
@@ -26,7 +26,7 @@ export class CollectibleSystem {
   constructor(scene: THREE.Scene, terrain: Terrain) {
     this.scene = scene;
     this.terrain = terrain;
-    this.geometry = new THREE.OctahedronGeometry(0.12, 0);
+    this.geometry = new THREE.OctahedronGeometry(0.06, 0);
 
     for (let i = 0; i < this.count; i++) {
       this.spawnCollectible();
@@ -46,16 +46,16 @@ export class CollectibleSystem {
     });
 
     const mesh = new THREE.Mesh(this.geometry, mat);
-    mesh.position.set(pos.x, pos.y + 0.35, pos.z);
+    mesh.position.set(pos.x, pos.y + 0.18, pos.z);
     mesh.castShadow = true;
     this.scene.add(mesh);
 
-    const entity = new Entity(mesh, { layer: Layer.Collectible, radius: 0.12 });
+    const entity = new Entity(mesh, { layer: Layer.Collectible, radius: 0.06 });
 
     this.collectibles.push({
       mesh,
       entity,
-      baseY: pos.y + 0.35,
+      baseY: pos.y + 0.18,
       phase: Math.random() * Math.PI * 2,
       collected: false,
       respawnTimer: 0,
@@ -71,8 +71,8 @@ export class CollectibleSystem {
         if (c.respawnTimer <= 0) {
           // Respawn at new position
           const pos = this.terrain.getRandomPosition(4);
-          c.mesh.position.set(pos.x, pos.y + 0.35, pos.z);
-          c.baseY = pos.y + 0.35;
+          c.mesh.position.set(pos.x, pos.y + 0.18, pos.z);
+          c.baseY = pos.y + 0.18;
           c.collected = false;
           c.mesh.visible = true;
         }
@@ -83,7 +83,7 @@ export class CollectibleSystem {
       c.phase += dt * 2;
       c.mesh.rotation.y += dt * 1.5;
       c.mesh.rotation.x += dt * 0.7;
-      c.mesh.position.y = c.baseY + Math.sin(c.phase) * 0.1;
+      c.mesh.position.y = c.baseY + Math.sin(c.phase) * 0.05;
 
       // Distance to player
       const dx = playerPos.x - c.mesh.position.x;

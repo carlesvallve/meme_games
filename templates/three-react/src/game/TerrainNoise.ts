@@ -200,7 +200,7 @@ export interface HeightmapStyleConfig {
 const HEIGHTMAP_STYLES: Record<HeightmapStyle, HeightmapStyleConfig> = {
   rolling: {
     resolution: 72,
-    maxHeight: 4.0,
+    maxHeight: 2.0,
     octaves: 5,
     lacunarity: 2.0,
     persistence: 0.5,
@@ -212,31 +212,31 @@ const HEIGHTMAP_STYLES: Record<HeightmapStyle, HeightmapStyleConfig> = {
   },
   terraces: {
     resolution: 72,
-    maxHeight: 8.0,
+    maxHeight: 4.0,
     octaves: 2,
     lacunarity: 2.0,
     persistence: 0.35,
     mask: 'none',
     invert: false,
     algorithm: 'fbm',
-    quantizeStep: 0.5,
+    quantizeStep: 0.25,
     posterize: 6,
   },
   islands: {
     resolution: 72,
-    maxHeight: 7.0,
+    maxHeight: 3.5,
     octaves: 5,
     lacunarity: 2.0,
     persistence: 0.55,
     mask: 'none',
     invert: false,
     algorithm: 'islands',
-    quantizeStep: 0.5,
+    quantizeStep: 0.25,
     posterize: 10,
   },
   caves: {
     resolution: 72,
-    maxHeight: 8.0,
+    maxHeight: 4.0,
     octaves: 3,
     lacunarity: 2.0,
     persistence: 0.45,
@@ -671,7 +671,7 @@ function generateCaves(
 // elevation zones so player/NPCs can reach all non-ceiling regions.
 // Ramps are compact (3×3 to 3×7 cells) — small triangular blocks at cliff edges.
 
-const SLOPE_HEIGHT = 1.0;   // max rise per vertex step (matches playerParams)
+const SLOPE_HEIGHT = 0.5;   // max rise per vertex step (matches playerParams)
 const HEIGHT_CEILING_FRAC = 0.85; // regions above this fraction of maxH stay disconnected
 const MAX_RAMP_ITER = 30;
 const RAMP_HALF_WIDTH = 1;  // 3 cells wide (center ± 1)
