@@ -368,6 +368,18 @@ export class NavGrid {
     return this.width * this.cellSize / 2;
   }
 
+  /** Check if any cardinal neighbor of a cell is blocked or out of bounds. */
+  hasBlockedNeighbor(gx: number, gz: number): boolean {
+    for (let dir = 0; dir < 8; dir += 2) { // cardinals only: 0(N), 2(E), 4(S), 6(W)
+      const ngx = gx + DIR_DGX[dir];
+      const ngz = gz + DIR_DGZ[dir];
+      if (ngx < 0 || ngx >= this.width || ngz < 0 || ngz >= this.height) return true;
+      const neighbor = this.cells[ngz * this.width + ngx];
+      if (neighbor.blocked) return true;
+    }
+    return false;
+  }
+
   canPass(gx: number, gz: number, dir: number): boolean {
     const cell = this.getCell(gx, gz);
     if (!cell) return false;

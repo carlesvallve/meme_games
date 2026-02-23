@@ -229,10 +229,8 @@ export async function loadVoxelDungeonVisuals(
   // Full-coverage GridHelper matching nav cell size, sitting on the floor surface.
   {
     const gridY = cellSize / 15 + 0.01;
-    let navN = Math.max(1, Math.round(cellSize / 0.5));
-    if (navN > 1 && navN % 2 === 0) navN++;
-    const navSize = cellSize / navN;
-    const divisions = Math.round(groundSize / navSize);
+    const navCellSize = 0.25;
+    const divisions = Math.round(groundSize / navCellSize);
 
     const grid = new THREE.GridHelper(groundSize, divisions, 0x000000, 0x000000);
     grid.position.y = gridY;

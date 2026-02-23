@@ -28,7 +28,7 @@ export class LootSystem {
   private items: LootItem[] = [];
   private readonly scene: THREE.Scene;
   private readonly terrain: Terrain;
-  private readonly pickupRadius = 0.4;
+  private readonly pickupRadius = 0.2;
 
   private readonly coinGeo: THREE.BufferGeometry;
   private readonly potionGeo: THREE.BufferGeometry;
@@ -39,8 +39,8 @@ export class LootSystem {
     this.scene = scene;
     this.terrain = terrain;
 
-    this.coinGeo = new THREE.OctahedronGeometry(0.08, 0);
-    this.potionGeo = new THREE.SphereGeometry(0.07, 6, 4);
+    this.coinGeo = new THREE.OctahedronGeometry(0.04, 0);
+    this.potionGeo = new THREE.SphereGeometry(0.035, 6, 4);
 
     this.coinMat = new THREE.MeshStandardMaterial({
       color: 0xffd700,
@@ -71,19 +71,19 @@ export class LootSystem {
 
       const mesh = new THREE.Mesh(geo, mat);
       mesh.position.copy(position);
-      mesh.position.y += 0.3; // start above chest
+      mesh.position.y += 0.15; // start above chest
       mesh.castShadow = true;
       mesh.visible = false; // hidden until delay expires
       this.scene.add(mesh);
 
-      const entity = new Entity(mesh, { layer: Layer.Collectible, radius: 0.08 });
+      const entity = new Entity(mesh, { layer: Layer.Collectible, radius: 0.04 });
 
       // Random ejection angle
       const angle = Math.random() * Math.PI * 2;
-      const hSpeed = 2.5 + Math.random() * 2.0;
+      const hSpeed = 1.2 + Math.random() * 1.0;
       const vel = new THREE.Vector3(
         Math.cos(angle) * hSpeed,
-        4.0 + Math.random() * 2.0, // punchy upward — drag keeps it below walls
+        2.0 + Math.random() * 1.0, // punchy upward — drag keeps it below walls
         Math.sin(angle) * hSpeed,
       );
 
@@ -138,7 +138,7 @@ export class LootSystem {
 
         // Floor check
         const terrainY = this.terrain.getTerrainY(item.mesh.position.x, item.mesh.position.z);
-        const floorY = terrainY + 0.08; // mesh radius
+        const floorY = terrainY + 0.04; // mesh radius
 
         if (item.mesh.position.y <= floorY) {
           item.mesh.position.y = floorY;
@@ -176,7 +176,7 @@ export class LootSystem {
         item.mesh.position.x += (dx / dist) * speed;
         item.mesh.position.z += (dz / dist) * speed;
         // Float up slightly toward player height
-        const dy = playerPos.y + 0.3 - item.mesh.position.y;
+        const dy = playerPos.y + 0.15 - item.mesh.position.y;
         item.mesh.position.y += dy * 4 * dt;
       }
 

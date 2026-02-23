@@ -19,14 +19,9 @@ import type { GameInstance } from '../types';
 import { CHARACTER_TEAM_COLORS, getSlots, getCharacterName, rerollRoster, type CharacterType } from './characters';
 import { getRandomVoxChar } from './VoxCharacterDB';
 
-/** Pick nav cell size that aligns with tile centers for voxelDungeon.
- *  Uses an odd number of cells per tile so the middle cell sits on the tile center. */
-function navCellForPreset(preset: string): number {
-  if (preset !== 'voxelDungeon') return 0.5;
-  const tileSize = useGameStore.getState().tileSize;
-  let n = Math.max(1, Math.round(tileSize / 0.5));
-  if (n > 1 && n % 2 === 0) n++; // odd → one cell centered on tile
-  return tileSize / n;
+/** Nav cell size: 0.25m for all presets. */
+function navCellForPreset(_preset: string): number {
+  return 0.25;
 }
 
 export function createGame(canvas: HTMLCanvasElement): GameInstance {
@@ -208,7 +203,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   const _planeHit = new THREE.Vector3();
 
   // Click marker (visual feedback on terrain click)
-  const markerGeo = new THREE.RingGeometry(0.08, 0.2, 16);
+  const markerGeo = new THREE.RingGeometry(0.04, 0.12, 16);
   markerGeo.rotateX(-Math.PI / 2);
   const markerMat = new THREE.MeshBasicMaterial({ color: 0x00ffaa, transparent: true, opacity: 0.8, side: THREE.DoubleSide });
   const clickMarker = new THREE.Mesh(markerGeo, markerMat);

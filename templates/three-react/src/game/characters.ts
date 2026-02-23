@@ -51,7 +51,7 @@ export const CHARACTER_NAMES: Record<CharacterType, string> = new Proxy(
 
 // ── Mesh ──
 
-const CHAR_MESH_SCALE = 1.4;
+const CHAR_MESH_SCALE = 1;
 
 /** Default character height (VOX models are built at 0.5 target height * mesh scale) */
 export const VOX_CHARACTER_HEIGHT = 0.5 * CHAR_MESH_SCALE;

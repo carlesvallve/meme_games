@@ -73,7 +73,7 @@ function buildChestLidModel(): VoxelModel {
   return { size: { x: 4, y: 1, z: 3 }, voxels };
 }
 
-const VOXEL_SCALE = 0.09;
+const VOXEL_SCALE = 0.06;
 
 export class ChestSystem {
   private chests: ChestObj[] = [];
@@ -170,7 +170,7 @@ export class ChestSystem {
 
     this.scene.add(group);
 
-    const entity = new Entity(group, { layer: Layer.Prop, radius: 0.4 });
+    const entity = new Entity(group, { layer: Layer.Prop, radius: 0.25 });
 
     this.chests.push({
       group,

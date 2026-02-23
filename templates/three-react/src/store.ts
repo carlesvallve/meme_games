@@ -47,8 +47,8 @@ export interface CameraParams {
 // ── Defaults ──────────────────────────────────────────────────────────
 
 export const DEFAULT_PLAYER_PARAMS: PlayerParams = {
-  speed: 4, stepHeight: 0.8, slopeHeight: 1.5, capsuleRadius: 0.2,
-  arrivalReach: 0.1, hopHeight: 0.1, magnetRadius: 2, magnetSpeed: 16,
+  speed: 4, stepHeight: 0.4, slopeHeight: 0.75, capsuleRadius: 0.1,
+  arrivalReach: 0.05, hopHeight: 0.05, magnetRadius: 1, magnetSpeed: 16,
 };
 
 export const DEFAULT_CAMERA_PARAMS: CameraParams = {
@@ -73,7 +73,7 @@ export const DEFAULT_SCENE_SETTINGS = {
   paletteName: 'random',
   wallGap: 1,
   roomSpacing: 3,
-  tileSize: 1.5,
+  tileSize: 0.75,
   gridOpacity: 0.25,
   resolutionScale: 1,
   testProp: '' as string,  // empty = normal templates, category name = spawn only that
