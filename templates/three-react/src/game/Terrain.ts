@@ -9,6 +9,8 @@ export type { HeightmapStyle } from './TerrainNoise';
 import { generateDungeon } from './DungeonGenerator';
 import type { WalkMask } from './DungeonGenerator';
 import { DoorSystem } from './Door';
+import { buildVoxelDungeonCollision, loadVoxelDungeonVisuals } from './VoxelDungeon';
+import { DungeonPropSystem, clearPropCache } from './DungeonProps';
 import { useGameStore } from '../store';
 import { randomPalette, palettes } from './ColorPalettes';
 import type { TerrainPalette } from './ColorPalettes';
@@ -32,7 +34,7 @@ export interface DebrisBox {
 
 // ── Terrain presets ─────────────────────────────────────────────────
 
-export type TerrainPreset = 'scattered' | 'terraced' | 'heightmap' | 'dungeon' | 'rooms';
+export type TerrainPreset = 'scattered' | 'terraced' | 'heightmap' | 'dungeon' | 'rooms' | 'voxelDungeon';
 
 interface TerrainPresetConfig {
   count: number;
@@ -94,6 +96,14 @@ const PRESET_CONFIGS: Record<TerrainPreset, TerrainPresetConfig> = {
     generateBox() { return { w: 1, d: 1, h: 0.5 }; },
     generatePos() { return null; },
   },
+
+  /** Blocky VOX dungeon with full-cube wall tiles */
+  voxelDungeon: {
+    count: 0,
+    spawnClear: 0,
+    generateBox() { return { w: 1, d: 1, h: 0.5 }; },
+    generatePos() { return null; },
+  },
 };
 
 const DEBUG_RAMPS = false;
@@ -104,7 +114,7 @@ export class Terrain {
   readonly group = new THREE.Group();
   private debris: DebrisBox[] = [];
   private debrisEntities: Entity[] = [];
-  private readonly groundSize = 40;
+  private readonly groundSize = 50;
   readonly preset: TerrainPreset;
   private readonly heightmapStyle: HeightmapStyle;
   private palette: TerrainPalette;
@@ -137,12 +147,15 @@ export class Terrain {
 
   // Dungeon walk mask (only for dungeon/rooms presets)
   private walkMask: WalkMask | null = null;
+  private effectiveGroundSize: number = 0; // may differ from groundSize for voxel dungeons
+  private baseFloorY: number = 0; // minimum floor height (e.g. VOX ground tile thickness)
 
   // Dynamic debris (e.g. doors) — checked by resolveMovement alongside static debris
   private dynamicDebris: DebrisBox[] = [];
 
   // Door system (only for rooms preset)
   private doorSystem: DoorSystem | null = null;
+  private propSystem: DungeonPropSystem | null = null;
 
   constructor(scene: THREE.Scene, preset: TerrainPreset = 'scattered', heightmapStyle: HeightmapStyle = 'rolling', palettePick: string = 'random') {
     this.preset = preset;
@@ -156,7 +169,7 @@ export class Terrain {
       this.paletteName = name;
     }
     this.createGround();
-    if (preset !== 'heightmap') {
+    if (preset !== 'heightmap' && preset !== 'voxelDungeon') {
       this.createGridLines();
     }
     this.createDebris();
@@ -630,6 +643,8 @@ export class Terrain {
       this.createHeightmapMesh();
     } else if (this.preset === 'terraced') {
       this.createTerracedDebris();
+    } else if (this.preset === 'voxelDungeon') {
+      this.createVoxelDungeonDebris();
     } else if (this.preset === 'dungeon' || this.preset === 'rooms') {
       this.createDungeonDebris();
     } else {
@@ -1144,6 +1159,7 @@ export class Terrain {
     const { wallGap } = useGameStore.getState();
     const output = generateDungeon(this.preset as 'dungeon' | 'rooms', this.groundSize, wallGap);
     this.walkMask = output.walkMask;
+    this.effectiveGroundSize = this.groundSize;
 
     console.log(`[Terrain] ${this.preset}: ${output.roomCount} rooms, ${output.corridorCount} corridors, ${output.boxes.length} boxes, ${output.doors.length} doors`);
 
@@ -1151,7 +1167,6 @@ export class Terrain {
       this.placeBox(def.x, def.z, def.w, def.d, def.h, true);
     }
 
-    // Create door system for dungeon and rooms presets
     if (output.doors.length > 0) {
       this.doorSystem = new DoorSystem(
         this.group,
@@ -1160,6 +1175,57 @@ export class Terrain {
         output.walkMask.cellSize,
       );
     }
+  }
+
+  private createVoxelDungeonDebris(): void {
+    const { wallGap, roomSpacing, tileSize } = useGameStore.getState();
+    const output = generateDungeon('dungeon', this.groundSize, wallGap, tileSize, roomSpacing);
+    this.walkMask = output.walkMask;
+    this.effectiveGroundSize = this.groundSize;
+    const cellSize = output.walkMask.cellSize;
+
+    console.log(`[Terrain] voxelDungeon: ${output.roomCount} rooms, ${output.corridorCount} corridors, ${output.doors.length} doors`);
+
+    const voxConfig = {
+      openGrid: output.walkMask.openGrid,
+      gridW: output.walkMask.gridW,
+      gridD: output.walkMask.gridD,
+      cellSize,
+      groundSize: this.groundSize,
+      doors: output.doors,
+      gridDoors: output.gridDoors,
+    };
+
+    const vdResult = buildVoxelDungeonCollision(voxConfig, this.group);
+    this.debris.push(...vdResult.debris);
+    this.debrisEntities.push(...vdResult.entities);
+
+    // VOX ground tiles are ~0.1m tall — characters should stand on top
+    this.baseFloorY = 1 * (cellSize / 15); // VOX_GROUND_Y * voxelScale
+
+    // Load visuals async, then create doors + props (need tile geometry to be loaded first)
+    loadVoxelDungeonVisuals(voxConfig, this.group).then(async () => {
+      if (output.doors.length > 0) {
+        this.doorSystem = new DoorSystem(
+          this.group,
+          this,
+          output.doors,
+          cellSize,
+          true, // useVoxDoors
+        );
+      }
+
+      // Place props in rooms
+      clearPropCache();
+      this.propSystem = new DungeonPropSystem(this.group);
+      await this.propSystem.populate(
+        output.rooms,
+        cellSize,
+        this.groundSize,
+        output.walkMask.openGrid,
+        output.walkMask.gridW,
+      );
+    });
   }
 
   private createTerracedDebris(): void {
@@ -1411,14 +1477,15 @@ export class Terrain {
 
   /** Build a NavGrid from current terrain for A* pathfinding */
   buildNavGrid(stepHeight: number, capsuleRadius: number, cellSize = 0.5, slopeHeight?: number): NavGrid {
-    const grid = new NavGrid(this.groundSize, this.groundSize, cellSize);
+    const navGroundSize = this.effectiveGroundSize || this.groundSize;
+    const grid = new NavGrid(navGroundSize, navGroundSize, cellSize);
     if (this.heightmapData) {
       grid.buildFromHeightmap(this.heightmapData, this.heightmapRes, this.heightmapGroundSize, stepHeight, slopeHeight);
     } else {
       grid.build(this.debris, stepHeight, capsuleRadius);
       // For dungeon/rooms, block nav cells outside the dungeon walkable area
       if (this.walkMask) {
-        grid.applyWalkMask(this.walkMask.openGrid, this.walkMask.gridW, this.walkMask.gridD, this.walkMask.cellSize, this.groundSize);
+        grid.applyWalkMask(this.walkMask.openGrid, this.walkMask.gridW, this.walkMask.gridD, this.walkMask.cellSize, navGroundSize);
       }
     }
 
@@ -1797,7 +1864,7 @@ export class Terrain {
     }
 
     // Box-based: O(n) iteration
-    let maxY = 0;
+    let maxY = this.baseFloorY;
     for (const box of this.debris) {
       if (
         Math.abs(x - box.x) < box.halfW + radius &&
@@ -2103,6 +2170,11 @@ export class Terrain {
       this.doorSystem.dispose();
       this.doorSystem = null;
     }
+    // Dispose prop system
+    if (this.propSystem) {
+      this.propSystem.dispose();
+      this.propSystem = null;
+    }
     this.dynamicDebris.length = 0;
   }
 
@@ -2137,8 +2209,8 @@ export class Terrain {
       return new THREE.Vector3(0, this.getTerrainY(0, 0), 0);
     }
 
-    // Dungeon/rooms: pick directly from NavGrid spawn-region cells
-    if ((this.preset === 'dungeon' || this.preset === 'rooms') && this.navGrid) {
+    // Dungeon/rooms/voxelDungeon: pick directly from NavGrid spawn-region cells
+    if ((this.preset === 'dungeon' || this.preset === 'rooms' || this.preset === 'voxelDungeon') && this.navGrid) {
       for (let attempt = 0; attempt < 50; attempt++) {
         const cell = this.navGrid.getRandomSpawnCell();
         if (!cell) break;

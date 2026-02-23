@@ -7,7 +7,7 @@ import { palettes } from '../game/ColorPalettes';
 
 type ActivePanel = 'player' | 'camera' | 'light' | 'scene' | null;
 
-const TERRAIN_PRESETS: TerrainPreset[] = ['scattered', 'terraced', 'heightmap', 'dungeon', 'rooms'];
+const TERRAIN_PRESETS: TerrainPreset[] = ['scattered', 'terraced', 'heightmap', 'dungeon', 'rooms', 'voxelDungeon'];
 const HEIGHTMAP_STYLES: HeightmapStyle[] = ['rolling', 'terraces', 'islands', 'caves'];
 const PALETTE_NAMES = ['random', ...Object.keys(palettes)];
 
@@ -198,6 +198,10 @@ function ScenePanel() {
   const setGridOpacity = useGameStore((s) => s.setGridOpacity);
   const wallGap = useGameStore((s) => s.wallGap);
   const setWallGap = useGameStore((s) => s.setWallGap);
+  const roomSpacing = useGameStore((s) => s.roomSpacing);
+  const setRoomSpacing = useGameStore((s) => s.setRoomSpacing);
+  const tileSize = useGameStore((s) => s.tileSize);
+  const setTileSize = useGameStore((s) => s.setTileSize);
   const resolutionScale = useGameStore((s) => s.resolutionScale);
   const setResolutionScale = useGameStore((s) => s.setResolutionScale);
   const remesh = useGameStore((s) => s.onRemesh);
@@ -277,6 +281,40 @@ function ScenePanel() {
           />
           <span style={{ color: '#fff', width: 36, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
             {wallGap}
+          </span>
+        </div>
+      )}
+
+      {/* Room spacing slider — only for voxelDungeon */}
+      {terrainPreset === 'voxelDungeon' && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+          <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Room Gap</span>
+          <input
+            type="range"
+            min={1} max={8} step={1}
+            value={roomSpacing}
+            onChange={(e) => setRoomSpacing(parseInt(e.target.value, 10))}
+            style={{ flex: 1, height: 14, accentColor: '#6af' }}
+          />
+          <span style={{ color: '#fff', width: 36, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+            {roomSpacing}
+          </span>
+        </div>
+      )}
+
+      {/* Tile size slider — only for voxelDungeon */}
+      {terrainPreset === 'voxelDungeon' && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+          <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Tile Size</span>
+          <input
+            type="range"
+            min={0.5} max={2} step={0.25}
+            value={tileSize}
+            onChange={(e) => setTileSize(parseFloat(e.target.value))}
+            style={{ flex: 1, height: 14, accentColor: '#6af' }}
+          />
+          <span style={{ color: '#fff', width: 36, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+            {tileSize}m
           </span>
         </div>
       )}

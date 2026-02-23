@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { useGameStore, DEFAULT_PLAYER_PARAMS, DEFAULT_CAMERA_PARAMS, DEFAULT_LIGHT_PRESET, DEFAULT_TORCH_PARAMS, DEFAULT_PARTICLE_TOGGLES, DEFAULT_SCENE_SETTINGS, saveCharacterParams, clearCharacterParams } from '../store';
+import { useGameStore, DEFAULT_PLAYER_PARAMS, DEFAULT_CAMERA_PARAMS, DEFAULT_LIGHT_PRESET, DEFAULT_TORCH_PARAMS, DEFAULT_PARTICLE_TOGGLES, DEFAULT_SCENE_SETTINGS } from '../store';
 import { Input } from './Input';
 import { Camera } from './Camera';
 import { createScene, applyLightPreset } from './Scene';
@@ -16,7 +16,18 @@ import type { ParticleToggles } from '../store';
 import type { ParticleSystem } from '../types';
 import { audioSystem } from '../utils/AudioSystem';
 import type { GameInstance } from '../types';
-import { CHARACTER_TEAM_COLORS, type CharacterType } from './characters';
+import { CHARACTER_TEAM_COLORS, getSlots, getCharacterName, rerollRoster, type CharacterType } from './characters';
+import { getRandomVoxChar } from './VoxCharacterDB';
+
+/** Pick nav cell size that aligns with tile centers for voxelDungeon.
+ *  Uses an odd number of cells per tile so the middle cell sits on the tile center. */
+function navCellForPreset(preset: string): number {
+  if (preset !== 'voxelDungeon') return 0.5;
+  const tileSize = useGameStore.getState().tileSize;
+  let n = Math.max(1, Math.round(tileSize / 0.5));
+  if (n > 1 && n % 2 === 0) n++; // odd → one cell centered on tile
+  return tileSize / n;
+}
 
 export function createGame(canvas: HTMLCanvasElement): GameInstance {
   // Renderer
@@ -47,7 +58,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   let terrain = new Terrain(scene, initPreset, initStyle, initPalette);
   useGameStore.getState().setPaletteActive(terrain.getPaletteName());
   const { playerParams: initParams } = useGameStore.getState();
-  let navGrid = terrain.buildNavGrid(initParams.stepHeight, initParams.capsuleRadius, 0.5, initParams.slopeHeight);
+  let navGrid = terrain.buildNavGrid(initParams.stepHeight, initParams.capsuleRadius, navCellForPreset(initPreset), initParams.slopeHeight);
   terrain.setGridOpacity(useGameStore.getState().gridOpacity);
   let collectibles = new CollectibleSystem(scene, terrain);
   let lootSystem = new LootSystem(scene, terrain);
@@ -72,6 +83,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   function regenerateScene(): void {
     activeCharacter = null;
     debugLadderIndex = -1;
+    rerollRoster();
 
     // Dispose old systems
     for (const char of characters) char.dispose();
@@ -88,7 +100,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     // Rebuild
     terrain = new Terrain(scene, terrainPreset, heightmapStyle, palPick);
     useGameStore.getState().setPaletteActive(terrain.getPaletteName());
-    navGrid = terrain.buildNavGrid(pp.stepHeight, pp.capsuleRadius, 0.5, pp.slopeHeight);
+    navGrid = terrain.buildNavGrid(pp.stepHeight, pp.capsuleRadius, navCellForPreset(terrainPreset), pp.slopeHeight);
     terrain.setGridOpacity(useGameStore.getState().gridOpacity);
     collectibles = new CollectibleSystem(scene, terrain);
     lootSystem = new LootSystem(scene, terrain);
@@ -140,7 +152,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   syncParticles(useGameStore.getState().particleToggles);
 
   // ── Unified character system ──────────────────────────────────────
-  const allCharacterTypes: CharacterType[] = ['boy', 'girl', 'robot', 'dog'];
+  const allCharacterTypes = getSlots();
   let characters: Character[] = [];
   let activeCharacter: Character | null = null;
   let lastSelectedCharacter: CharacterType | null = null;
@@ -178,7 +190,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
 
   function updateActiveCharacterUI(): void {
     if (activeCharacter) {
-      useGameStore.getState().setActiveCharacter(activeCharacter.characterType, CHARACTER_TEAM_COLORS[activeCharacter.characterType]);
+      useGameStore.getState().setActiveCharacter(getCharacterName(activeCharacter.characterType), CHARACTER_TEAM_COLORS[activeCharacter.characterType]);
     }
   }
 
@@ -205,22 +217,21 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     };
   }
 
-  /** Sync the active character's movement params from the store (for settings sliders). */
+  /** Sync movement params from the store to all characters (for settings sliders). */
   let lastSyncedPlayerParams: ReturnType<typeof useGameStore.getState>['playerParams'] | null = null;
-  function syncActiveCharacterParams(): void {
-    if (!activeCharacter) return;
+  function syncAllCharacterParams(): void {
     const pp = useGameStore.getState().playerParams;
-    // Only sync + save when the store's playerParams object actually changed (slider moved)
     if (pp === lastSyncedPlayerParams) return;
     lastSyncedPlayerParams = pp;
-    const p = activeCharacter.params;
-    p.speed = pp.speed;
-    p.stepHeight = pp.stepHeight;
-    p.slopeHeight = pp.slopeHeight;
-    p.capsuleRadius = pp.capsuleRadius;
-    p.arrivalReach = pp.arrivalReach;
-    p.hopHeight = pp.hopHeight;
-    saveCharacterParams(activeCharacter.characterType, p);
+    for (const char of characters) {
+      const p = char.params;
+      p.speed = pp.speed;
+      p.stepHeight = pp.stepHeight;
+      p.slopeHeight = pp.slopeHeight;
+      p.capsuleRadius = pp.capsuleRadius;
+      p.arrivalReach = pp.arrivalReach;
+      p.hopHeight = pp.hopHeight;
+    }
   }
 
   function selectCharacter(char: Character | null): void {
@@ -239,18 +250,6 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     // Set new one to player-controlled
     if (char) {
       char.setPlayerControlled(makePlayerControlDeps());
-      speechSystem.setCharacter(char.characterType);
-      speechSystem.setPlayerMesh(char.mesh);
-
-      // Load this character's movement params into the store so sliders reflect them
-      const p = char.params;
-      const store = useGameStore.getState();
-      store.setPlayerParam('speed', p.speed);
-      store.setPlayerParam('stepHeight', p.stepHeight);
-      store.setPlayerParam('slopeHeight', p.slopeHeight);
-      store.setPlayerParam('capsuleRadius', p.capsuleRadius);
-      store.setPlayerParam('arrivalReach', p.arrivalReach);
-      store.setPlayerParam('hopHeight', p.hopHeight);
     }
 
     // Load new character's inventory
@@ -335,6 +334,15 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     if (useGameStore.getState().phase !== 'playing') return;
     if (e.code === 'ArrowLeft') { cycleCharacter(-1); e.preventDefault(); }
     else if (e.code === 'ArrowRight') { cycleCharacter(1); e.preventDefault(); }
+    else if (e.code === 'KeyR') {
+      if (activeCharacter) {
+        const entry = getRandomVoxChar();
+        console.log(`[Game] Random VOX skin: ${entry.name} (${entry.category})`);
+        speechSystem.onSkinChanged(activeCharacter);
+        activeCharacter.applyVoxSkin(entry);
+      }
+      e.preventDefault();
+    }
     else if (e.code === 'KeyL') {
       const ladders = terrain.getLadderDefs();
       if (ladders.length === 0) return;
@@ -436,11 +444,12 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       }
     }
 
+    // Register all characters for speech bubbles
+    speechSystem.setCharacters(characters);
+
     if (activeCharacter) {
-      speechSystem.setCharacter(controlledType);
-      speechSystem.setPlayerMesh(activeCharacter.mesh);
       useGameStore.getState().setCollectibles(0);
-      useGameStore.getState().setActiveCharacter(controlledType, CHARACTER_TEAM_COLORS[controlledType]);
+      useGameStore.getState().setActiveCharacter(getCharacterName(controlledType), CHARACTER_TEAM_COLORS[controlledType]);
     }
   }
 
@@ -473,15 +482,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       useGameStore.getState().setPaletteActive(name);
     },
     onResetPlayerParams: () => {
-      if (!activeCharacter) return;
       const d = DEFAULT_PLAYER_PARAMS;
-      activeCharacter.params.speed = d.speed;
-      activeCharacter.params.stepHeight = d.stepHeight;
-      activeCharacter.params.slopeHeight = d.slopeHeight;
-      activeCharacter.params.capsuleRadius = d.capsuleRadius;
-      activeCharacter.params.arrivalReach = d.arrivalReach;
-      activeCharacter.params.hopHeight = d.hopHeight;
-      clearCharacterParams(activeCharacter.characterType);
       const store = useGameStore.getState();
       store.setPlayerParam('speed', d.speed);
       store.setPlayerParam('stepHeight', d.stepHeight);
@@ -491,6 +492,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       store.setPlayerParam('hopHeight', d.hopHeight);
       store.setPlayerParam('magnetRadius', d.magnetRadius);
       store.setPlayerParam('magnetSpeed', d.magnetSpeed);
+      // syncAllCharacterParams will pick up the changes next frame
     },
     onResetCameraParams: () => {
       const d = DEFAULT_CAMERA_PARAMS;
@@ -549,7 +551,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
 
     if (phase === 'playing' && activeCharacter) {
       // Sync active character's movement params from settings sliders
-      syncActiveCharacterParams();
+      syncAllCharacterParams();
 
       // Update all characters uniformly
       for (const char of characters) {

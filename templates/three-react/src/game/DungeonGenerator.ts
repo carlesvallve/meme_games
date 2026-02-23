@@ -32,6 +32,10 @@ export interface DungeonOutput {
   roomCount: number;
   corridorCount: number;
   doors: DoorDef[];
+  /** Doors in grid coordinates (before world-space conversion) */
+  gridDoors: DoorDef[];
+  /** Room rects in grid coordinates */
+  rooms: { x: number; z: number; w: number; d: number }[];
 }
 
 /**
@@ -42,14 +46,16 @@ export function generateDungeon(
   mode: 'dungeon' | 'rooms',
   groundSize: number,
   wallGap = 1,
+  cellSizeOverride?: number,
+  roomSpacing?: number,
 ): DungeonOutput {
-  const cellSize = 2;
+  const cellSize = cellSizeOverride ?? 2;
   const gridW = Math.floor(groundSize / cellSize);
   const gridD = gridW;
   const wallHeight = 2.5;
 
   const result = mode === 'dungeon'
-    ? generateBSPDungeon(gridW, gridD, 3, 5)
+    ? generateBSPDungeon(gridW, gridD, 3, 6, roomSpacing)
     : generateAdjacentRooms(gridW, gridD, 4, 4, wallGap);
 
   const boxes = convertToBoxDefs(result, cellSize, wallHeight, groundSize);
@@ -65,9 +71,12 @@ export function generateDungeon(
   };
 
   const doors: DoorDef[] = [];
+  const isVoxelDungeon = cellSizeOverride !== undefined; // voxel dungeon uses cellSizeOverride
+  console.log(`[DOOR] mode=${mode}, gridDoors=${(result.doors || []).length}, corridors=${result.corridors.length}, isVoxelDungeon=${isVoxelDungeon}`);
   for (const d of result.doors || []) {
-    // Skip wall-flanking check when roomOwnership exists (wallGap=0 — walls are room-boundary based)
-    if (!result.roomOwnership) {
+    // Skip wall-flanking check for voxel dungeon (walls are full cells, not edges)
+    // and when roomOwnership exists (wallGap=0 — walls are room-boundary based)
+    if (!result.roomOwnership && !isVoxelDungeon) {
       const gx = Math.round(d.x);
       const gz = Math.round(d.z);
       const hasWalls = d.orientation === 'NS'
@@ -83,6 +92,7 @@ export function generateDungeon(
       gapWidth: d.gapWidth,
     });
   }
+  console.log(`[DOOR] final world-space doors: ${doors.length}`);
 
   return {
     boxes,
@@ -95,6 +105,8 @@ export function generateDungeon(
     roomCount: result.rooms.length,
     corridorCount: result.corridors.length,
     doors,
+    gridDoors: result.doors || [],
+    rooms: result.rooms.map(r => r.rect),
   };
 }
 
@@ -163,30 +175,27 @@ function splitBSP(rect: Rect, minSize: number, depth: number, maxDepth: number):
   return node;
 }
 
-function placeRoomsInBSP(node: BSPNode, minRoomSize: number, padding: number): void {
+function placeRoomsInBSP(node: BSPNode, minRoomSize: number, padding: number, maxRoomSize: number): void {
   if (!node.left && !node.right) {
-    // Leaf node — place a room with padding
-    const maxW = node.rect.w - padding * 2;
-    const maxD = node.rect.d - padding * 2;
-    if (maxW < minRoomSize || maxD < minRoomSize) {
-      // Partition too small, use max available
-      node.room = {
-        x: node.rect.x + padding,
-        z: node.rect.z + padding,
-        w: Math.max(minRoomSize, maxW),
-        d: Math.max(minRoomSize, maxD),
-      };
+    // Leaf node — place room inset by padding, capped at maxRoomSize
+    const availW = node.rect.w - padding * 2;
+    const availD = node.rect.d - padding * 2;
+    if (availW < minRoomSize || availD < minRoomSize) {
       return;
     }
-    const w = minRoomSize + Math.floor(Math.random() * (maxW - minRoomSize + 1));
-    const d = minRoomSize + Math.floor(Math.random() * (maxD - minRoomSize + 1));
-    const x = node.rect.x + padding + Math.floor(Math.random() * (maxW - w + 1));
-    const z = node.rect.z + padding + Math.floor(Math.random() * (maxD - d + 1));
+    const capW = Math.min(availW, maxRoomSize);
+    const capD = Math.min(availD, maxRoomSize);
+    // Random size between minRoomSize and capped max
+    const w = minRoomSize + Math.floor(Math.random() * (capW - minRoomSize + 1));
+    const d = minRoomSize + Math.floor(Math.random() * (capD - minRoomSize + 1));
+    // Center within padded area
+    const x = node.rect.x + padding + Math.floor((availW - w) / 2);
+    const z = node.rect.z + padding + Math.floor((availD - d) / 2);
     node.room = { x, z, w, d };
     return;
   }
-  if (node.left) placeRoomsInBSP(node.left, minRoomSize, padding);
-  if (node.right) placeRoomsInBSP(node.right, minRoomSize, padding);
+  if (node.left) placeRoomsInBSP(node.left, minRoomSize, padding, maxRoomSize);
+  if (node.right) placeRoomsInBSP(node.right, minRoomSize, padding, maxRoomSize);
 }
 
 function collectRooms(node: BSPNode): Rect[] {
@@ -197,9 +206,28 @@ function collectRooms(node: BSPNode): Rect[] {
   return rooms;
 }
 
-/** Get a random point inside a room rect */
+/** Get the center point of a room rect */
 function roomCenter(r: Rect): { gx: number; gz: number } {
   return { gx: Math.floor(r.x + r.w / 2), gz: Math.floor(r.z + r.d / 2) };
+}
+
+/** Get a point on room's edge closest to target, clamped to room interior */
+function roomEdgeToward(r: Rect, target: { gx: number; gz: number }): { gx: number; gz: number } {
+  const cx = Math.floor(r.x + r.w / 2);
+  const cz = Math.floor(r.z + r.d / 2);
+  const dx = target.gx - cx;
+  const dz = target.gz - cz;
+
+  // Move from center toward target, stopping at room edge
+  if (Math.abs(dx) > Math.abs(dz)) {
+    // Primarily horizontal — exit through east or west edge
+    const edgeX = dx > 0 ? r.x + r.w - 1 : r.x;
+    return { gx: edgeX, gz: Math.max(r.z, Math.min(r.z + r.d - 1, target.gz)) };
+  } else {
+    // Primarily vertical — exit through north or south edge
+    const edgeZ = dz > 0 ? r.z + r.d - 1 : r.z;
+    return { gx: Math.max(r.x, Math.min(r.x + r.w - 1, target.gx)), gz: edgeZ };
+  }
 }
 
 /** Connect two BSP sibling subtrees with an L-shaped corridor */
@@ -215,20 +243,66 @@ function connectBSPSiblings(
   connectBSPSiblings(node.left, openGrid, gridW, corridors);
   connectBSPSiblings(node.right, openGrid, gridW, corridors);
 
-  // Connect: pick a random room from each subtree
+  // Connect: pick the closest pair of rooms from each subtree
   const leftRooms = collectRooms(node.left);
   const rightRooms = collectRooms(node.right);
   if (leftRooms.length === 0 || rightRooms.length === 0) return;
 
-  const lr = leftRooms[Math.floor(Math.random() * leftRooms.length)];
-  const rr = rightRooms[Math.floor(Math.random() * rightRooms.length)];
-  const a = roomCenter(lr);
-  const b = roomCenter(rr);
+  // Find the pair with shortest center-to-center distance
+  let bestDist = Infinity;
+  let bestL = leftRooms[0], bestR = rightRooms[0];
+  for (const lr of leftRooms) {
+    for (const rr of rightRooms) {
+      const ac = roomCenter(lr), bc = roomCenter(rr);
+      const d = Math.abs(ac.gx - bc.gx) + Math.abs(ac.gz - bc.gz);
+      if (d < bestDist) { bestDist = d; bestL = lr; bestR = rr; }
+    }
+  }
+
+  // Connect from nearest edges instead of centers
+  const a = roomEdgeToward(bestL, roomCenter(bestR));
+  const b = roomEdgeToward(bestR, roomCenter(bestL));
 
   corridors.push(carveLCorridor(a.gx, a.gz, b.gx, b.gz, openGrid, gridW));
 }
 
-/** Carve an L-shaped corridor between two grid points */
+/** Connect rooms using Prim's MST — always picks the nearest unconnected room */
+function connectRoomsMST(
+  rooms: DungeonRoom[],
+  openGrid: boolean[],
+  gridW: number,
+  corridors: DungeonCorridor[],
+): void {
+  if (rooms.length < 2) return;
+
+  const connected = new Set<number>([0]);
+  const remaining = new Set<number>();
+  for (let i = 1; i < rooms.length; i++) remaining.add(i);
+
+  while (remaining.size > 0) {
+    let bestDist = Infinity;
+    let bestFrom = 0, bestTo = 0;
+
+    for (const ci of connected) {
+      const ac = roomCenter(rooms[ci].rect);
+      for (const ri of remaining) {
+        const bc = roomCenter(rooms[ri].rect);
+        const d = Math.abs(ac.gx - bc.gx) + Math.abs(ac.gz - bc.gz);
+        if (d < bestDist) { bestDist = d; bestFrom = ci; bestTo = ri; }
+      }
+    }
+
+    // Connect from nearest edges
+    const a = roomEdgeToward(rooms[bestFrom].rect, roomCenter(rooms[bestTo].rect));
+    const b = roomEdgeToward(rooms[bestTo].rect, roomCenter(rooms[bestFrom].rect));
+    corridors.push(carveLCorridor(a.gx, a.gz, b.gx, b.gz, openGrid, gridW));
+
+    connected.add(bestTo);
+    remaining.delete(bestTo);
+  }
+}
+
+/** Carve an L-shaped corridor between two grid points (1 cell wide) */
 function carveLCorridor(
   x1: number, z1: number,
   x2: number, z2: number,
@@ -267,13 +341,21 @@ export function generateBSPDungeon(
   gridW: number,
   gridD: number,
   minRoomSize = 3,
-  maxDepth = 5,
+  maxDepth = 6,
+  roomSpacingOverride?: number,
 ): DungeonResult {
-  const border = 1;
+  const border = 2;
+  const roomSpacing = Math.max(1, roomSpacingOverride ?? 3);
+  // padding = per-side inset. Gap between sibling rooms = 2*padding.
+  // We want gap ≈ roomSpacing, so padding = ceil(roomSpacing/2), min 1.
+  const padding = Math.max(1, Math.ceil(roomSpacing / 2));
   const usableRect: Rect = { x: border, z: border, w: gridW - border * 2, d: gridD - border * 2 };
 
-  const root = splitBSP(usableRect, minRoomSize, 0, maxDepth);
-  placeRoomsInBSP(root, minRoomSize, 1);
+  // minSize for BSP split must account for padding so every leaf can fit a room
+  const minPartitionSize = minRoomSize + padding * 2;
+  const maxRoomSize = 7; // cap room dimensions for balanced layouts
+  const root = splitBSP(usableRect, minPartitionSize, 0, maxDepth);
+  placeRoomsInBSP(root, minRoomSize, padding, maxRoomSize);
 
   const openGrid = new Array(gridW * gridD).fill(false);
 
@@ -292,12 +374,23 @@ export function generateBSPDungeon(
     return { rect };
   });
 
-  // Connect via BSP tree
+  // Connect rooms via minimum spanning tree (shortest corridors)
   const corridors: DungeonCorridor[] = [];
-  connectBSPSiblings(root, openGrid, gridW, corridors);
+  connectRoomsMST(rooms, openGrid, gridW, corridors);
+
+  // Eliminate 1-thick walls, re-bridge, repeat
+  eliminateThinWalls(openGrid, roomGrid, gridW, gridD);
+  ensureConnectivity(rooms, openGrid, gridW, gridD, corridors);
+  eliminateThinWalls(openGrid, roomGrid, gridW, gridD);
 
   // Detect doors: where corridor cells meet room boundaries
+  // Log corridor cell count for debugging
+  let totalCorridorCells = 0;
+  for (const c of corridors) totalCorridorCells += c.cells.length;
+  console.log(`[DOOR] ${rooms.length} rooms, ${corridors.length} corridors (${totalCorridorCells} cells)`);
+
   const doors = detectCorridorDoors(corridors, roomGrid, openGrid, gridW, gridD);
+  console.log(`[DOOR] detectCorridorDoors found ${doors.length} doors`);
 
   return { rooms, corridors, openGrid, gridW, gridD, doors };
 }
@@ -590,6 +683,8 @@ function detectCorridorDoors(
     }
   }
 
+  console.log(`[DOOR] candidates=${candidates.length}, corridorCells=${corridorSet.size}`);
+
   // Shuffle so selection isn't biased by scan order
   for (let i = candidates.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -689,6 +784,50 @@ function punchDoor(
   }
 }
 
+/**
+ * Eliminate 1-thick walls: any closed cell that has open cells on opposite
+ * cardinal sides is a shared wall. Fix by closing corridor-side open cells.
+ * Also catches near-diagonal thin spots (open cell whose neighbor is 1 cell
+ * from another open area).
+ */
+function eliminateThinWalls(
+  openGrid: boolean[],
+  roomGrid: Int8Array,
+  gridW: number,
+  gridD: number,
+): void {
+  const isOpen = (gx: number, gz: number): boolean => {
+    if (gx < 0 || gx >= gridW || gz < 0 || gz >= gridD) return false;
+    return openGrid[gz * gridW + gx];
+  };
+
+  for (let pass = 0; pass < 10; pass++) {
+    let changed = false;
+    for (let gz = 1; gz < gridD - 1; gz++) {
+      for (let gx = 1; gx < gridW - 1; gx++) {
+        if (openGrid[gz * gridW + gx]) continue; // only check closed cells
+
+        // Cardinal thin walls: open on opposite sides
+        if (isOpen(gx, gz - 1) && isOpen(gx, gz + 1)) {
+          if (roomGrid[(gz - 1) * gridW + gx] < 0) {
+            openGrid[(gz - 1) * gridW + gx] = false; changed = true;
+          } else if (roomGrid[(gz + 1) * gridW + gx] < 0) {
+            openGrid[(gz + 1) * gridW + gx] = false; changed = true;
+          }
+        }
+        if (isOpen(gx - 1, gz) && isOpen(gx + 1, gz)) {
+          if (roomGrid[gz * gridW + (gx - 1)] < 0) {
+            openGrid[gz * gridW + (gx - 1)] = false; changed = true;
+          } else if (roomGrid[gz * gridW + (gx + 1)] < 0) {
+            openGrid[gz * gridW + (gx + 1)] = false; changed = true;
+          }
+        }
+      }
+    }
+    if (!changed) break;
+  }
+}
+
 /** BFS flood fill to ensure all rooms are connected; bridge isolated components */
 function ensureConnectivity(
   rooms: DungeonRoom[],
@@ -728,24 +867,26 @@ function ensureConnectivity(
 
   if (componentId <= 1) return;
 
-  // Connect each isolated component to component 0
-  const componentCenters = new Map<number, { gx: number; gz: number }>();
+  // Connect each isolated component to component 0 using nearest room edges
+  const componentRooms = new Map<number, DungeonRoom>();
   for (const room of rooms) {
     const c = roomCenter(room.rect);
     const idx = c.gz * gridW + c.gx;
     const comp = visited[idx];
-    if (comp >= 0 && !componentCenters.has(comp)) {
-      componentCenters.set(comp, c);
+    if (comp >= 0 && !componentRooms.has(comp)) {
+      componentRooms.set(comp, room);
     }
   }
 
-  const target = componentCenters.get(0);
-  if (!target) return;
+  const targetRoom = componentRooms.get(0);
+  if (!targetRoom) return;
 
   for (let c = 1; c < componentId; c++) {
-    const src = componentCenters.get(c);
-    if (!src) continue;
-    corridors.push(carveLCorridor(src.gx, src.gz, target.gx, target.gz, openGrid, gridW));
+    const srcRoom = componentRooms.get(c);
+    if (!srcRoom) continue;
+    const a = roomEdgeToward(srcRoom.rect, roomCenter(targetRoom.rect));
+    const b = roomEdgeToward(targetRoom.rect, roomCenter(srcRoom.rect));
+    corridors.push(carveLCorridor(a.gx, a.gz, b.gx, b.gz, openGrid, gridW));
   }
 }
 

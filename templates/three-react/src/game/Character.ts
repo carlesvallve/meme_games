@@ -1,7 +1,10 @@
 import * as THREE from 'three';
-import { useGameStore, loadCharacterParams } from '../store';
-import { createCharacterMesh } from './characters';
+import { useGameStore } from '../store';
+import { createCharacterMesh, voxRoster } from './characters';
 import type { CharacterType } from './characters';
+import { loadVoxCharacter } from '../utils/VoxModelLoader';
+import type { VoxCharacterData, VoxAnimFrames } from '../utils/VoxModelLoader';
+import type { VoxCharEntry } from './VoxCharacterDB';
 import { Entity, Layer } from './Entity';
 import type { Terrain } from './Terrain';
 import type { NavGrid } from './NavGrid';
@@ -100,6 +103,17 @@ export class Character implements BehaviorAgent {
   protected footSfxTimer = 0;
   private climbState: ClimbState | null = null;
 
+  // ── VOX animation ──────────────────────────────────────────────
+  /** Currently applied VOX skin entry (for personality data) */
+  voxEntry: VoxCharEntry | null = null;
+  private voxData: VoxCharacterData | null = null;
+  private voxAnimState: 'idle' | 'walk' | 'action' = 'idle';
+  private voxFrameIndex = 0;
+  private voxFrameTimer = 0;
+  private voxLoaded = false;
+  /** Frame rates per animation type */
+  private static readonly VOX_FPS: Record<string, number> = { idle: 3, walk: 8, action: 6 };
+
   /** Per-character movement parameters (mutable, shared by reference with behaviors) */
   params: MovementParams;
 
@@ -135,8 +149,8 @@ export class Character implements BehaviorAgent {
     this.characterType = type;
     this.ladderDefs = ladderDefs;
 
-    // Mesh
-    this.mesh = createCharacterMesh(type);
+    // Mesh (placeholder — replaced by VOX skin below)
+    this.mesh = createCharacterMesh();
     this.mesh.position.copy(position);
     this.groundY = position.y;
     this.visualGroundY = position.y;
@@ -160,21 +174,16 @@ export class Character implements BehaviorAgent {
     this.fillLight.castShadow = false;
     scene.add(this.fillLight);
 
-    // Initialize per-character movement params: load from localStorage or fall back to store defaults
-    const savedParams = loadCharacterParams(type);
-    if (savedParams) {
-      this.params = { ...savedParams };
-    } else {
-      const pp = useGameStore.getState().playerParams;
-      this.params = {
-        speed: pp.speed,
-        stepHeight: pp.stepHeight,
-        slopeHeight: pp.slopeHeight,
-        capsuleRadius: pp.capsuleRadius,
-        arrivalReach: pp.arrivalReach,
-        hopHeight: pp.hopHeight,
-      };
-    }
+    // Initialize movement params from store defaults
+    const pp = useGameStore.getState().playerParams;
+    this.params = {
+      speed: pp.speed,
+      stepHeight: pp.stepHeight,
+      slopeHeight: pp.slopeHeight,
+      capsuleRadius: pp.capsuleRadius,
+      arrivalReach: pp.arrivalReach,
+      hopHeight: pp.hopHeight,
+    };
 
     // Default behavior: roaming (receives shared reference to this.params)
     this.defaultBehavior = new Roaming({ navGrid, ladderDefs }, this.params);
@@ -185,6 +194,12 @@ export class Character implements BehaviorAgent {
       this.debugLineMat = new THREE.LineBasicMaterial({ color: DEBUG_LINE_COLOR, transparent: true, opacity: 0.6 });
       this.debugNodeMat = new THREE.MeshBasicMaterial({ color: DEBUG_NODE_COLOR, transparent: true, opacity: 0.7 });
       this.debugGoalMat = new THREE.MeshBasicMaterial({ color: DEBUG_GOAL_COLOR, transparent: true, opacity: 0.8 });
+    }
+
+    // Auto-apply VOX skin from the roster
+    const rosterEntry = voxRoster[type];
+    if (rosterEntry) {
+      this.applyVoxSkin(rosterEntry);
     }
   }
 
@@ -213,6 +228,66 @@ export class Character implements BehaviorAgent {
     return currentHopHalf;
   }
 
+  // ── VOX skin loading ─────────────────────────────────────────────
+
+  /** Apply a VOX skin from the character database. Disposes previous VOX geometries. */
+  async applyVoxSkin(entry: VoxCharEntry): Promise<void> {
+    this.voxEntry = entry;
+    // Dispose previous VOX data if any
+    if (this.voxData) {
+      this.voxData.base.dispose();
+      for (const frames of Object.values(this.voxData.frames)) {
+        for (const geo of frames) {
+          if (geo && geo !== this.voxData.base) geo.dispose();
+        }
+      }
+      this.voxData = null;
+      this.voxLoaded = false;
+    }
+
+    try {
+      const data = await loadVoxCharacter(entry.folderPath, entry.prefix);
+      this.voxData = data;
+      this.voxLoaded = true;
+      this.voxAnimState = 'idle';
+      this.voxFrameIndex = 0;
+      this.voxFrameTimer = 0;
+      // Swap geometry
+      this.mesh.geometry.dispose();
+      this.mesh.geometry = data.base;
+      console.log(`[Character] VOX skin applied: '${entry.name}' (${entry.category})`);
+    } catch (err) {
+      console.error(`[Character] Failed to apply VOX skin '${entry.name}':`, err);
+    }
+  }
+
+  /** Update VOX frame-swap animation */
+  private updateVoxAnimation(dt: number, isMoving: boolean): void {
+    if (!this.voxData || !this.voxLoaded) return;
+
+    const newState = isMoving ? 'walk' : 'idle';
+    if (newState !== this.voxAnimState) {
+      this.voxAnimState = newState;
+      this.voxFrameIndex = 0;
+      this.voxFrameTimer = 0;
+    }
+
+    const frames = this.voxData.frames[this.voxAnimState];
+    if (frames.length === 0) return;
+
+    const fps = Character.VOX_FPS[this.voxAnimState] ?? 4;
+    this.voxFrameTimer += dt;
+
+    if (this.voxFrameTimer >= 1 / fps) {
+      this.voxFrameTimer -= 1 / fps;
+      this.voxFrameIndex = (this.voxFrameIndex + 1) % frames.length;
+      const newGeo = frames[this.voxFrameIndex];
+      if (newGeo && newGeo !== this.mesh.geometry) {
+        this.mesh.geometry = newGeo;
+      }
+    }
+  }
+
   // ── Selection & control switching ────────────────────────────────
 
   get selected(): boolean { return this._selected; }
@@ -229,17 +304,6 @@ export class Character implements BehaviorAgent {
     this._selected = false;
     this.playerControl = null;
     this.behavior = this.defaultBehavior;
-  }
-
-  /** Reset movement params to current store defaults. */
-  resetParams(): void {
-    const pp = useGameStore.getState().playerParams;
-    this.params.speed = pp.speed;
-    this.params.stepHeight = pp.stepHeight;
-    this.params.slopeHeight = pp.slopeHeight;
-    this.params.capsuleRadius = pp.capsuleRadius;
-    this.params.arrivalReach = pp.arrivalReach;
-    this.params.hopHeight = pp.hopHeight;
   }
 
   /** Set a click-to-move goal via A* pathfinding. */
@@ -304,6 +368,7 @@ export class Character implements BehaviorAgent {
     this.mesh.rotation.y = this.facing;
 
     this.moveTime += dt * this.hopFrequency;
+    this.updateVoxAnimation(dt, true);
 
     return true;
   }
@@ -349,6 +414,7 @@ export class Character implements BehaviorAgent {
       this.visualGroundY,
       1 - Math.exp(-15 * dt),
     );
+    this.updateVoxAnimation(dt, false);
   }
 
   updateTorch(dt: number): void {

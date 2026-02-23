@@ -3,11 +3,14 @@
 // the player approaches and close when they walk away. Uses a
 // dynamicDebris box on Terrain for collision blocking when closed.
 // Wide openings (gapWidth >= 2) get double doors that swing apart.
+// Supports both procedural BoxGeometry doors and VOX door meshes.
 
 import * as THREE from 'three';
 import type { DoorDef } from './DungeonGenerator';
 import type { Terrain, DebrisBox } from './Terrain';
 import { Entity, Layer } from './Entity';
+import { getRandomTile } from './VoxDungeonDB';
+import { getTileGeometry, getCellSize } from './VoxDungeonLoader';
 
 function easeInOutCubic(t: number): number {
   return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
@@ -28,11 +31,12 @@ interface DoorObj {
   worldZ: number;
 }
 
-const OPEN_DIST = 2.5;
-const CLOSE_DIST = 3.5;
+const OPEN_DIST = 1.2;
+const CLOSE_DIST = 1.2;
+const LATERAL_TOLERANCE = 0.6; // max offset along the door's parallel axis
 const ANIM_SPEED = 3.0;
 
-// Door dimensions
+// Procedural door dimensions
 const DOOR_HEIGHT = 2.2;
 const DOOR_THICK = 0.1;
 const WALL_STUB = 0.2;
@@ -42,34 +46,112 @@ export class DoorSystem {
   private readonly terrain: Terrain;
   private readonly parent: THREE.Object3D;
 
-  constructor(parent: THREE.Object3D, terrain: Terrain, doorDefs: DoorDef[], cellSize: number) {
+  constructor(
+    parent: THREE.Object3D,
+    terrain: Terrain,
+    doorDefs: DoorDef[],
+    cellSize: number,
+    useVoxDoors = false,
+  ) {
     this.parent = parent;
     this.terrain = terrain;
 
-    const doorMat = new THREE.MeshStandardMaterial({
-      color: 0x6B4226,
-      roughness: 0.7,
-      metalness: 0.15,
-      emissive: 0x1a0a00,
-      emissiveIntensity: 0.2,
-    });
-
-    const stubMat = new THREE.MeshStandardMaterial({
-      color: 0x2a2a3e,
-      roughness: 0.85,
-      metalness: 0.1,
-    });
-
-    const plankMat = new THREE.MeshStandardMaterial({
-      color: 0x8B5E3C,
-      roughness: 0.8,
-      metalness: 0.1,
-    });
-
-    for (const def of doorDefs) {
-      this.createDoor(def, cellSize, doorMat, stubMat, plankMat);
+    if (useVoxDoors) {
+      for (const def of doorDefs) {
+        this.createVoxDoor(def, cellSize);
+      }
+    } else {
+      const doorMat = new THREE.MeshStandardMaterial({
+        color: 0x6B4226, roughness: 0.7, metalness: 0.15,
+        emissive: 0x1a0a00, emissiveIntensity: 0.2,
+      });
+      const stubMat = new THREE.MeshStandardMaterial({
+        color: 0x2a2a3e, roughness: 0.85, metalness: 0.1,
+      });
+      const plankMat = new THREE.MeshStandardMaterial({
+        color: 0x8B5E3C, roughness: 0.8, metalness: 0.1,
+      });
+      for (const def of doorDefs) {
+        this.createDoor(def, cellSize, doorMat, stubMat, plankMat);
+      }
     }
   }
+
+  // ── VOX door creation ──
+
+  private createVoxDoor(def: DoorDef, cellSize: number): void {
+    const isNS = def.orientation === 'NS';
+    const voxCellSize = getCellSize(); // mesh scale (1.5m)
+
+    const group = new THREE.Group();
+    group.position.set(def.x, 0, def.z);
+
+    // VOX door panel faces -Z by default.
+    // NS = narrow in Z, corridor runs along X → door panel perpendicular to X → rotate 90°
+    // EW = narrow in X, corridor runs along Z → door panel perpendicular to Z → no rotation
+    if (isNS) {
+      group.rotation.y = Math.PI / 2;
+    }
+
+    // Get VOX door geometry
+    const doorEntry = getRandomTile('door');
+    const doorGeo = doorEntry ? getTileGeometry(doorEntry) : null;
+
+    if (doorGeo) {
+      const pivot = new THREE.Group();
+      // Hinge at one edge of the cell
+      pivot.position.set(-voxCellSize / 2, 0, 0);
+      group.add(pivot);
+
+      const voxMat = new THREE.MeshStandardMaterial({
+        vertexColors: true,
+        roughness: 0.7,
+        metalness: 0.15,
+      });
+
+      const doorMesh = new THREE.Mesh(doorGeo, voxMat);
+      // Door mesh centered at origin — offset so it extends from the hinge
+      doorMesh.position.set(voxCellSize / 2, 0, 0);
+      doorMesh.castShadow = true;
+      doorMesh.receiveShadow = true;
+      pivot.add(doorMesh);
+
+      this.parent.add(group);
+
+      const halfOpening = cellSize / 2;
+      const entity = new Entity(group, {
+        layer: Layer.Architecture,
+        radius: halfOpening,
+        weight: Infinity,
+      });
+
+      const debrisBox: DebrisBox = {
+        x: def.x,
+        z: def.z,
+        halfW: isNS ? DOOR_THICK / 2 : halfOpening,
+        halfD: isNS ? halfOpening : DOOR_THICK / 2,
+        height: DOOR_HEIGHT,
+      };
+
+      this.terrain.addDynamicDebris(debrisBox);
+
+      this.doors.push({
+        group,
+        pivots: [pivot],
+        isDouble: false,
+        entity,
+        debrisBox,
+        isOpen: false,
+        openProgress: 0,
+        swingSign: 1,
+        orientation: def.orientation,
+        worldX: def.x,
+        worldZ: def.z,
+      });
+    }
+  }
+
+  // ── Procedural door creation (original) ──
 
   private createDoor(
     def: DoorDef,
@@ -124,14 +206,12 @@ export class DoorSystem {
 
     if (isDouble) {
       // Double doors: two panels, each hinged at the outer edge
-      // Left panel: hinge at left stub edge, swings inward
       const leftPivot = new THREE.Group();
       leftPivot.position.set(-halfOpening + WALL_STUB, 0, 0);
       group.add(leftPivot);
       this.addDoorPanel(leftPivot, panelWidth, doorMat, plankMat);
       pivots.push(leftPivot);
 
-      // Right panel: hinge at right stub edge, swings opposite
       const rightPivot = new THREE.Group();
       rightPivot.position.set(halfOpening - WALL_STUB, 0, 0);
       group.add(rightPivot);
@@ -215,15 +295,23 @@ export class DoorSystem {
       for (const pos of characterPositions) {
         const dx = pos.x - door.worldX;
         const dz = pos.z - door.worldZ;
-        const dist = Math.sqrt(dx * dx + dz * dz);
         const dy = Math.abs(pos.y - 0);
+        if (dy > stepHeight) continue;
 
-        if (dist < closestDist && dy <= stepHeight) {
-          closestDist = dist;
+        // Perpendicular = distance along the axis the door faces
+        // Lateral = distance along the door's width axis
+        const perp = door.orientation === 'EW' ? Math.abs(dz) : Math.abs(dx);
+        const lateral = door.orientation === 'EW' ? Math.abs(dx) : Math.abs(dz);
+
+        // Only trigger when character is in front of the door, not diagonally
+        if (lateral > LATERAL_TOLERANCE) continue;
+
+        if (perp < closestDist) {
+          closestDist = perp;
           closestDx = dx;
           closestDz = dz;
         }
-        if (dist < OPEN_DIST && dy <= stepHeight) {
+        if (perp < OPEN_DIST) {
           anyInRange = true;
         }
       }

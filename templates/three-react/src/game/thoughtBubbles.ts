@@ -1,5 +1,3 @@
-import type { CharacterType } from './characters';
-
 export const THOUGHT_BUBBLE_LINES: readonly string[] = [
   'Neon never sleeps.', 'Rain tastes electric.', 'Memory feels rented.',
   'Signal is weak.', 'Sky is artificial.', 'I was upgraded.',
@@ -36,14 +34,6 @@ export const THOUGHT_BUBBLE_LINES: readonly string[] = [
   'Almost human.', 'Almost free.', 'Almost gone.',
 ];
 
-export const DOG_ONOMATOPOEIA: readonly string[] = [
-  'Woof!', 'Arf!', 'Ruff!', 'Woof woof!', 'Arf arf!',
-  'Ruff ruff!', 'Grruff.', 'Woof?', 'Arf?', 'Huff.',
-  'Sniff.', 'Whine.', 'Yip!', 'Yap!', 'Bork!',
-  'Awoo?', 'Grrr...', 'Woof.', 'Arf.', 'Ruff.',
-  'Bark!', 'Woof woof.', 'Yawn.', 'Snort.',
-];
-
 export const CELEBRATION_LINES: readonly string[] = [
   'Target neutralized.', 'Objective secured.', 'That felt alive.',
   'Energy rising.', 'Signal amplified.', 'We move forward.',
@@ -55,16 +45,10 @@ export const CELEBRATION_LINES: readonly string[] = [
   'We adapt.', 'We override.', 'We prevail.',
 ];
 
-export function getRandomThought(characterType?: CharacterType): string {
-  if (characterType === 'dog') {
-    return DOG_ONOMATOPOEIA[Math.floor(Math.random() * DOG_ONOMATOPOEIA.length)];
-  }
+export function getRandomThought(): string {
   return THOUGHT_BUBBLE_LINES[Math.floor(Math.random() * THOUGHT_BUBBLE_LINES.length)];
 }
 
-export function getRandomCelebration(characterType?: CharacterType): string {
-  if (characterType === 'dog') {
-    return DOG_ONOMATOPOEIA[Math.floor(Math.random() * DOG_ONOMATOPOEIA.length)];
-  }
+export function getRandomCelebration(): string {
   return CELEBRATION_LINES[Math.floor(Math.random() * CELEBRATION_LINES.length)];
 }
