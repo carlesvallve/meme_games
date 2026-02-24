@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import type { Character } from './Character';
-import { audioSystem } from '../utils/AudioSystem';
 
 // ── Gore chunk (flying body parts + blood droplets) ─────────────────
 
@@ -39,6 +38,11 @@ interface FloorSplat {
 const MAX_CHUNKS = 60;
 const MAX_STAINS = 120;
 const MAX_FLOOR_SPLATS = 50;
+
+/** Random lifetime for any gore element (chunks, splats, cubes) so nothing consistently outlasts the rest. */
+function randGoreLifetime(): number {
+  return 4 + Math.random() * 14; // 4–18s
+}
 
 const CHUNK_GRAVITY = 12;
 const CHUNK_DRAG = 1.5;
@@ -124,16 +128,32 @@ function randBloodColor(): THREE.Color {
 
 // ── GoreSystem ──────────────────────────────────────────────────────
 
+/** Optional: (x, z) => floor normal at that point; used to align blood splats to terrain. */
+export type GetFloorNormal = (x: number, z: number) => THREE.Vector3;
+/** Optional: (x, z) => terrain height; used so falling gore lands on actual terrain. */
+export type GetTerrainY = (x: number, z: number) => number;
+
+const WORLD_UP = new THREE.Vector3(0, 1, 0);
+const CHUNK_REST_SKIN = 0.02;
+
 export class GoreSystem {
   private chunks: GoreChunk[] = [];
   private stains: BloodStain[] = [];
   private floorSplats: FloorSplat[] = [];
   private readonly scene: THREE.Scene;
+  private readonly getFloorNormal: GetFloorNormal | null;
+  private readonly getTerrainY: GetTerrainY | null;
   private readonly chunkGeo = new THREE.BoxGeometry(1, 1, 1);
   private readonly splatGeo: THREE.PlaneGeometry;
 
-  constructor(scene: THREE.Scene) {
+  constructor(
+    scene: THREE.Scene,
+    getFloorNormal?: GetFloorNormal | null,
+    getTerrainY?: GetTerrainY | null,
+  ) {
     this.scene = scene;
+    this.getFloorNormal = getFloorNormal ?? null;
+    this.getTerrainY = getTerrainY ?? null;
     this.splatGeo = new THREE.PlaneGeometry(1, 1);
     this.splatGeo.rotateX(-Math.PI / 2);
   }
@@ -151,12 +171,12 @@ export class GoreSystem {
     const height = maxY - minY;
     if (height < 0.01) return;
 
-    // Body part chunks
+    // Body part chunks (slightly larger for visibility)
     const bands: Array<[number, number, number, number, number]> = [
-      [0.80, 1.00, 1, 0.025, 0.045],
-      [0.40, 0.80, 1, 0.035, 0.065],
-      [0.50, 0.80, Math.random() < 0.6 ? 1 : 2, 0.02, 0.04],
-      [0.00, 0.35, 1 + Math.floor(Math.random() * 2), 0.025, 0.05],
+      [0.80, 1.00, 1, 0.032, 0.058],
+      [0.40, 0.80, 1, 0.045, 0.082],
+      [0.50, 0.80, Math.random() < 0.6 ? 1 : 2, 0.026, 0.052],
+      [0.00, 0.35, 1 + Math.floor(Math.random() * 2), 0.032, 0.065],
     ];
 
     for (const [startFrac, endFrac, count, sizeMin, sizeMax] of bands) {
@@ -167,25 +187,25 @@ export class GoreSystem {
         this.spawnChunk(
           pos.x, pos.y + (yMin + yMax) * 0.5, pos.z,
           groundY, color,
-          sizeMin, sizeMax, 2.0 + Math.random() * 2.5, 3.0 + Math.random() * 1.0,
+          sizeMin, sizeMax, 1.3 + Math.random() * 1.5, 3.0 + Math.random() * 1.0,
         );
       }
     }
 
-    // Blood droplets — many tiny cubes
-    const bloodCount = 10 + Math.floor(Math.random() * 8);
+    // Blood droplets — slightly fewer, less ejection speed
+    const bloodCount = 8 + Math.floor(Math.random() * 6);
     for (let i = 0; i < bloodCount; i++) {
       this.spawnChunk(
         pos.x, pos.y + height * (0.1 + Math.random() * 0.5), pos.z,
         groundY, randBloodColor(),
-        0.008, 0.025, 2.0 + Math.random() * 4.0, 1.0 + Math.random() * 0.8,
+        0.01, 0.032, 1.2 + Math.random() * 2.2, 1.0 + Math.random() * 0.8,
       );
     }
 
-    // Floor splats — many tiny puddles, radial spread
-    const splatCount = 5 + Math.floor(Math.random() * 4);
+    // Floor splats — smaller radial spread
+    const splatCount = 4 + Math.floor(Math.random() * 3);
     for (let i = 0; i < splatCount; i++) {
-      const dist = Math.random() * 0.5;
+      const dist = Math.random() * 0.35;
       const angle = Math.random() * Math.PI * 2;
       this.spawnFloorSplat(
         pos.x + Math.cos(angle) * dist,
@@ -204,7 +224,7 @@ export class GoreSystem {
         if (distSq > 2.5 * 2.5) continue; // within 2.5m
         // More stains the closer you are
         const proximity = 1 - Math.sqrt(distSq) / 2.5;
-        const stainCount = 3 + Math.floor(proximity * 8);
+        const stainCount = 5 + Math.floor(proximity * 12);
         this.spawnStainsOnCharacter(char.mesh, stainCount);
       }
     }
@@ -217,13 +237,13 @@ export class GoreSystem {
     groundY: number,
     attacker?: THREE.Mesh,
   ): void {
-    // Small blood droplets flying from impact point
+    // Small blood droplets flying from impact point (slightly larger)
     const count = 4 + Math.floor(Math.random() * 4);
     for (let i = 0; i < count; i++) {
       this.spawnChunk(
         x, y + 0.1 + Math.random() * 0.2, z,
         groundY, randBloodColor(),
-        0.006, 0.018, 1.5 + Math.random() * 2.5, 0.6 + Math.random() * 0.5,
+        0.008, 0.024, 1.5 + Math.random() * 2.5, 0.6 + Math.random() * 0.5,
       );
     }
 
@@ -239,7 +259,7 @@ export class GoreSystem {
 
     // Stain the attacker (blood splashes back on you)
     if (attacker) {
-      const stainCount = 1 + Math.floor(Math.random() * 2);
+      const stainCount = 2 + Math.floor(Math.random() * 3);
       this.spawnStainsOnCharacter(attacker, stainCount);
     }
   }
@@ -291,8 +311,7 @@ export class GoreSystem {
     positionStainFromGeometry(mesh, posAttr, nrmAttr, idx, normalOffset);
 
     parent.add(mesh);
-    // Wide spread of lifetimes so stains fade out individually at different times
-    const lifetime = 3 + Math.random() * Math.random() * 25; // bias toward shorter: mostly 3-10s, some up to 28s
+    const lifetime = randGoreLifetime();
     this.stains.push({
       mesh, parent, vertexIndex: idx, normalOffset,
       age: 0,
@@ -308,7 +327,7 @@ export class GoreSystem {
     color: THREE.Color,
     sizeMin: number, sizeMax: number,
     ejectSpeed: number,
-    lifetime: number,
+    _lifetimeHint: number,
   ): void {
     while (this.chunks.length >= MAX_CHUNKS) {
       const old = this.chunks.shift()!;
@@ -344,6 +363,7 @@ export class GoreSystem {
     );
 
     const avgSize = (sx + sy + sz) / 3;
+    const lifetime = randGoreLifetime();
     this.chunks.push({ mesh, vel, groundY, age: 0, lifetime, bounced: false, size: avgSize });
   }
 
@@ -373,10 +393,14 @@ export class GoreSystem {
     const scaleZ = size * (0.6 + Math.random() * 0.8);
     mesh.scale.set(scaleX, 1, scaleZ);
     mesh.position.set(x, y, z);
-    mesh.rotation.y = Math.random() * Math.PI * 2;
+    if (this.getFloorNormal) {
+      const normal = this.getFloorNormal(x, z).clone().normalize();
+      mesh.quaternion.setFromUnitVectors(WORLD_UP, normal);
+    }
+    mesh.rotateY(Math.random() * Math.PI * 2);
     this.scene.add(mesh);
 
-    this.floorSplats.push({ mesh, age: 0, lifetime: 10 + Math.random() * 5, startOpacity: opacity });
+    this.floorSplats.push({ mesh, age: 0, lifetime: randGoreLifetime(), startOpacity: opacity });
 
     // 1-3 tiny blood cubes flattened on the floor next to the splat
     const cubeCount = 1 + Math.floor(Math.random() * 3);
@@ -411,10 +435,14 @@ export class GoreSystem {
     const mesh = new THREE.Mesh(this.chunkGeo, mat);
     mesh.scale.set(w, h, d);
     mesh.position.set(x, y, z);
-    mesh.rotation.y = Math.random() * Math.PI * 2;
+    if (this.getFloorNormal) {
+      const normal = this.getFloorNormal(x, z).clone().normalize();
+      mesh.quaternion.setFromUnitVectors(WORLD_UP, normal);
+    }
+    mesh.rotateY(Math.random() * Math.PI * 2);
     this.scene.add(mesh);
 
-    this.floorSplats.push({ mesh, age: 0, lifetime: 10 + Math.random() * 5, startOpacity: (mat as THREE.MeshStandardMaterial).opacity });
+    this.floorSplats.push({ mesh, age: 0, lifetime: randGoreLifetime(), startOpacity: (mat as THREE.MeshStandardMaterial).opacity });
   }
 
   // ── Update ────────────────────────────────────────────────────────
@@ -449,22 +477,31 @@ export class GoreSystem {
       chunk.mesh.rotation.x += chunk.vel.x * dt * 4;
       chunk.mesh.rotation.z += chunk.vel.z * dt * 4;
 
-      if (chunk.mesh.position.y <= chunk.groundY + 0.02) {
-        chunk.mesh.position.y = chunk.groundY + 0.02;
+      const x = chunk.mesh.position.x;
+      const z = chunk.mesh.position.z;
+      let groundY = this.getTerrainY ? this.getTerrainY(x, z) : chunk.groundY;
+      // Box terrain (e.g. voxel dungeon) returns wall *tops* when (x,z) is in a wall footprint, causing gore to float. Cap to spawn floor + margin.
+      const maxGroundY = chunk.groundY + 0.4;
+      if (groundY > maxGroundY) groundY = chunk.groundY;
+      const restY = groundY + CHUNK_REST_SKIN;
+
+      if (chunk.mesh.position.y <= restY) {
+        chunk.mesh.position.y = restY;
         const impactSpeed = Math.abs(chunk.vel.y);
         if (!chunk.bounced) {
           chunk.bounced = true;
           chunk.vel.y *= CHUNK_BOUNCE_Y;
           chunk.vel.x *= CHUNK_BOUNCE_XZ;
           chunk.vel.z *= CHUNK_BOUNCE_XZ;
-          // Wet landing thud — louder for bigger chunks, scaled by impact speed
-          if (chunk.size > 0.012 && impactSpeed > 1) {
-            const vol = Math.min(impactSpeed / 10, 1) * Math.min(chunk.size / 0.05, 1);
-            audioSystem.sfxAt('thud', chunk.mesh.position.x, chunk.mesh.position.z, vol);
-          }
         } else {
           chunk.vel.set(0, 0, 0);
         }
+      }
+      // Keep landed chunks snapped to terrain (slopes, stairs, etc.); use same cap so we don't push to wall tops
+      if (chunk.bounced && chunk.vel.lengthSq() < 1e-6 && this.getTerrainY) {
+        let snapY = this.getTerrainY(x, z);
+        if (snapY > maxGroundY) snapY = chunk.groundY;
+        chunk.mesh.position.y = snapY + CHUNK_REST_SKIN;
       }
 
       const fadeStart = chunk.lifetime * 0.6;

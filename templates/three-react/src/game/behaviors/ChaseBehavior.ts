@@ -33,7 +33,7 @@ export class ChaseBehavior extends Behavior {
   constructor(
     ctx: BehaviorContext,
     movementParams: MovementParams,
-    attackRange = 0.8,
+    attackRange = 0.5,
     attackCooldown = 1.2,
     chaseRange = 8,
   ) {

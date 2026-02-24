@@ -27,7 +27,55 @@ export interface MovementParams {
   hopHeight: number;
   movementMode: MovementMode;
   showPathDebug: boolean;
+  /** Melee attack reach (distance); used for arc check. */
+  attackReach: number;
+  /** Melee attack arc half-angle in radians (total arc = 2 * attackArcHalf). */
+  attackArcHalf: number;
+  /** Melee damage dealt per hit. */
+  attackDamage: number;
+  /** Seconds between melee attacks (AI). */
+  attackCooldown: number;
+  /** Chase/aggro range for AI (units). */
+  chaseRange: number;
+  /** Knockback impulse speed when hit. */
+  knockbackSpeed: number;
+  /** Knockback velocity decay rate (exp(-knockbackDecay * dt)). */
+  knockbackDecay: number;
+  /** Invulnerability duration after hit (seconds). */
+  invulnDuration: number;
+  /** Hit flash duration (seconds). */
+  flashDuration: number;
+  /** Stun duration when hit (seconds). */
+  stunDuration: number;
+  /** Attack animation / hit window duration (seconds). */
+  attackDuration: number;
+  /** Exhaustion duration after combo (seconds). */
+  exhaustDuration: number;
 }
+
+/** Default params for any character. Enemy overrides in constructor. */
+export const DEFAULT_CHARACTER_PARAMS: MovementParams = {
+  speed: 4,
+  stepHeight: 0.4,
+  slopeHeight: 0.75,
+  capsuleRadius: 0.1,
+  arrivalReach: 0.05,
+  hopHeight: 0.05,
+  movementMode: 'grid' as MovementMode,
+  showPathDebug: true,
+  attackReach: 0.5,
+  attackArcHalf: Math.PI / 3,
+  attackDamage: 1,
+  attackCooldown: 0,
+  chaseRange: 0,
+  knockbackSpeed: 1.5,
+  knockbackDecay: 14,
+  invulnDuration: 0.8,
+  flashDuration: 0.15,
+  stunDuration: 0.08,
+  attackDuration: 0.2,
+  exhaustDuration: 1.0,
+};
 
 export function lerpAngle(current: number, target: number, t: number): number {
   let diff = target - current;
@@ -218,18 +266,9 @@ export class Character implements BehaviorAgent {
     this.fillLight.castShadow = false;
     scene.add(this.fillLight);
 
-    // Initialize movement params from store defaults
+    // Params: Character defaults first, then overlay store (Character owns combat/movement defaults)
     const pp = useGameStore.getState().playerParams;
-    this.params = {
-      speed: pp.speed,
-      stepHeight: pp.stepHeight,
-      slopeHeight: pp.slopeHeight,
-      capsuleRadius: pp.capsuleRadius,
-      arrivalReach: pp.arrivalReach,
-      hopHeight: pp.hopHeight,
-      movementMode: pp.movementMode,
-      showPathDebug: pp.showPathDebug,
-    };
+    this.params = { ...DEFAULT_CHARACTER_PARAMS, ...pp };
 
     // Default behavior: roaming (receives shared reference to this.params)
     this.defaultBehavior = new Roaming({ navGrid, ladderDefs }, this.params);
@@ -267,7 +306,9 @@ export class Character implements BehaviorAgent {
       if (this._selected) {
         audioSystem.sfx('step');
       } else {
-        audioSystem.sfxAt('step', this.mesh.position.x, this.mesh.position.z);
+        // Enemies: super low step volume so they're not annoying
+        const stepVol = this.isEnemy ? 0.06 : 1;
+        audioSystem.sfxAt('step', this.mesh.position.x, this.mesh.position.z, stepVol);
       }
     }
 
@@ -597,21 +638,19 @@ export class Character implements BehaviorAgent {
     // Store hit direction (from attacker toward victim) for gore ejection
     this.lastHitDirX = dist > 0.001 ? dx / dist : 0;
     this.lastHitDirZ = dist > 0.001 ? dz / dist : 0;
-    const knockbackSpeed = this.isEnemy ? 5 : 4;
+    const knockbackSpeed = this.params.knockbackSpeed;
     if (dist > 0.001) {
       this.knockbackVX = (dx / dist) * knockbackSpeed;
       this.knockbackVZ = (dz / dist) * knockbackSpeed;
     } else {
-      // Random direction if on same spot
       const angle = Math.random() * Math.PI * 2;
       this.knockbackVX = Math.cos(angle) * knockbackSpeed;
       this.knockbackVZ = Math.sin(angle) * knockbackSpeed;
     }
 
-    // Timers
-    this.invulnTimer = this.isEnemy ? 0.5 : 0.8;
-    this.flashTimer = 0.15;
-    this.stunTimer = this.isEnemy ? 0.4 : 0.2;
+    this.invulnTimer = this.params.invulnDuration;
+    this.flashTimer = this.params.flashDuration;
+    this.stunTimer = this.params.stunDuration;
 
     // Store original emissive for flash
     const mat = this.mesh.material as THREE.MeshStandardMaterial;
@@ -634,13 +673,12 @@ export class Character implements BehaviorAgent {
 
     this.isAttacking = true;
     this.attackJustStarted = true;
-    this.attackTimer = 0.2;
+    this.attackTimer = this.params.attackDuration;
     this.timeSinceLastAttack = 0;
     this.attackCount++;
 
-    // Exhaustion after 7 rapid slashes (togglable from settings)
     if (useGameStore.getState().playerParams.exhaustionEnabled && this.attackCount >= 7) {
-      this.exhaustTimer = 1.0;
+      this.exhaustTimer = this.params.exhaustDuration;
       this.attackCount = 0;
     }
 
@@ -684,7 +722,7 @@ export class Character implements BehaviorAgent {
       this.mesh.position.z = resolved.z;
       this.groundY = resolved.y;
 
-      const decay = Math.exp(-5 * dt);
+      const decay = Math.exp(-this.params.knockbackDecay * dt);
       this.knockbackVX *= decay;
       this.knockbackVZ *= decay;
     }
@@ -706,7 +744,8 @@ export class Character implements BehaviorAgent {
       const mat = this.mesh.material as THREE.MeshStandardMaterial;
       if (mat.emissive) {
         mat.emissive.setRGB(1, 1, 1);
-        mat.emissiveIntensity = 2.0 * (this.flashTimer / 0.15);
+        const fd = Math.max(this.params.flashDuration, 0.001);
+        mat.emissiveIntensity = 2.0 * (this.flashTimer / fd);
       }
       if (this.flashTimer <= 0) {
         this.flashTimer = 0;

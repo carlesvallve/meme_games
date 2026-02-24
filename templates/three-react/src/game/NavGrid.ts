@@ -431,8 +431,9 @@ export class NavGrid {
           h01 * (1 - fx) * fz + h11 * fx * fz;
 
         // Block cells near world edge to prevent pathfinding outside visible mesh.
-        // NavGrid covers 40m but heightmap mesh is 36m (2m margin each side = 4 cells).
-        const EDGE_MARGIN = 5;
+        // NavGrid is wider than the heightmap mesh by 2m on each side.
+        // Compute margin in cells based on actual cell size.
+        const EDGE_MARGIN = Math.ceil(2.5 / cellSize);
         const nearEdge = gx < EDGE_MARGIN || gx >= width - EDGE_MARGIN ||
                          gz < EDGE_MARGIN || gz >= height - EDGE_MARGIN;
 
@@ -497,18 +498,20 @@ export class NavGrid {
     };
 
     // 2. Block cells based on corner heights.
-    // Sample the 4 corners of each cell. If the height range exceeds stepHeight,
-    // the cell is on a cliff face and is unwalkable — simple and robust.
+    // Sample the 4 corners of each cell. If the height range exceeds the threshold,
+    // the cell is on a cliff face and is unwalkable.
+    // Use a minimum sampling radius so that very small cells still detect nearby cliffs.
+    const sampleHalf = Math.max(halfCell, hmCellSize * 0.5);
     for (let gz = 0; gz < height; gz++) {
       for (let gx = 0; gx < width; gx++) {
         const cell = this.cells[gz * width + gx];
         if (cell.blocked) continue;
         const wx = cell.worldX;
         const wz = cell.worldZ;
-        const h00 = sampleHM(wx - halfCell, wz - halfCell);
-        const h10 = sampleHM(wx + halfCell, wz - halfCell);
-        const h01 = sampleHM(wx - halfCell, wz + halfCell);
-        const h11 = sampleHM(wx + halfCell, wz + halfCell);
+        const h00 = sampleHM(wx - sampleHalf, wz - sampleHalf);
+        const h10 = sampleHM(wx + sampleHalf, wz - sampleHalf);
+        const h01 = sampleHM(wx - sampleHalf, wz + sampleHalf);
+        const h11 = sampleHM(wx + sampleHalf, wz + sampleHalf);
         const hMax = Math.max(h00, h10, h01, h11);
         const hMin = Math.min(h00, h10, h01, h11);
 
@@ -539,16 +542,18 @@ export class NavGrid {
           // Height difference between cell centers
           if (Math.abs(cell.surfaceHeight - neighbor.surfaceHeight) > stepHeight) continue;
 
-          // Ahead-gradient check: mirrors resolveMovement exactly.
-          // When character at cell A walks toward cell B, resolveMovement checks
-          // the gradient at (destination + moveDir * eps). We check at the neighbor
-          // cell center, which is where the character would be heading.
+          // Ahead-gradient check: mirrors resolveMovement.
+          // resolveMovement checks gradient ahead of the move direction.
+          // We check at the midpoint and destination — slightly more permissive
+          // than checking the source cell (which runtime doesn't do), so paths
+          // exist wherever the character can actually walk.
+          const midX = (cell.worldX + neighbor.worldX) * 0.5;
+          const midZ = (cell.worldZ + neighbor.worldZ) * 0.5;
+          const midGrad = gradMagAt(midX, midZ);
+          if (midGrad > maxSlope) continue;
+
           const aheadGrad = gradMagAt(neighbor.worldX, neighbor.worldZ);
           if (aheadGrad > maxSlope) continue;
-
-          // Also check gradient at current cell (character could be blocked leaving)
-          const srcGrad = gradMagAt(cell.worldX, cell.worldZ);
-          if (srcGrad > maxSlope) continue;
 
           // Diagonal: both adjacent cardinals must also be non-blocked and reachable
           if (dir % 2 === 1) {

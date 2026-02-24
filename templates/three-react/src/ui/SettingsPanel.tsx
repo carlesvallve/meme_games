@@ -46,12 +46,13 @@ const TORCH_PARAMS: SliderDef<keyof TorchParams>[] = [
 const LIGHT_PRESETS: LightPreset[] = ['default', 'bright', 'dark', 'none'];
 
 const CAMERA_PARAMS: SliderDef<keyof CameraParams>[] = [
+  { key: 'distance', label: 'Zoom', min: 2, max: 40, step: 0.5 },
   { key: 'minDistance', label: 'Zoom Min', min: 2, max: 15, step: 0.5 },
   { key: 'maxDistance', label: 'Zoom Max', min: 10, max: 40, step: 0.5 },
   { key: 'pitchMin', label: 'Pitch Min', min: -89, max: -20, step: 1 },
   { key: 'pitchMax', label: 'Pitch Max', min: -50, max: -5, step: 1 },
   { key: 'rotationSpeed', label: 'Rotation', min: 0.001, max: 0.02, step: 0.001 },
-  { key: 'zoomSpeed', label: 'Zoom', min: 0.005, max: 0.05, step: 0.005 },
+  { key: 'zoomSpeed', label: 'Zoom Speed', min: 0.005, max: 0.05, step: 0.005 },
 ];
 
 const btnStyle = (active: boolean) => ({

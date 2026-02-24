@@ -14,7 +14,7 @@ import { Character } from './Character';
 import { EnemySystem, type HitImpactCallbacks } from './EnemySystem';
 import { ProjectileSystem } from './ProjectileSystem';
 import { GoreSystem } from './GoreSystem';
-import { getProjectileConfig, isRangedHeroId } from './CombatConfig';
+import { getProjectileConfig, getMuzzleOffset, isRangedHeroId } from './CombatConfig';
 import { createDustMotes, createRainEffect, createDebrisEffect } from '../utils/particles';
 import type { ParticleToggles } from '../store';
 import type { ParticleSystem } from '../types';
@@ -75,11 +75,13 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   let currentGridOpacity = useGameStore.getState().gridOpacity;
   applyLightPreset(sceneLights, currentLightPreset);
 
-  // Camera
+  // Camera (initial distance from store so zoom syncs with settings)
+  const initialCamParams = useGameStore.getState().cameraParams;
   const cam = new Camera(window.innerWidth / window.innerHeight, canvas, {
-    distance: 12,
+    distance: initialCamParams.distance,
     angleX: -35,
     angleY: 45,
+    onDistanceChange: (d) => useGameStore.getState().setCameraParam('distance', d),
   });
 
   // Input
@@ -98,7 +100,11 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   let chestSystem = new ChestSystem(scene, terrain, lootSystem, usePropChestsOnly);
   let enemySystem: EnemySystem | null = null;
   let projectileSystem: ProjectileSystem | null = null;
-  let goreSystem = new GoreSystem(scene);
+  let goreSystem = new GoreSystem(
+    scene,
+    (x, z) => terrain.getTerrainNormal(x, z),
+    (x, z) => terrain.getTerrainY(x, z),
+  );
   if (usePropChestsOnly) {
     terrain.setPropChestRegistrar((list) => list.forEach(({ position, mesh, entity, openGeo }) => chestSystem.registerPropChest(position, mesh, entity, openGeo)));
   }
@@ -130,7 +136,11 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     if (enemySystem) { enemySystem.dispose(); enemySystem = null; }
     if (projectileSystem) { projectileSystem.dispose(); projectileSystem = null; }
     goreSystem.dispose();
-    goreSystem = new GoreSystem(scene);
+    goreSystem = new GoreSystem(
+      scene,
+      (x, z) => terrain.getTerrainNormal(x, z),
+      (x, z) => terrain.getTerrainY(x, z),
+    );
     chestSystem.dispose();
     lootSystem.dispose();
     collectibles.dispose();
@@ -280,6 +290,18 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       p.hopHeight = pp.hopHeight;
       p.movementMode = pp.movementMode;
       p.showPathDebug = pp.showPathDebug;
+      p.attackReach = pp.attackReach;
+      p.attackArcHalf = pp.attackArcHalf;
+      p.attackDamage = pp.attackDamage;
+      p.attackCooldown = pp.attackCooldown;
+      p.chaseRange = pp.chaseRange;
+      p.knockbackSpeed = pp.knockbackSpeed;
+      p.knockbackDecay = pp.knockbackDecay;
+      p.invulnDuration = pp.invulnDuration;
+      p.flashDuration = pp.flashDuration;
+      p.stunDuration = pp.stunDuration;
+      p.attackDuration = pp.attackDuration;
+      p.exhaustDuration = pp.exhaustDuration;
     }
   }
 
@@ -642,15 +664,21 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
         const heroId = activeCharacter.voxEntry?.id ?? '';
         const projConfig = getProjectileConfig(heroId);
         if (projConfig && projectileSystem) {
-          // Ranged: play attack anim + fire projectile
+          // Ranged: play attack anim + fire from muzzle (spawn point)
           activeCharacter.startAttack();
           const pos = activeCharacter.getPosition();
+          const facing = activeCharacter.facing;
+          const muzzle = getMuzzleOffset(heroId);
+          const faceDirX = -Math.sin(facing);
+          const faceDirZ = -Math.cos(facing);
+          const spawnX = pos.x + faceDirX * muzzle.forward;
+          const spawnY = activeCharacter.groundY + muzzle.up;
+          const spawnZ = pos.z + faceDirZ * muzzle.forward;
           projectileSystem.fireProjectile(
             heroId,
             projConfig,
-            pos.x, pos.z,
-            activeCharacter.groundY,
-            activeCharacter.facing,
+            spawnX, spawnY, spawnZ,
+            facing,
             enemySystem ? enemySystem.getEnemies() : [],
           );
         } else {
@@ -714,6 +742,12 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
             const s = useGameStore.getState();
             s.setScore(s.score + 10);
           }
+        }, {
+          getGroundY: terrainHeightAt,
+          terrainColliders: [
+            terrain.getBoxGroup(),
+            ...(terrain.getTerrainMesh() ? [terrain.getTerrainMesh()!] : []),
+          ],
         });
       }
 

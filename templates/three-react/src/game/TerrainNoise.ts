@@ -379,7 +379,8 @@ export function generateHeightmap(
   // Applied at final resolution so ramps benefit from higher mesh detail.
   let rampCells = new Set<number>();
   if (config.posterize > 0) {
-    rampCells = ensureConnectivity(grid, verts, resolution, SLOPE_HEIGHT * 1.5, quantizeStep, config.maxHeight, actualSeed);
+    const slopeH = config.maxHeight * SLOPE_HEIGHT_FRAC;
+    rampCells = ensureConnectivity(grid, verts, resolution, slopeH * 1.5, quantizeStep, config.maxHeight, actualSeed);
   }
 
   // Ladder detection is now handled at the NavGrid level (Terrain.buildNavGrid)
@@ -671,14 +672,18 @@ function generateCaves(
 // elevation zones so player/NPCs can reach all non-ceiling regions.
 // Ramps are compact (3×3 to 3×7 cells) — small triangular blocks at cliff edges.
 
-const SLOPE_HEIGHT = 0.5;   // max rise per vertex step (matches playerParams)
-const HEIGHT_CEILING_FRAC = 0.85; // regions above this fraction of maxH stay disconnected
+// Reference maxHeight these fractions were tuned for (terraces preset at groundSize=50).
+// All height-dependent constants are derived as fractions of maxHeight so they
+// scale automatically when ground size (and thus maxHeight) changes.
+const REF_MAX_HEIGHT = 4.0;
+const SLOPE_HEIGHT_FRAC = 0.5 / REF_MAX_HEIGHT;      // ~12.5% — max rise per vertex step
+const HEIGHT_CEILING_FRAC = 0.85;                      // regions above this fraction stay disconnected
 const MAX_RAMP_ITER = 30;
-const RAMP_HALF_WIDTH = 1;  // 3 cells wide (center ± 1)
-const RAMP_SLOPE = 0.25;    // max height rise per cell along the ramp (very gentle)
-
-/** Max height difference that ramps will bridge. Taller cliffs are left for ladders. */
-const MAX_RAMP_HEIGHT = 2.5;
+const RAMP_HALF_WIDTH = 1;                             // 3 cells wide (center ± 1)
+const RAMP_SLOPE_FRAC = 0.3 / REF_MAX_HEIGHT;          // ~7.5% — max height rise per ramp cell
+const MAX_RAMP_HEIGHT_FRAC = 3.0 / REF_MAX_HEIGHT;    // ~75% — max cliff height ramps will bridge
+const MIN_RAMP_HEIGHT_FRAC = 0.2 / REF_MAX_HEIGHT;    // ~5% — min cliff height to place a ramp
+const ROLLING_AMP_FRAC = 0.6 / REF_MAX_HEIGHT;        // ~15% — rolling noise amplitude on ramps
 
 /** BFS flood-fill that labels connected regions.
  *  Two vertices connect if |h1-h2| <= slopeHeight and both are below ceiling.
@@ -762,10 +767,13 @@ function ensureConnectivity(
   slopeHeight: number, _quantizeStep: number, maxHeight: number, seed: number,
 ): Set<number> {
   const ceilingH = maxHeight * HEIGHT_CEILING_FRAC;
+  const RAMP_SLOPE = maxHeight * RAMP_SLOPE_FRAC;
+  const MAX_RAMP_HEIGHT = maxHeight * MAX_RAMP_HEIGHT_FRAC;
+  const MIN_RAMP_HEIGHT = maxHeight * MIN_RAMP_HEIGHT_FRAC;
   // Same rolling noise as the main terrain pass — used to re-apply undulation to ramp cells
   const rollingPerm = buildPerm(seed + 4444);
   const rollingScale = 5.0;
-  const rollingAmp = 0.6; // gentler than terrain's ±1.2m to keep ramps walkable
+  const rollingAmp = maxHeight * ROLLING_AMP_FRAC;
   const spawnVertex = Math.floor(verts / 2);
   const allRampCells = new Set<number>();
   const EDGE_MARGIN = 3;
@@ -817,7 +825,7 @@ function ensureConnectivity(
           const hA = grid[idx];
           const hB = grid[nIdx];
           const heightDiff = Math.abs(hA - hB);
-          if (heightDiff > MAX_RAMP_HEIGHT || heightDiff < 0.3) continue;
+          if (heightDiff > MAX_RAMP_HEIGHT || heightDiff < MIN_RAMP_HEIGHT) continue;
 
           // Determine low/high side and ramp direction (from low toward high)
           const lowH = Math.min(hA, hB);
@@ -902,7 +910,9 @@ function ensureConnectivity(
     const rampNoisePerm = buildPerm(seed + 7777 + iter * 31);
 
     // Randomly pick ramp or stairs mode per connection
-    const STAIR_STEP = 0.5;  // vertical rise per stair step
+    // Scale stair step to terrace level height so stairs are always climbable
+    const terraceStep = maxHeight / Math.max(1, _quantizeStep > 0 ? Math.round(maxHeight / _quantizeStep) : 6);
+    const STAIR_STEP = Math.min(0.25, terraceStep * 0.8);  // vertical rise per stair step
     const STAIR_TREAD = 2;   // cells per flat tread
     const useStairs = valueNoise2D(bestLowX * 0.3, bestLowZ * 0.3, rampNoisePerm) > 0.5;
 

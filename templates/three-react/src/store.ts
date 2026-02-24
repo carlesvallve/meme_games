@@ -25,6 +25,18 @@ export interface PlayerParams {
   movementMode: MovementMode;
   showPathDebug: boolean;
   exhaustionEnabled: boolean;
+  attackReach: number;
+  attackArcHalf: number;
+  attackDamage: number;
+  attackCooldown: number;
+  chaseRange: number;
+  knockbackSpeed: number;
+  knockbackDecay: number;
+  invulnDuration: number;
+  flashDuration: number;
+  stunDuration: number;
+  attackDuration: number;
+  exhaustDuration: number;
 }
 
 export type LightPreset = 'default' | 'bright' | 'dark' | 'none';
@@ -42,6 +54,8 @@ export interface TorchParams {
 export interface CameraParams {
   minDistance: number;
   maxDistance: number;
+  /** Current camera distance (zoom level); synced with camera and scroll/pinch. */
+  distance: number;
   pitchMin: number;
   pitchMax: number;
   rotationSpeed: number;
@@ -52,15 +66,33 @@ export interface CameraParams {
 // ── Defaults ──────────────────────────────────────────────────────────
 
 export const DEFAULT_PLAYER_PARAMS: PlayerParams = {
-  speed: 4, stepHeight: 0.4, slopeHeight: 0.75, capsuleRadius: 0.1,
-  arrivalReach: 0.05, hopHeight: 0.05, magnetRadius: 1, magnetSpeed: 16,
-  exhaustionEnabled: false,
+  speed: 4,
+  stepHeight: 0.4,
+  slopeHeight: 0.75,
+  capsuleRadius: 0.1,
+  arrivalReach: 0.05,
+  hopHeight: 0.05,
+  magnetRadius: 1,
+  magnetSpeed: 16,
   movementMode: 'grid' as MovementMode,
   showPathDebug: true,
+  exhaustionEnabled: false,
+  attackReach: 0.5,
+  attackArcHalf: Math.PI / 3,
+  attackDamage: 1,
+  attackCooldown: 0,
+  chaseRange: 0,
+  knockbackSpeed: 1.5,
+  knockbackDecay: 14,
+  invulnDuration: 0.8,
+  flashDuration: 0.15,
+  stunDuration: 0.08,
+  attackDuration: 0.2,
+  exhaustDuration: 1.0,
 };
 
 export const DEFAULT_CAMERA_PARAMS: CameraParams = {
-  minDistance: 5, maxDistance: 25, pitchMin: -80, pitchMax: -10,
+  minDistance: 5, maxDistance: 25, distance: 12, pitchMin: -80, pitchMax: -10,
   rotationSpeed: 0.005, zoomSpeed: 0.01, collisionLayers: Layer.None,
 };
 
@@ -245,8 +277,17 @@ export const useGameStore = create<GameStore>((set) => ({
   potions: 0,
   speechBubbles: [],
   particleToggles: saved.particleToggles ?? { ...DEFAULT_PARTICLE_TOGGLES },
-  playerParams: saved.playerParams ?? { ...DEFAULT_PLAYER_PARAMS },
-  cameraParams: saved.cameraParams ?? { ...DEFAULT_CAMERA_PARAMS },
+  playerParams: { ...DEFAULT_PLAYER_PARAMS, ...saved.playerParams },
+  cameraParams: (() => {
+    const def = { ...DEFAULT_CAMERA_PARAMS };
+    const savedCam = saved.cameraParams;
+    if (!savedCam) return def;
+    return {
+      ...def,
+      ...savedCam,
+      distance: savedCam.distance ?? def.distance,
+    };
+  })(),
   lightPreset: saved.lightPreset ?? DEFAULT_LIGHT_PRESET,
   torchEnabled: saved.torchEnabled ?? true,
   torchParams: saved.torchParams ?? { ...DEFAULT_TORCH_PARAMS },
