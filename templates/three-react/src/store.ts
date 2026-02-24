@@ -124,6 +124,7 @@ export const DEFAULT_SCENE_SETTINGS = {
   testProp: '' as string,  // empty = normal templates, category name = spawn only that
   testFloor: '' as string, // empty = random ground tiles, tile id = use only that
   doorChance: 0.7,
+  roomLabels: true, // voxelDungeon: show room name labels (e.g. "Barracks")
 };
 
 // ── localStorage persistence ──────────────────────────────────────────
@@ -147,6 +148,7 @@ interface SavedSettings {
   testProp?: string;
   testFloor?: string;
   doorChance?: number;
+  roomLabels?: boolean;
   particleToggles?: ParticleToggles;
 }
 
@@ -177,6 +179,7 @@ function saveSettings(): void {
     testProp: s.testProp,
     testFloor: s.testFloor,
     doorChance: s.doorChance,
+    roomLabels: s.roomLabels,
     particleToggles: s.particleToggles,
   };
   try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(data)); } catch { /* ignore */ }
@@ -216,6 +219,7 @@ interface GameStore {
   testProp: string;
   testFloor: string;
   doorChance: number;
+  roomLabels: boolean;
 
   setPhase: (phase: GameStore['phase']) => void;
   setScore: (score: number) => void;
@@ -246,6 +250,7 @@ interface GameStore {
   setTestProp: (prop: string) => void;
   setTestFloor: (floor: string) => void;
   setDoorChance: (chance: number) => void;
+  setRoomLabels: (on: boolean) => void;
 
   activeCharacterName: string | null;
   activeCharacterColor: string | null;
@@ -308,6 +313,7 @@ export const useGameStore = create<GameStore>((set) => ({
   testProp: saved.testProp ?? DEFAULT_SCENE_SETTINGS.testProp,
   testFloor: saved.testFloor ?? DEFAULT_SCENE_SETTINGS.testFloor,
   doorChance: saved.doorChance ?? DEFAULT_SCENE_SETTINGS.doorChance,
+  roomLabels: saved.roomLabels ?? DEFAULT_SCENE_SETTINGS.roomLabels,
 
   setPhase: (phase) => set({ phase }),
   setScore: (score) => set({ score }),
@@ -350,6 +356,7 @@ export const useGameStore = create<GameStore>((set) => ({
   setTestProp: (testProp) => set({ testProp }),
   setTestFloor: (testFloor) => set({ testFloor }),
   setDoorChance: (doorChance) => set({ doorChance }),
+  setRoomLabels: (roomLabels) => set({ roomLabels }),
 
   activeCharacterName: null,
   activeCharacterColor: null,

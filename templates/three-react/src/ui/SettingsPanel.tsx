@@ -216,6 +216,8 @@ function ScenePanel() {
   const setTestFloor = useGameStore((s) => s.setTestFloor);
   const doorChance = useGameStore((s) => s.doorChance);
   const setDoorChance = useGameStore((s) => s.setDoorChance);
+  const roomLabels = useGameStore((s) => s.roomLabels);
+  const setRoomLabels = useGameStore((s) => s.setRoomLabels);
   const propCategories = PROP_CATEGORIES;
   const remesh = useGameStore((s) => s.onRemesh);
   const randomizePalette = useGameStore((s) => s.onRandomizePalette);
@@ -394,6 +396,20 @@ function ScenePanel() {
           <span style={{ color: '#fff', width: 36, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
             {doorChance.toFixed(1)}
           </span>
+        </div>
+      )}
+
+      {/* Room labels on/off — only for voxelDungeon */}
+      {terrainPreset === 'voxelDungeon' && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+          <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Room Labels</span>
+          <button
+            type="button"
+            onClick={() => setRoomLabels(!roomLabels)}
+            style={{ ...btnStyle(roomLabels), flex: 1 }}
+          >
+            {roomLabels ? 'On' : 'Off'}
+          </button>
         </div>
       )}
 

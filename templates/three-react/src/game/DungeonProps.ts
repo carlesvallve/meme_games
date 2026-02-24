@@ -363,6 +363,7 @@ export class DungeonPropSystem {
     gridW: number,
     gridDoors?: { x: number; z: number; orientation: 'NS' | 'EW' }[],
     wallHeight = 2.5,
+    showRoomLabels = true,
   ): Promise<void> {
     this.cellSize = cellSize;
     const halfWorld = groundSize / 2;
@@ -451,6 +452,7 @@ export class DungeonPropSystem {
         const centerWx = toWorldX(room.x + (room.w - 1) / 2);
         const centerWz = toWorldZ(room.z + (room.d - 1) / 2);
         const label = createRoomLabel(template.name, centerWx, wallHeight - 1, centerWz);
+        label.visible = showRoomLabels;
         this.parent.add(label);
         this.labels.push(label);
 
@@ -932,6 +934,11 @@ export class DungeonPropSystem {
       out.push({ position: worldPos.clone(), mesh: p.mesh, entity: p.entity, openGeo: p.openGeo });
     }
     return out;
+  }
+
+  /** Toggle room name labels on/off (e.g. from voxel dungeon settings). */
+  setRoomLabelsVisible(visible: boolean): void {
+    for (const label of this.labels) label.visible = visible;
   }
 
   private findCell(
