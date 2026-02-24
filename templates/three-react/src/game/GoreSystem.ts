@@ -143,8 +143,6 @@ export class GoreSystem {
   spawnGore(
     mesh: THREE.Mesh,
     groundY: number,
-    hitDirX: number,
-    hitDirZ: number,
     nearbyCharacters?: Character[],
   ): void {
     const pos = mesh.position;
@@ -168,7 +166,7 @@ export class GoreSystem {
       for (let i = 0; i < count; i++) {
         this.spawnChunk(
           pos.x, pos.y + (yMin + yMax) * 0.5, pos.z,
-          groundY, hitDirX, hitDirZ, color,
+          groundY, color,
           sizeMin, sizeMax, 2.0 + Math.random() * 2.5, 3.0 + Math.random() * 1.0,
         );
       }
@@ -179,20 +177,20 @@ export class GoreSystem {
     for (let i = 0; i < bloodCount; i++) {
       this.spawnChunk(
         pos.x, pos.y + height * (0.1 + Math.random() * 0.5), pos.z,
-        groundY, hitDirX, hitDirZ, randBloodColor(),
+        groundY, randBloodColor(),
         0.008, 0.025, 2.0 + Math.random() * 4.0, 1.0 + Math.random() * 0.8,
       );
     }
 
-    // Floor splats — many tiny puddles
+    // Floor splats — many tiny puddles, radial spread
     const splatCount = 5 + Math.floor(Math.random() * 4);
     for (let i = 0; i < splatCount; i++) {
       const dist = Math.random() * 0.5;
       const angle = Math.random() * Math.PI * 2;
       this.spawnFloorSplat(
-        pos.x + Math.cos(angle) * dist + hitDirX * Math.random() * 0.3,
+        pos.x + Math.cos(angle) * dist,
         groundY + 0.005,
-        pos.z + Math.sin(angle) * dist + hitDirZ * Math.random() * 0.3,
+        pos.z + Math.sin(angle) * dist,
       );
     }
 
@@ -216,7 +214,6 @@ export class GoreSystem {
 
   spawnBloodSplash(
     x: number, y: number, z: number,
-    hitDirX: number, hitDirZ: number,
     groundY: number,
     attacker?: THREE.Mesh,
   ): void {
@@ -225,7 +222,7 @@ export class GoreSystem {
     for (let i = 0; i < count; i++) {
       this.spawnChunk(
         x, y + 0.1 + Math.random() * 0.2, z,
-        groundY, hitDirX, hitDirZ, randBloodColor(),
+        groundY, randBloodColor(),
         0.006, 0.018, 1.5 + Math.random() * 2.5, 0.6 + Math.random() * 0.5,
       );
     }
@@ -308,7 +305,6 @@ export class GoreSystem {
   private spawnChunk(
     x: number, y: number, z: number,
     groundY: number,
-    hitDirX: number, hitDirZ: number,
     color: THREE.Color,
     sizeMin: number, sizeMax: number,
     ejectSpeed: number,

@@ -201,8 +201,9 @@ export class ProjectileSystem {
       isArrow,
     });
 
-    // SFX
-    audioSystem.sfx('shoot');
+    // SFX — spatial, type-specific
+    const sfxType = isArrow ? 'arrow' : 'fireball';
+    audioSystem.sfxAt(sfxType, px, pz);
 
     return true;
   }

@@ -88,7 +88,7 @@ function createSlashArc(parent: THREE.Object3D): SlashArc {
   const mat = new THREE.MeshBasicMaterial({
     color: 0xffffff,
     transparent: true,
-    opacity: 0.8,
+    opacity: 0.35,
     side: THREE.DoubleSide,
     depthWrite: false,
     blending: THREE.AdditiveBlending,
@@ -200,7 +200,7 @@ export class EnemySystem {
   private goreSystem: GoreSystem | null = null;
 
   // Player attack arc params
-  private readonly playerReach = 1.0;
+  private readonly playerReach = 0.7;
   private readonly playerArcHalf = Math.PI / 3; // 60 degrees = 120 total
   private readonly playerDamage = 2;
 
@@ -260,7 +260,8 @@ export class EnemySystem {
       const pz = playerChar.mesh.position.z;
 
       // Slash swoosh SFX + visual arc (once per attack, on first frame)
-      if (playerChar.attackTimer > 0.18) {
+      if (playerChar.attackJustStarted) {
+        playerChar.attackJustStarted = false;
         audioSystem.sfx('slash');
         this.slashArcs.push(createSlashArc(playerChar.mesh));
       }
@@ -286,7 +287,7 @@ export class EnemySystem {
 
             // Blood splash on hit (splatter on attacker)
             if (this.goreSystem) {
-              this.goreSystem.spawnBloodSplash(ex, ey, ez, hitDirX, hitDirZ, enemy.groundY, playerChar.mesh);
+              this.goreSystem.spawnBloodSplash(ex, ey, ez, enemy.groundY, playerChar.mesh);
             }
 
             if (this.impactCallbacks) {
@@ -305,14 +306,10 @@ export class EnemySystem {
 
       if (!enemy.isAlive) {
         const pos = enemy.mesh.position;
-        // Compute hit direction from last damage source
-        const hdx = enemy.lastHitDirX ?? 0;
-        const hdz = enemy.lastHitDirZ ?? 0;
-        const hlen = Math.sqrt(hdx * hdx + hdz * hdz) || 1;
         if (this.goreSystem) {
           // Collect nearby characters (player + allies) so blood stains them
           const nearby: Character[] = [playerChar, ...this.allyCharacters];
-          this.goreSystem.spawnGore(enemy.mesh, enemy.groundY, hdx / hlen, hdz / hlen, nearby);
+          this.goreSystem.spawnGore(enemy.mesh, enemy.groundY, nearby);
         }
         this.lootSystem.spawnLoot(pos.clone());
         audioSystem.sfxAt('death', pos.x, pos.z);
@@ -443,9 +440,9 @@ export class EnemySystem {
       const scale = 1 + t * 0.2;
       arc.mesh.scale.set(scale, scale, scale);
 
-      // Fade: hold full opacity during sweep, then fade out in remaining time
-      const fadeT = t > 0.5 ? (t - 0.5) / 0.5 : 0;
-      (arc.mesh.material as THREE.MeshBasicMaterial).opacity = 0.8 * (1 - fadeT);
+      // Fade: gradual from start, like a weapon trail dissipating
+      const opacity = 0.35 * (1 - t * t);
+      (arc.mesh.material as THREE.MeshBasicMaterial).opacity = opacity;
     }
   }
 
@@ -501,9 +498,9 @@ export class EnemySystem {
   }
 
   /** Spawn blood splash at a world position (used by ProjectileSystem) */
-  spawnBloodSplash(x: number, y: number, z: number, dirX: number, dirZ: number, groundY: number): void {
+  spawnBloodSplash(x: number, y: number, z: number, groundY: number): void {
     if (this.goreSystem) {
-      this.goreSystem.spawnBloodSplash(x, y, z, dirX, dirZ, groundY);
+      this.goreSystem.spawnBloodSplash(x, y, z, groundY);
     }
   }
 

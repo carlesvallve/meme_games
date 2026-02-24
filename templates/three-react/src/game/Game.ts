@@ -487,28 +487,17 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
 
     const ladderDefs = terrain.getLadderDefs();
 
-    for (const type of allCharacterTypes) {
-      // Spawn position: validate (0,0) for the controlled character, random for others
-      let pos: THREE.Vector3;
-      if (type === controlledType) {
-        // Use (0,0) if walkable, otherwise fallback to random
-        const spawnY = terrain.getTerrainY(0, 0);
-        if (navGrid.isWalkable(0, 0)) {
-          pos = new THREE.Vector3(0, spawnY, 0);
-        } else {
-          pos = terrain.getRandomPosition();
-        }
-      } else {
-        pos = terrain.getRandomPosition();
-      }
+    // Spawn only the controlled hero
+    {
+      const spawnY = terrain.getTerrainY(0, 0);
+      const pos = navGrid.isWalkable(0, 0)
+        ? new THREE.Vector3(0, spawnY, 0)
+        : terrain.getRandomPosition();
 
-      const char = new Character(scene, terrain, navGrid, type, pos, ladderDefs);
+      const char = new Character(scene, terrain, navGrid, controlledType, pos, ladderDefs);
+      char.setPlayerControlled(makePlayerControlDeps());
       characters.push(char);
-
-      if (type === controlledType) {
-        char.setPlayerControlled(makePlayerControlDeps());
-        activeCharacter = char;
-      }
+      activeCharacter = char;
     }
 
     // Register all characters for speech bubbles
@@ -708,7 +697,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
           // VFX: damage number + hit sparks
           enemySystem!.spawnDamageNumber(info.x, info.y, info.z, info.damage);
           enemySystem!.spawnHitSparks(info.x, info.y, info.z, info.dirX, info.dirZ);
-          enemySystem!.spawnBloodSplash(info.x, info.y, info.z, info.dirX, info.dirZ, info.enemy.groundY);
+          enemySystem!.spawnBloodSplash(info.x, info.y, info.z, info.enemy.groundY);
           audioSystem.sfxAt('fleshHit', info.x, info.z);
 
           // Impact feel
