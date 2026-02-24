@@ -73,6 +73,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   const { scene, lights: sceneLights } = createScene();
   let currentLightPreset: LightPreset = useGameStore.getState().lightPreset;
   let currentGridOpacity = useGameStore.getState().gridOpacity;
+  let currentRoomLabels = useGameStore.getState().roomLabels;
   applyLightPreset(sceneLights, currentLightPreset);
 
   // Camera (initial distance from store so zoom syncs with settings)
@@ -612,6 +613,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       store.setWallGap(d.wallGap);
       store.setGridOpacity(d.gridOpacity);
       store.setResolutionScale(d.resolutionScale);
+      store.setRoomLabels(d.roomLabels);
       const dp = DEFAULT_PARTICLE_TOGGLES;
       for (const key of Object.keys(dp) as (keyof typeof dp)[]) {
         if (store.particleToggles[key] !== dp[key]) store.toggleParticle(key);
@@ -681,6 +683,10 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
             spawnX, spawnY, spawnZ,
             facing,
             enemySystem ? enemySystem.getEnemies() : [],
+            [
+              terrain.getBoxGroup(),
+              ...(terrain.getTerrainMesh() ? [terrain.getTerrainMesh()!] : []),
+            ],
           );
         } else {
           // Melee: auto-aim snap toward nearest enemy, then attack
@@ -770,6 +776,13 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       if (gridOp !== currentGridOpacity) {
         currentGridOpacity = gridOp;
         terrain.setGridOpacity(gridOp);
+      }
+
+      // Sync room labels (voxel dungeon)
+      const roomLabels = useGameStore.getState().roomLabels;
+      if (roomLabels !== currentRoomLabels) {
+        currentRoomLabels = roomLabels;
+        terrain.setRoomLabelsVisible(roomLabels);
       }
 
       // Camera follows active character (or debug ladder)

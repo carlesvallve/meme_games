@@ -328,7 +328,7 @@ export class ProjectileSystem {
     }
   }
 
-  /** Fire a projectile from the given muzzle (spawn) position, auto-targeting the nearest enemy in a forward cone. */
+  /** Fire a projectile from the given muzzle (spawn) position, auto-targeting the nearest enemy in a forward cone. Only auto-targets if raycast to enemy reaches the enemy cleanly (no wall/door in the way). Pass terrainColliders when you have them so obstacles = architecture + props + terrain. */
   fireProjectile(
     ownerKey: string,
     config: ProjectileConfig,
@@ -337,6 +337,7 @@ export class ProjectileSystem {
     spawnZ: number,
     facing: number,
     enemies: ReadonlyArray<Enemy>,
+    terrainColliders?: THREE.Object3D[],
   ): boolean {
     // Cooldown check
     const cd = this.cooldowns.get(ownerKey) ?? 0;
@@ -348,7 +349,7 @@ export class ProjectileSystem {
     // Set cooldown
     this.cooldowns.set(ownerKey, config.cooldown);
 
-    // Auto-target: pick nearest enemy within forward cone (from muzzle position)
+    // Auto-target: pick nearest enemy within forward cone with clear line of sight (no obstacle between muzzle and enemy)
     const faceDirX = -Math.sin(facing);
     const faceDirZ = -Math.cos(facing);
     let dirX = faceDirX;
@@ -358,24 +359,45 @@ export class ProjectileSystem {
     let targetY = spawnY;
     let targetZ = spawnZ + faceDirZ * 10;
 
+    const raycaster = new THREE.Raycaster();
+    const rayOrigin = new THREE.Vector3(spawnX, spawnY, spawnZ);
+    const rayDir = new THREE.Vector3();
+    const archAndProps = entityRegistry ? entityRegistry.getByLayer(Layer.Architecture | Layer.Prop).map(e => e.object3D) : [];
+    const obstacles = [...archAndProps, ...(terrainColliders ?? [])];
+
     let bestDist = AUTO_TARGET_RANGE;
     for (const enemy of enemies) {
       if (!enemy.isAlive) continue;
-      const edx = enemy.mesh.position.x - spawnX;
-      const edz = enemy.mesh.position.z - spawnZ;
-      const eDist = Math.sqrt(edx * edx + edz * edz);
+      const ex = enemy.mesh.position.x;
+      const ey = enemy.mesh.position.y;
+      const ez = enemy.mesh.position.z;
+      const edx = ex - spawnX;
+      const edy = ey - spawnY;
+      const edz = ez - spawnZ;
+      const eDist = Math.sqrt(edx * edx + edy * edy + edz * edz);
       if (eDist < 0.1 || eDist > bestDist) continue;
 
-      // Check forward cone: dot product with facing
-      const enx = edx / eDist;
-      const enz = edz / eDist;
+      // Check forward cone: dot product with facing (horizontal)
+      const eDistH = Math.sqrt(edx * edx + edz * edz) || 0.001;
+      const enx = edx / eDistH;
+      const enz = edz / eDistH;
       const dot = faceDirX * enx + faceDirZ * enz;
       if (dot < AUTO_TARGET_MIN_DOT) continue; // outside ~120° cone
 
+      // Line-of-sight: raycast to enemy must not hit an obstacle first
+      if (obstacles.length > 0) {
+        rayDir.set(edx, edy, edz).normalize();
+        raycaster.set(rayOrigin, rayDir);
+        raycaster.far = eDist + 0.05;
+        raycaster.near = 0.02;
+        const hits = raycaster.intersectObjects(obstacles, true);
+        if (hits.length > 0 && hits[0].distance < eDist - 0.05) continue; // obstacle in the way
+      }
+
       bestDist = eDist;
-      targetX = enemy.mesh.position.x;
-      targetY = enemy.mesh.position.y;
-      targetZ = enemy.mesh.position.z;
+      targetX = ex;
+      targetY = ey;
+      targetZ = ez;
     }
 
     const toTargetX = targetX - spawnX;
@@ -773,6 +795,7 @@ export class ProjectileSystem {
       }
 
       let hit = false;
+      let staticHitPoint: THREE.Vector3 | null = null; // for energy impact on doors/walls/props
 
       // Terrain following: glide over gentle slopes, impact on steep ones (cliffs/walls)
       if (!hit && getGroundY) {
@@ -820,8 +843,8 @@ export class ProjectileSystem {
       //   }
       // }
 
-      // Arrows: raycast vs architecture/props
-      if (!hit && p.isArrow && staticColliders.length > 0) {
+      // Raycast vs architecture/props (doors, walls): arrows stick, energy impacts
+      if (!hit && staticColliders.length > 0) {
         rayOrigin.set(lastX, lastY, lastZ);
         rayDir.set(p.mesh.position.x - lastX, p.mesh.position.y - lastY, p.mesh.position.z - lastZ);
         const rayLen = rayDir.length();
@@ -834,7 +857,11 @@ export class ProjectileSystem {
           for (const h of hits) {
             if (!h.face) continue;
             audioSystem.sfxAt('fleshHitHigh', h.point.x, h.point.z);
-            this.stickArrow(p, h.point.clone());
+            if (p.isArrow) {
+              this.stickArrow(p, h.point.clone());
+            } else {
+              staticHitPoint = h.point.clone();
+            }
             hit = true;
             break;
           }
@@ -890,7 +917,7 @@ export class ProjectileSystem {
       }
 
       if (hit && !p.isArrow) {
-        const pos = p.mesh.position;
+        const pos = staticHitPoint ?? p.mesh.position;
         const impactParent = hitEnemy?.mesh && hitEnemy.mesh instanceof THREE.Mesh ? hitEnemy.mesh : undefined;
         this.spawnEnergyImpact(pos.x, pos.y, pos.z, this.getProjectileColor(p), p.vx, p.vy, p.vz, impactParent);
         this.removeProjectile(i);

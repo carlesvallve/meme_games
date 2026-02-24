@@ -1266,6 +1266,8 @@ export class Terrain {
         output.walkMask.openGrid,
         output.walkMask.gridW,
         output.gridDoors,
+        undefined, // wallHeight default
+        useGameStore.getState().roomLabels,
       );
 
       // Register prop debris boxes for physical collision (keyboard movement)
@@ -1296,6 +1298,11 @@ export class Terrain {
   /** Set callback to run when voxel dungeon prop chests are placed (so Game can register them with ChestSystem). */
   setPropChestRegistrar(cb: ((list: { position: THREE.Vector3; mesh: THREE.Mesh; entity: Entity; openGeo?: THREE.BufferGeometry }[]) => void) | null): void {
     this.propChestRegistrar = cb;
+  }
+
+  /** Show or hide voxel dungeon room name labels (e.g. from settings toggle). */
+  setRoomLabelsVisible(visible: boolean): void {
+    this.propSystem?.setRoomLabelsVisible(visible);
   }
 
   private createTerracedDebris(): void {

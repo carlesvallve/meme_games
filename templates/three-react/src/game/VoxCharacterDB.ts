@@ -1,6 +1,12 @@
 // ── VOX Character Database ──
 // Registry of all VOX characters with personality data for speech bubbles.
 
+/** When/how often to play footstep SFX. */
+export type StepMode = 'walker' | 'jumper' | 'flyer';
+// - walker: normal steps (each hop half + land on impact)
+// - jumper: only play step on landing, half the time (e.g. blob, slob)
+// - flyer: no steps (bat, beholder/gazer)
+
 export interface VoxCharEntry {
   id: string;           // e.g. "knight", "blob_a"
   name: string;         // display name: "Knight", "Blob A (Green)"
@@ -10,6 +16,8 @@ export interface VoxCharEntry {
   thoughts: string[];   // idle thought bubbles
   exclamations: string[]; // reactions to events (hits, discoveries)
   sounds: string[];     // onomatopoeia / grunts
+  /** Footstep frequency / movement mode. Default 'walker'. */
+  stepMode: StepMode;
 }
 
 const BASE = '/models/Square Dungeon Asset Pack/Characters';
@@ -299,6 +307,17 @@ function getArchetype(folder: string): string {
     .toLowerCase();
 }
 
+/** Step mode by enemy archetype: flyer = no steps, jumper = step only on landing (half the time). */
+const STEP_MODE_BY_ARCHETYPE: Partial<Record<Archetype, StepMode>> = {
+  bat: 'flyer',
+  beholder: 'flyer',
+  dragon: 'flyer',
+  ghost: 'flyer',
+  blob: 'jumper',
+  mimic: 'jumper',
+  slob: 'jumper',
+};
+
 function getPersonality(folder: string): Pick<VoxCharEntry, 'thoughts' | 'exclamations' | 'sounds'> {
   const archetype = getArchetype(folder);
   const p = PERSONALITIES[archetype as Archetype];
@@ -316,6 +335,7 @@ function heroEntry(folder: string): VoxCharEntry {
     folderPath: `${BASE}/Heroes/${encoded}/VOX`,
     prefix,
     ...getPersonality(folder),
+    stepMode: 'walker',
   };
 }
 
@@ -326,6 +346,7 @@ function enemyEntry(folder: string): VoxCharEntry {
     .split('/')
     .map((s) => encodeURIComponent(s))
     .join('/');
+  const archetype = getArchetype(folder) as Archetype;
   return {
     id: prefix + (folder !== stripped ? '_' + folder.match(/\(([^)]*)\)/)?.[1]?.toLowerCase().replace(/\s+/g, '_') : ''),
     name: folder,
@@ -333,6 +354,7 @@ function enemyEntry(folder: string): VoxCharEntry {
     folderPath: `${BASE}/Enemies/${encoded}/VOX`,
     prefix,
     ...getPersonality(folder),
+    stepMode: STEP_MODE_BY_ARCHETYPE[archetype] ?? 'walker',
   };
 }
 

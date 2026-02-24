@@ -4,7 +4,7 @@ import { createCharacterMesh, voxRoster } from './characters';
 import type { CharacterType } from './characters';
 import { loadVoxCharacter } from '../utils/VoxModelLoader';
 import type { VoxCharacterData, VoxAnimFrames } from '../utils/VoxModelLoader';
-import type { VoxCharEntry } from './VoxCharacterDB';
+import type { VoxCharEntry, StepMode } from './VoxCharacterDB';
 import { Entity, Layer } from './Entity';
 import type { Terrain } from './Terrain';
 import type { NavGrid } from './NavGrid';
@@ -157,6 +157,11 @@ export class Character implements BehaviorAgent {
   // ── VOX animation ──────────────────────────────────────────────
   /** Currently applied VOX skin entry (for personality data) */
   voxEntry: VoxCharEntry | null = null;
+
+  /** Effective step mode from current VOX skin: walker = steps in applyHop + land; jumper = steps on last walk frame + step on land 50%; flyer = no steps. Skin determines mode (e.g. player as Bat = flyer, no steps). */
+  getStepMode(): StepMode {
+    return this.voxEntry?.stepMode ?? 'walker';
+  }
   private voxData: VoxCharacterData | null = null;
   private voxAnimState: 'idle' | 'walk' | 'action' = 'idle';
   private voxFrameIndex = 0;
@@ -293,19 +298,26 @@ export class Character implements BehaviorAgent {
   getX(): number { return this.mesh.position.x; }
   getZ(): number { return this.mesh.position.z; }
 
-  /** Override applyHop to emit spatial step SFX */
+  /** Apply vertical hop offset. Step SFX: only walkers play step here; jumpers use VOX walk frame; flyers never. */
   applyHop(hopHeight: number): number {
     const hopSin = Math.sin(this.moveTime * Math.PI);
     const hop = Math.abs(hopSin) * hopHeight;
     this.mesh.position.y = this.visualGroundY + hop;
     const currentHopHalf = Math.floor(this.moveTime) % 2;
+    const stepMode = this.getStepMode();
 
-    if (currentHopHalf !== this.lastHopHalf && this.footSfxTimer >= 0.12) {
+    if (stepMode === 'flyer') {
+      if (currentHopHalf !== this.lastHopHalf) this.lastHopHalf = currentHopHalf;
+      return currentHopHalf;
+    }
+    // Only walkers play step SFX from hop clock; jumpers get steps in updateVoxAnimation (last walk frame)
+    if (stepMode === 'walker' && currentHopHalf !== this.lastHopHalf && this.footSfxTimer >= FOOT_SFX_COOLDOWN) {
       this.lastHopHalf = currentHopHalf;
       this.footSfxTimer = 0;
-      // Hero 0.7, enemies 0.35; always use sfxAt so intensity is applied
       const stepVol = this.isEnemy ? 0.35 : 0.7;
       audioSystem.sfxAt('step', this.mesh.position.x, this.mesh.position.z, stepVol);
+    } else if (currentHopHalf !== this.lastHopHalf) {
+      this.lastHopHalf = currentHopHalf;
     }
 
     return currentHopHalf;
@@ -399,6 +411,16 @@ export class Character implements BehaviorAgent {
       const newGeo = frames[this.voxFrameIndex];
       if (newGeo && newGeo !== this.mesh.geometry) {
         this.mesh.geometry = newGeo;
+      }
+      // Jumpers only: step SFX on last walk frame every cycle (one step per walk loop = steady spaced steps).
+      const stepMode = this.getStepMode();
+      if (this.voxAnimState === 'walk' && stepMode === 'jumper' && this.footSfxTimer >= FOOT_SFX_COOLDOWN) {
+        const lastWalkFrame = frames.length > 0 ? frames.length - 1 : 0;
+        if (this.voxFrameIndex === lastWalkFrame) {
+          const vol = this.isEnemy ? 0.35 : 0.7;
+          audioSystem.sfxAt('step', this.mesh.position.x, this.mesh.position.z, vol);
+          this.footSfxTimer = 0;
+        }
       }
     }
   }
@@ -523,9 +545,16 @@ export class Character implements BehaviorAgent {
         const impactSpeed = this.velocityY;
         this.visualGroundY = this.groundY;
         this.velocityY = 0;
-        if (impactSpeed > 1 && this.footSfxTimer >= FOOT_SFX_COOLDOWN) {
-          const landVol = this.isEnemy ? 0.35 : 0.7;
-          audioSystem.sfxAt('land', this.mesh.position.x, this.mesh.position.z, landVol);
+        const stepMode = this.getStepMode();
+        if (stepMode === 'flyer') {
+          // no step/land sounds for flyers
+        } else if (impactSpeed > 1 && this.footSfxTimer >= FOOT_SFX_COOLDOWN) {
+          const vol = this.isEnemy ? 0.35 : 0.7;
+          if (stepMode === 'jumper') {
+            if (Math.random() < 0.5) audioSystem.sfxAt('step', this.mesh.position.x, this.mesh.position.z, vol);
+          } else {
+            audioSystem.sfxAt('land', this.mesh.position.x, this.mesh.position.z, vol);
+          }
           this.footSfxTimer = 0;
         }
       }
