@@ -78,6 +78,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   // Camera (initial distance from store so zoom syncs with settings)
   const initialCamParams = useGameStore.getState().cameraParams;
   const cam = new Camera(window.innerWidth / window.innerHeight, canvas, {
+    fov: initialCamParams.fov ?? 60,
     distance: initialCamParams.distance,
     angleX: -35,
     angleY: 45,
@@ -705,6 +706,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
 
       // Enemy system
       if (enemySystem) {
+        const showSlashEffect = useGameStore.getState().playerParams.showSlashEffect;
         enemySystem.update(dt, activeCharacter,
           (damage) => {
             const s = useGameStore.getState();
@@ -716,6 +718,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
             const s = useGameStore.getState();
             s.setScore(s.score + 10);
           },
+          showSlashEffect,
         );
       }
 

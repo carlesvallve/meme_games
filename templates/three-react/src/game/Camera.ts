@@ -311,6 +311,10 @@ export class Camera {
   }
 
   setParams(p: CameraParams): void {
+    if (p.fov != null) {
+      this.camera.fov = p.fov;
+      this.camera.updateProjectionMatrix();
+    }
     this.minDistance = p.minDistance;
     this.maxDistance = p.maxDistance;
     this.pitchMin = p.pitchMin * (Math.PI / 180);

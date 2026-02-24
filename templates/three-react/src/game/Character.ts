@@ -303,13 +303,9 @@ export class Character implements BehaviorAgent {
     if (currentHopHalf !== this.lastHopHalf && this.footSfxTimer >= 0.12) {
       this.lastHopHalf = currentHopHalf;
       this.footSfxTimer = 0;
-      if (this._selected) {
-        audioSystem.sfx('step');
-      } else {
-        // Enemies: super low step volume so they're not annoying
-        const stepVol = this.isEnemy ? 0.06 : 1;
-        audioSystem.sfxAt('step', this.mesh.position.x, this.mesh.position.z, stepVol);
-      }
+      // Hero 0.7, enemies 0.35; always use sfxAt so intensity is applied
+      const stepVol = this.isEnemy ? 0.35 : 0.7;
+      audioSystem.sfxAt('step', this.mesh.position.x, this.mesh.position.z, stepVol);
     }
 
     return currentHopHalf;
@@ -528,11 +524,8 @@ export class Character implements BehaviorAgent {
         this.visualGroundY = this.groundY;
         this.velocityY = 0;
         if (impactSpeed > 1 && this.footSfxTimer >= FOOT_SFX_COOLDOWN) {
-          if (this._selected) {
-            audioSystem.sfx('land');
-          } else {
-            audioSystem.sfxAt('land', this.mesh.position.x, this.mesh.position.z);
-          }
+          const landVol = this.isEnemy ? 0.35 : 0.7;
+          audioSystem.sfxAt('land', this.mesh.position.x, this.mesh.position.z, landVol);
           this.footSfxTimer = 0;
         }
       }

@@ -24,7 +24,7 @@ export class Enemy extends Character {
     this.hp = 4;
     this.maxHp = 4;
 
-    this.params.speed = 1 + Math.random() * 1;
+    this.params.speed = 0.5 + Math.random() * 1;
     this.params.hopHeight = 0.03;
     this.params.attackReach = 0.5;
     this.params.attackArcHalf = Math.PI / 3;
