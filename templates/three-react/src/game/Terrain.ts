@@ -106,7 +106,7 @@ const PRESET_CONFIGS: Record<TerrainPreset, TerrainPresetConfig> = {
   },
 };
 
-const DEBUG_RAMPS = false;
+const DEBUG_RAMPS = true;
 
 // ── Terrain class ───────────────────────────────────────────────────
 
@@ -690,8 +690,12 @@ export class Terrain {
 
   /** Generate a real heightmap mesh — single continuous grid with smooth slopes */
   private createHeightmapMesh(): void {
-    const config = getHeightmapConfig(this.heightmapStyle);
+    const config = { ...getHeightmapConfig(this.heightmapStyle) };
     const groundSize = this.groundSize - 4; // usable area (2m margin each side)
+    // Scale max height proportionally to ground size so slopes stay the same steepness.
+    // Configs were tuned for groundSize=46 (50 - 4 margin).
+    const REF_GROUND = 46;
+    config.maxHeight *= groundSize / REF_GROUND;
     const { resolutionScale } = useGameStore.getState();
     const res = Math.round(config.resolution * resolutionScale);
     const verts = res + 1;
@@ -1755,8 +1759,8 @@ export class Terrain {
 
   private ensureNavGridConnectivity(grid: NavGrid, ladderCost: number, navLinkOffset: number): void {
     const MAX_ITER = 60;
-    const EDGE_MARGIN = 3;
-    const MAX_WALK = 20;  // max cells to walk through a cliff in one direction
+    const EDGE_MARGIN = Math.ceil(2.5 / grid.cellSize);
+    const MAX_WALK = Math.ceil(10 / grid.cellSize);  // ~10m walk through cliff in cells
     const DIRS: [number, number][] = [[1, 0], [-1, 0], [0, 1], [0, -1]]; // cardinals only → clean ladder angles
 
     for (let iter = 0; iter < MAX_ITER; iter++) {
@@ -1973,6 +1977,23 @@ export class Terrain {
       }
     }
     return maxY;
+  }
+
+  /** Surface normal at (x, z) for aligning decals/splats. Heightmap: gradient-based; box terrain: up. */
+  getTerrainNormal(x: number, z: number): THREE.Vector3 {
+    const up = new THREE.Vector3(0, 1, 0);
+    if (this.heightmapData) {
+      const eps = 0.05;
+      const hL = this.getTerrainY(x - eps, z);
+      const hR = this.getTerrainY(x + eps, z);
+      const hD = this.getTerrainY(x, z - eps);
+      const hU = this.getTerrainY(x, z + eps);
+      const dx = (hR - hL) / (2 * eps);
+      const dz = (hU - hD) / (2 * eps);
+      const n = new THREE.Vector3(-dx, 1, -dz).normalize();
+      return n;
+    }
+    return up;
   }
 
   /**

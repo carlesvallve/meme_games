@@ -17,19 +17,23 @@ const CHAR_PUSH_STRENGTH = 8; // push-apart speed multiplier
 // ── Attack arc helper ────────────────────────────────────────────────
 
 function isInAttackArc(
-  attackerX: number, attackerZ: number, attackerFacing: number,
-  targetX: number, targetZ: number,
+  attackerX: number, attackerY: number, attackerZ: number, attackerFacing: number,
+  targetX: number, targetY: number, targetZ: number,
   reach: number, halfAngle: number,
 ): boolean {
   const dx = targetX - attackerX;
+  const dy = targetY - attackerY;
   const dz = targetZ - attackerZ;
-  const dist = Math.sqrt(dx * dx + dz * dz);
-  if (dist > reach) return false;
-  if (dist < 0.001) return true;
+  // Spherecast: 3D distance for range, 2D angle for arc
+  const dist3D = Math.sqrt(dx * dx + dy * dy + dz * dz);
+  if (dist3D > reach) return false;
+  if (dist3D < 0.001) return true;
 
+  const dist2D = Math.sqrt(dx * dx + dz * dz);
+  if (dist2D < 0.001) return true;
   const fwdX = -Math.sin(attackerFacing);
   const fwdZ = -Math.cos(attackerFacing);
-  const dot = fwdX * (dx / dist) + fwdZ * (dz / dist);
+  const dot = fwdX * (dx / dist2D) + fwdZ * (dz / dist2D);
   return dot >= Math.cos(halfAngle);
 }
 
@@ -49,8 +53,8 @@ function createSlashArc(parent: THREE.Object3D): SlashArc {
   // The sweep animates from right-to-left by revealing segments via drawRange.
 
   const arcAngle = Math.PI * 0.7; // ~126 degrees
-  const innerR = 0.15;
-  const outerR = 0.6;
+  const innerR = 0.1;
+  const outerR = 0.5;
   const segments = 14;
   const vertCount = (segments + 1) * 2;
   const positions = new Float32Array(vertCount * 3);
@@ -200,8 +204,6 @@ export class EnemySystem {
   private goreSystem: GoreSystem | null = null;
 
   // Player attack arc params
-  private readonly playerReach = 0.7;
-  private readonly playerArcHalf = Math.PI / 3; // 60 degrees = 120 total
   private readonly playerDamage = 2;
 
   /** Optional list of allied characters (non-enemies) for collision */
@@ -268,7 +270,7 @@ export class EnemySystem {
 
       for (const enemy of this.enemies) {
         if (!enemy.isAlive || hitThisFrame.has(enemy)) continue;
-        if (isInAttackArc(px, pz, playerChar.facing, enemy.mesh.position.x, enemy.mesh.position.z, this.playerReach, this.playerArcHalf)) {
+        if (isInAttackArc(px, playerChar.groundY, pz, playerChar.facing, enemy.mesh.position.x, enemy.groundY, enemy.mesh.position.z, playerChar.params.attackReach, playerChar.params.attackArcHalf)) {
           const hit = enemy.takeDamage(this.playerDamage, px, pz);
           if (hit) {
             hitThisFrame.add(enemy);
@@ -332,10 +334,10 @@ export class EnemySystem {
 
           const ex = enemy.mesh.position.x;
           const ez = enemy.mesh.position.z;
-          if (isInAttackArc(ex, ez, enemy.facing, playerChar.mesh.position.x, playerChar.mesh.position.z, enemy.attackRange, this.playerArcHalf)) {
-            const hit = playerChar.takeDamage(enemy.attackDamage, ex, ez);
+          if (isInAttackArc(ex, enemy.groundY, ez, enemy.facing, playerChar.mesh.position.x, playerChar.groundY, playerChar.mesh.position.z, enemy.params.attackReach, enemy.params.attackArcHalf)) {
+            const hit = playerChar.takeDamage(enemy.params.attackDamage, ex, ez);
             if (hit) {
-              onPlayerHit(enemy.attackDamage);
+              onPlayerHit(enemy.params.attackDamage);
               audioSystem.sfxAt('fleshHit', playerChar.mesh.position.x, playerChar.mesh.position.z);
               if (this.impactCallbacks) {
                 const pdx = playerChar.mesh.position.x - ex;

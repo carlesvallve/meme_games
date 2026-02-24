@@ -136,7 +136,8 @@ class AudioSystemClass {
         case 'land':     sfxLand(ctx, dest); break;
         case 'potion':   sfxPotion(ctx, dest); break;
         case 'slash':    sfxSlash(ctx, dest); break;
-        case 'fleshHit': sfxFleshHit(ctx, dest); break;
+        case 'fleshHit':     sfxFleshHit(ctx, dest); break;
+        case 'fleshHitHigh': sfxFleshHit(ctx, dest, 1.25); break;
         case 'hurt':     sfxHurt(ctx, dest); break;
         case 'shoot':    sfxShoot(ctx, dest); break;
         case 'arrow':    sfxArrow(ctx, dest); break;

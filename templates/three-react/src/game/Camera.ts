@@ -11,6 +11,8 @@ export interface CameraOptions {
   angleX?: number;
   angleY?: number;
   followSpeed?: number;
+  /** Called when distance changes (scroll/pinch) so store can stay in sync */
+  onDistanceChange?: (distance: number) => void;
 }
 
 const DRAG_THRESHOLD = 8; // px before considering it a real drag (fixes mobile)
@@ -62,6 +64,7 @@ export class Camera {
   private shakeDecay = 0;
 
   private canvas: HTMLCanvasElement;
+  private onDistanceChange?: (distance: number) => void;
   private onPointerDown: (e: PointerEvent) => void;
   private onPointerMove: (e: PointerEvent) => void;
   private onPointerUp: (e: PointerEvent) => void;
@@ -79,6 +82,7 @@ export class Camera {
       angleX = -35,
       angleY = 45,
       followSpeed = 8,
+      onDistanceChange,
     } = opts;
 
     this.camera = new THREE.PerspectiveCamera(fov, aspect, near, far);
@@ -87,6 +91,7 @@ export class Camera {
     this.angleY = angleY * (Math.PI / 180);
     this.followSpeed = followSpeed;
     this.canvas = canvas;
+    this.onDistanceChange = onDistanceChange;
 
     // Prevent browser from hijacking touch for scroll/zoom
     canvas.style.touchAction = 'none';
@@ -146,6 +151,7 @@ export class Camera {
         this.minDistance,
         Math.min(this.maxDistance, this.distance + e.deltaY * this.zoomSpeed),
       );
+      this.onDistanceChange?.(this.distance);
     };
 
     // Touch pinch zoom (two-finger only)
@@ -181,6 +187,7 @@ export class Camera {
         }
 
         this.distance = Math.max(this.minDistance, Math.min(this.maxDistance, this.distance));
+        this.onDistanceChange?.(this.distance);
         this.lastPinchDist = pinchDist;
         this.lastTwoFingerY = avgY;
       }
@@ -311,8 +318,9 @@ export class Camera {
     this.rotationSpeed = p.rotationSpeed;
     this.zoomSpeed = p.zoomSpeed;
     this.collisionLayers = p.collisionLayers;
-    // Clamp current values to new ranges
-    this.distance = Math.max(this.minDistance, Math.min(this.maxDistance, this.distance));
+    // Sync distance from store (e.g. from settings slider); clamp to min/max
+    const nextDistance = Math.max(this.minDistance, Math.min(this.maxDistance, p.distance));
+    this.distance = nextDistance;
     this.angleX = Math.max(this.pitchMin, Math.min(this.pitchMax, this.angleX));
   }
 

@@ -1,9 +1,9 @@
-/** Meaty flesh-hit impact — low thump + filtered noise snap + metallic ring */
-export function sfxFleshHit(ctx: AudioContext, dest: AudioNode = ctx.destination): void {
+/** Meaty flesh-hit impact — low thump + filtered noise snap + metallic ring.
+ *  Optional pitchMul: use 1 for default, >1 for higher pitch (e.g. 1.25 for terrain/wall impact). */
+export function sfxFleshHit(ctx: AudioContext, dest: AudioNode = ctx.destination, pitchMulOverride?: number): void {
   const now = ctx.currentTime;
 
-  // Randomize pitch per hit
-  const pitchMul = 0.8 + Math.random() * 0.4;
+  const pitchMul = pitchMulOverride ?? (0.8 + Math.random() * 0.4);
 
   // Low-frequency thump (body impact)
   const osc = ctx.createOscillator();

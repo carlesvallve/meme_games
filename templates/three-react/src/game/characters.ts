@@ -2,20 +2,23 @@ import * as THREE from 'three';
 import { VOX_HEROES, type VoxCharEntry } from './VoxCharacterDB';
 
 // ── Character slots ──
-// Internal identifiers for the 4 character slots.
-// Visual appearance comes from the VOX roster, not these names.
+// One slot per hero; all VOX_HEROES are shown on the start screen grid.
 
-export type CharacterType = 'slot0' | 'slot1' | 'slot2' | 'slot3';
+export type CharacterType =
+  | 'slot0' | 'slot1' | 'slot2' | 'slot3' | 'slot4' | 'slot5'
+  | 'slot6' | 'slot7' | 'slot8' | 'slot9' | 'slot10' | 'slot11';
 
-const ALL_SLOTS: CharacterType[] = ['slot0', 'slot1', 'slot2', 'slot3'];
+const ALL_SLOTS: CharacterType[] = [
+  'slot0', 'slot1', 'slot2', 'slot3', 'slot4', 'slot5',
+  'slot6', 'slot7', 'slot8', 'slot9', 'slot10', 'slot11',
+];
 
 // ── VOX Roster ──
-// 4 randomly-picked unique heroes assigned to each slot.
+// All heroes in order; each slot maps to one VOX_HEROES entry.
 
 function pickRoster(): Record<CharacterType, VoxCharEntry> {
-  const shuffled = [...VOX_HEROES].sort(() => Math.random() - 0.5);
   return Object.fromEntries(
-    ALL_SLOTS.map((slot, i) => [slot, shuffled[i]]),
+    ALL_SLOTS.map((slot, i) => [slot, VOX_HEROES[i]]),
   ) as Record<CharacterType, VoxCharEntry>;
 }
 
@@ -36,6 +39,14 @@ export const CHARACTER_TEAM_COLORS: Record<CharacterType, string> = {
   slot1: '#4a9eff',
   slot2: '#44cc66',
   slot3: '#ffaa22',
+  slot4: '#aa66ff',
+  slot5: '#ff6b9d',
+  slot6: '#00ccaa',
+  slot7: '#ff8844',
+  slot8: '#88ccff',
+  slot9: '#ccff88',
+  slot10: '#ffcc00',
+  slot11: '#c44',
 };
 
 // ── Names from roster ──

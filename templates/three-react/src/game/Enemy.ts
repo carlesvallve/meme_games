@@ -9,9 +9,6 @@ import { ChaseBehavior } from './behaviors/ChaseBehavior';
 import type { CharacterType } from './characters';
 
 export class Enemy extends Character {
-  readonly attackDamage = 1;
-  readonly attackRange = 0.8;
-  readonly chaseRange = 8;
   private chaseBehavior: ChaseBehavior | null = null;
 
   constructor(
@@ -21,17 +18,26 @@ export class Enemy extends Character {
     position: THREE.Vector3,
     ladderDefs: ReadonlyArray<LadderDef> = [],
   ) {
-    // Use 'slot0' as placeholder type since enemies don't use the hero slot system
-    // skipAutoSkin=true prevents the hero roster skin from racing with the enemy skin
     super(scene, terrain, navGrid, 'slot0' as CharacterType, position, ladderDefs, true);
 
     this.isEnemy = true;
     this.hp = 4;
     this.maxHp = 4;
 
-    // Slower speed
-    this.params.speed = 2.5;
+    this.params.speed = 1 + Math.random() * 1;
     this.params.hopHeight = 0.03;
+    this.params.attackReach = 0.5;
+    this.params.attackArcHalf = Math.PI / 3;
+    this.params.attackDamage = 1;
+    this.params.attackCooldown = 1.2;
+    this.params.chaseRange = 8;
+    this.params.knockbackSpeed = 2;
+    this.params.knockbackDecay = 14;
+    this.params.invulnDuration = 0.5;
+    this.params.flashDuration = 0.15;
+    this.params.stunDuration = 0.15;
+    this.params.attackDuration = 0.2;
+    this.params.exhaustDuration = 1.0;
 
     // Remove torch lights (enemies don't carry torches)
     this.torchLight.intensity = 0;
@@ -49,9 +55,9 @@ export class Enemy extends Character {
     this.chaseBehavior = new ChaseBehavior(
       { navGrid, ladderDefs },
       this.params,
-      this.attackRange,
-      1.2,
-      this.chaseRange,
+      this.params.attackReach,
+      this.params.attackCooldown,
+      this.params.chaseRange,
     );
     this.behavior = this.chaseBehavior;
   }
