@@ -145,6 +145,7 @@ export class Character implements BehaviorAgent {
   flashTimer = 0;
   attackTimer = 0;
   isAttacking = false;
+  attackJustStarted = false;
   attackCount = 0;
   exhaustTimer = 0;
   /** Time since last attack — used to reset attackCount after a pause */
@@ -632,6 +633,7 @@ export class Character implements BehaviorAgent {
     }
 
     this.isAttacking = true;
+    this.attackJustStarted = true;
     this.attackTimer = 0.2;
     this.timeSinceLastAttack = 0;
     this.attackCount++;

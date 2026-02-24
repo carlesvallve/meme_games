@@ -115,7 +115,7 @@ export class Terrain {
   private debris: DebrisBox[] = [];
   private debrisEntities: Entity[] = [];
   private boxGroup = new THREE.Group(); // visible box meshes for click raycast
-  private readonly groundSize = 50;
+  private readonly groundSize = 30;
   readonly preset: TerrainPreset;
   private readonly heightmapStyle: HeightmapStyle;
   private palette: TerrainPalette;
