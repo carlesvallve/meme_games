@@ -37,6 +37,7 @@ export interface PlayerParams {
   stunDuration: number;
   attackDuration: number;
   exhaustDuration: number;
+  showSlashEffect: boolean;
 }
 
 export type LightPreset = 'default' | 'bright' | 'dark' | 'none';
@@ -52,6 +53,8 @@ export interface TorchParams {
 }
 
 export interface CameraParams {
+  /** Vertical field of view in degrees */
+  fov: number;
   minDistance: number;
   maxDistance: number;
   /** Current camera distance (zoom level); synced with camera and scroll/pinch. */
@@ -89,9 +92,11 @@ export const DEFAULT_PLAYER_PARAMS: PlayerParams = {
   stunDuration: 0.08,
   attackDuration: 0.2,
   exhaustDuration: 1.0,
+  showSlashEffect: true,
 };
 
 export const DEFAULT_CAMERA_PARAMS: CameraParams = {
+  fov: 60,
   minDistance: 5, maxDistance: 25, distance: 12, pitchMin: -80, pitchMax: -10,
   rotationSpeed: 0.005, zoomSpeed: 0.01, collisionLayers: Layer.None,
 };

@@ -118,8 +118,9 @@ class AudioSystemClass {
     const ctx = this.ensureContext();
     if (!ctx) return;
 
-    // For spatial attenuation, route through a gain node
-    const dest = volume < 0.99 ? this.createAttenuatedDest(ctx, volume) : ctx.destination;
+    // Step and land use intensity as volume scale (e.g. enemy steps pass 0.03 for quieter)
+    const effectiveVolume = (type === 'step' || type === 'land') ? volume * intensity : volume;
+    const dest = effectiveVolume < 0.99 ? this.createAttenuatedDest(ctx, effectiveVolume) : ctx.destination;
 
     try {
       switch (type) {

@@ -46,6 +46,7 @@ const TORCH_PARAMS: SliderDef<keyof TorchParams>[] = [
 const LIGHT_PRESETS: LightPreset[] = ['default', 'bright', 'dark', 'none'];
 
 const CAMERA_PARAMS: SliderDef<keyof CameraParams>[] = [
+  { key: 'fov', label: 'FOV', min: 30, max: 90, step: 5 },
   { key: 'distance', label: 'Zoom', min: 2, max: 40, step: 0.5 },
   { key: 'minDistance', label: 'Zoom Min', min: 2, max: 15, step: 0.5 },
   { key: 'maxDistance', label: 'Zoom Max', min: 10, max: 40, step: 0.5 },
@@ -602,6 +603,24 @@ export function SettingsPanel() {
                   flex: 1,
                   background: (playerParams.exhaustionEnabled ? 'on' : 'off') === val ? '#6af' : '#333',
                   color: (playerParams.exhaustionEnabled ? 'on' : 'off') === val ? '#000' : '#aaa',
+                  margin: 0,
+                }}
+              >
+                {val}
+              </button>
+            ))}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+            <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Slash effect</span>
+            {(['on', 'off'] as const).map((val) => (
+              <button
+                key={val}
+                onClick={() => setPlayerParam('showSlashEffect', val === 'on')}
+                style={{
+                  ...resetBtnStyle,
+                  flex: 1,
+                  background: (playerParams.showSlashEffect ? 'on' : 'off') === val ? '#6af' : '#333',
+                  color: (playerParams.showSlashEffect ? 'on' : 'off') === val ? '#000' : '#aaa',
                   margin: 0,
                 }}
               >

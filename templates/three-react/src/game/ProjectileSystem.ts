@@ -569,8 +569,9 @@ export class ProjectileSystem {
   }
 
   /**
-   * Stick arrow to hit point. For terrain/architecture we use the exact hit point (no vertex snap).
-   * Character sticks use stickArrowToCharacterMesh so they follow animation.
+   * Stick arrow to hit point.
+   * Terrain/wall/prop: no parent — arrow stays in world space at hit point (just collide, no reparenting).
+   * Character: pass character mesh as parent so the arrow reparents and follows the character (stick in flesh).
    */
   private stickArrow(
     p: Projectile,
@@ -587,13 +588,14 @@ export class ProjectileSystem {
       p.light = null;
     }
     removeArrowTip(p.mesh);
-    const parent = parentOrAttachMesh;
     const worldForward = new THREE.Vector3();
     p.mesh.getWorldDirection(worldForward);
-    // Tip at hit + penetration so arrow sinks into surface (chars and terrain/cliffs)
     const desiredWorldPos = hitPoint.clone().addScaledVector(worldForward, ARROW_PENETRATION_OFFSET - ARROW_TIP_OFFSET);
 
+    const parent = parentOrAttachMesh;
     if (parent) {
+      // Character: reparent so arrow follows the character
+      const arrowWorldQuat = p.mesh.getWorldQuaternion(new THREE.Quaternion());
       p.mesh.removeFromParent();
       parent.add(p.mesh);
       p.stuckToMesh = undefined;
@@ -602,8 +604,9 @@ export class ProjectileSystem {
       p.mesh.position.copy(desiredWorldPos);
       const parentWorldQuat = new THREE.Quaternion();
       parent.getWorldQuaternion(parentWorldQuat).invert();
-      p.mesh.quaternion.copy(parentWorldQuat).multiply(p.mesh.getWorldQuaternion(new THREE.Quaternion()));
+      p.mesh.quaternion.copy(parentWorldQuat).multiply(arrowWorldQuat);
     } else {
+      // Terrain/wall/prop: stay in world space, no reparenting
       p.stuckToMesh = undefined;
       p.stuckVertexIndex = undefined;
       p.mesh.position.copy(desiredWorldPos);
@@ -783,14 +786,14 @@ export class ProjectileSystem {
           const slope = hDist > 0.001 ? rise / hDist : 0;
 
           if (slope > TERRAIN_HIT_SLOPE) {
-            // Steep slope — projectile impacts terrain
+            // Steep slope — projectile impacts terrain (cliff/wall). Arrows stick at ground height; energy impact at projectile position so it doesn't jump up (getGroundY can be top of wall in any dungeon mode).
             const hitPoint = new THREE.Vector3(p.mesh.position.x, groundHere + FLOOR_STICK_Y_OFFSET, p.mesh.position.z);
             audioSystem.sfxAt('fleshHit', hitPoint.x, hitPoint.z);
             if (p.isArrow) {
               this.stickArrow(p, hitPoint);
               hit = true;
             } else {
-              this.spawnEnergyImpact(hitPoint.x, hitPoint.y, hitPoint.z, this.getProjectileColor(p), p.vx, p.vy, p.vz, undefined, 0.5);
+              this.spawnEnergyImpact(p.mesh.position.x, p.mesh.position.y, p.mesh.position.z, this.getProjectileColor(p), p.vx, p.vy, p.vz, undefined, 0.5);
               this.removeProjectile(i);
               continue;
             }
@@ -831,7 +834,7 @@ export class ProjectileSystem {
           for (const h of hits) {
             if (!h.face) continue;
             audioSystem.sfxAt('fleshHitHigh', h.point.x, h.point.z);
-            this.stickArrow(p, h.point.clone(), h.object);
+            this.stickArrow(p, h.point.clone());
             hit = true;
             break;
           }

@@ -250,6 +250,7 @@ export class EnemySystem {
     playerChar: Character,
     onPlayerHit: (damage: number) => void,
     onEnemyDied: () => void,
+    showSlashEffect = true,
   ): void {
     const hitThisFrame = new Set<Enemy>();
 
@@ -265,7 +266,7 @@ export class EnemySystem {
       if (playerChar.attackJustStarted) {
         playerChar.attackJustStarted = false;
         audioSystem.sfx('slash');
-        this.slashArcs.push(createSlashArc(playerChar.mesh));
+        if (showSlashEffect) this.slashArcs.push(createSlashArc(playerChar.mesh));
       }
 
       for (const enemy of this.enemies) {
@@ -330,7 +331,7 @@ export class EnemySystem {
         if (started) {
           // Slash arc + SFX for enemy attacks
           audioSystem.sfxAt('slash', enemy.mesh.position.x, enemy.mesh.position.z);
-          this.slashArcs.push(createSlashArc(enemy.mesh));
+          if (showSlashEffect) this.slashArcs.push(createSlashArc(enemy.mesh));
 
           const ex = enemy.mesh.position.x;
           const ez = enemy.mesh.position.z;
@@ -495,6 +496,7 @@ export class EnemySystem {
   }
 
   /** Spawn hit sparks at a world position (used by ProjectileSystem) */
+  /** Called when something hits an enemy (melee or projectile); always shows hit sparks. */
   spawnHitSparks(x: number, y: number, z: number, dirX: number, dirZ: number): void {
     this.hitSparks.push(createHitSparks(this.scene, x, y, z, dirX, dirZ));
   }
