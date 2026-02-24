@@ -39,8 +39,8 @@ export class LootSystem {
     this.scene = scene;
     this.terrain = terrain;
 
-    this.coinGeo = new THREE.OctahedronGeometry(0.04, 0);
-    this.potionGeo = new THREE.SphereGeometry(0.035, 6, 4);
+    this.coinGeo = new THREE.OctahedronGeometry(0.05, 0);
+    this.potionGeo = new THREE.SphereGeometry(0.05, 6, 4);
 
     this.coinMat = new THREE.MeshStandardMaterial({
       color: 0xffd700,
@@ -58,10 +58,13 @@ export class LootSystem {
   }
 
   spawnLoot(position: THREE.Vector3): void {
-    const count = 4 + Math.floor(Math.random() * 5); // 4-8 items
+    // 10% chance of no drop at all (just gore)
+    if (Math.random() < 0.1) return;
+
+    const count = 1 + Math.floor(Math.random() * 3); // 1-3 items
 
     for (let i = 0; i < count; i++) {
-      const isCoin = Math.random() < 0.7;
+      const isCoin = Math.random() < 0.8;
       const type: 'coin' | 'potion' = isCoin ? 'coin' : 'potion';
 
       const geo = isCoin ? this.coinGeo : this.potionGeo;
@@ -80,10 +83,10 @@ export class LootSystem {
 
       // Random ejection angle
       const angle = Math.random() * Math.PI * 2;
-      const hSpeed = 1.2 + Math.random() * 1.0;
+      const hSpeed = 1.8 + Math.random() * 1.4;
       const vel = new THREE.Vector3(
         Math.cos(angle) * hSpeed,
-        2.0 + Math.random() * 1.0, // punchy upward — drag keeps it below walls
+        3.0 + Math.random() * 1.5,
         Math.sin(angle) * hSpeed,
       );
 
@@ -128,16 +131,44 @@ export class LootSystem {
         item.vel.x *= dragFactor;
         item.vel.z *= dragFactor;
         item.vel.y -= GRAVITY * dt;
+        const oldX = item.mesh.position.x;
+        const oldZ = item.mesh.position.z;
         item.mesh.position.x += item.vel.x * dt;
         item.mesh.position.y += item.vel.y * dt;
         item.mesh.position.z += item.vel.z * dt;
+
+        // Wall bounce — only check large debris boxes (walls), skip small prop colliders
+        if (item.age > 0.1) {
+          const newX = item.mesh.position.x;
+          const newZ = item.mesh.position.z;
+          const itemY = item.mesh.position.y;
+          const debris = this.terrain.getDebris();
+          for (const box of debris) {
+            if (box.halfW < 0.15 || box.halfD < 0.15) continue; // skip prop debris
+            if (itemY > box.height) continue; // above the wall
+            const relX = newX - box.x;
+            const relZ = newZ - box.z;
+            if (Math.abs(relX) < box.halfW && Math.abs(relZ) < box.halfD) {
+              const overlapX = box.halfW - Math.abs(relX);
+              const overlapZ = box.halfD - Math.abs(relZ);
+              if (overlapX < overlapZ) {
+                item.mesh.position.x = oldX;
+                item.vel.x *= -0.4;
+              } else {
+                item.mesh.position.z = oldZ;
+                item.vel.z *= -0.4;
+              }
+              break;
+            }
+          }
+        }
 
         // Spin
         item.mesh.rotation.y += dt * 8;
         item.mesh.rotation.x += dt * 5;
 
-        // Floor check
-        const terrainY = this.terrain.getTerrainY(item.mesh.position.x, item.mesh.position.z);
+        // Floor check — use getFloorY to skip prop debris (chests, barrels, etc.)
+        const terrainY = this.terrain.getFloorY(item.mesh.position.x, item.mesh.position.z);
         const floorY = terrainY + 0.04; // mesh radius
 
         if (item.mesh.position.y <= floorY) {

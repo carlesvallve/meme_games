@@ -11,17 +11,54 @@ import { ChestSystem } from './Chest';
 import { LootSystem } from './Loot';
 import { SpeechBubbleSystem } from './SpeechBubble';
 import { Character } from './Character';
+import { EnemySystem, type HitImpactCallbacks } from './EnemySystem';
+import { ProjectileSystem } from './ProjectileSystem';
+import { GoreSystem } from './GoreSystem';
+import { getProjectileConfig, isRangedHeroId } from './CombatConfig';
 import { createDustMotes, createRainEffect, createDebrisEffect } from '../utils/particles';
 import type { ParticleToggles } from '../store';
 import type { ParticleSystem } from '../types';
 import { audioSystem } from '../utils/AudioSystem';
 import type { GameInstance } from '../types';
 import { CHARACTER_TEAM_COLORS, getSlots, getCharacterName, rerollRoster, type CharacterType } from './characters';
-import { getRandomVoxChar } from './VoxCharacterDB';
+import { VOX_HEROES, VOX_ENEMIES } from './VoxCharacterDB';
 
 /** Nav cell size: 0.25m for all presets. */
 function navCellForPreset(_preset: string): number {
   return 0.25;
+}
+
+/** Melee auto-aim: find nearest enemy within reach+margin and a wide cone, return snap facing or null. */
+function findMeleeAimTarget(
+  px: number, pz: number, currentFacing: number,
+  enemies: ReadonlyArray<{ isAlive: boolean; mesh: { position: THREE.Vector3 } }>,
+): number | null {
+  const maxRange = 1.8;       // slightly beyond melee reach so you snap before closing gap
+  const maxAngle = Math.PI * 0.6; // 108 deg cone (generous)
+
+  let bestAngleDiff = maxAngle;
+  let bestFacing: number | null = null;
+
+  const fwdX = -Math.sin(currentFacing);
+  const fwdZ = -Math.cos(currentFacing);
+
+  for (const enemy of enemies) {
+    if (!enemy.isAlive) continue;
+    const dx = enemy.mesh.position.x - px;
+    const dz = enemy.mesh.position.z - pz;
+    const dist = Math.sqrt(dx * dx + dz * dz);
+    if (dist > maxRange || dist < 0.01) continue;
+
+    // Angle between current facing and direction to enemy
+    const dot = fwdX * (dx / dist) + fwdZ * (dz / dist);
+    const angleDiff = Math.acos(Math.min(1, Math.max(-1, dot)));
+    if (angleDiff < bestAngleDiff) {
+      bestAngleDiff = angleDiff;
+      bestFacing = Math.atan2(-dx, -dz);
+    }
+  }
+
+  return bestFacing;
 }
 
 export function createGame(canvas: HTMLCanvasElement): GameInstance {
@@ -59,6 +96,9 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   let lootSystem = new LootSystem(scene, terrain);
   const usePropChestsOnly = initPreset === 'voxelDungeon';
   let chestSystem = new ChestSystem(scene, terrain, lootSystem, usePropChestsOnly);
+  let enemySystem: EnemySystem | null = null;
+  let projectileSystem: ProjectileSystem | null = null;
+  let goreSystem = new GoreSystem(scene);
   if (usePropChestsOnly) {
     terrain.setPropChestRegistrar((list) => list.forEach(({ position, mesh, entity, openGeo }) => chestSystem.registerPropChest(position, mesh, entity, openGeo)));
   }
@@ -87,6 +127,10 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     // Dispose old systems
     for (const char of characters) char.dispose();
     characters = [];
+    if (enemySystem) { enemySystem.dispose(); enemySystem = null; }
+    if (projectileSystem) { projectileSystem.dispose(); projectileSystem = null; }
+    goreSystem.dispose();
+    goreSystem = new GoreSystem(scene);
     chestSystem.dispose();
     lootSystem.dispose();
     collectibles.dispose();
@@ -234,6 +278,8 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       p.capsuleRadius = pp.capsuleRadius;
       p.arrivalReach = pp.arrivalReach;
       p.hopHeight = pp.hopHeight;
+      p.movementMode = pp.movementMode;
+      p.showPathDebug = pp.showPathDebug;
     }
   }
 
@@ -356,8 +402,9 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     else if (e.code === 'ArrowRight') { cycleCharacter(1); e.preventDefault(); }
     else if (e.code === 'KeyR') {
       if (activeCharacter) {
-        const entry = getRandomVoxChar();
-        console.log(`[Game] Random VOX skin: ${entry.name} (${entry.category})`);
+        const pool = e.shiftKey ? VOX_ENEMIES : VOX_HEROES;
+        const entry = pool[Math.floor(Math.random() * pool.length)];
+        console.log(`[Game] Random ${e.shiftKey ? 'enemy' : 'hero'} skin: ${entry.name}`);
         speechSystem.onSkinChanged(activeCharacter);
         activeCharacter.applyVoxSkin(entry);
       }
@@ -469,8 +516,22 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
 
     if (activeCharacter) {
       useGameStore.getState().setCollectibles(0);
+      useGameStore.getState().setHP(10, 10);
       useGameStore.getState().setActiveCharacter(getCharacterName(controlledType), CHARACTER_TEAM_COLORS[controlledType]);
     }
+
+    // Spawn enemies + projectile system
+    if (enemySystem) enemySystem.dispose();
+    if (projectileSystem) projectileSystem.dispose();
+    enemySystem = new EnemySystem(scene, terrain, navGrid, lootSystem, ladderDefs);
+    enemySystem.setGoreSystem(goreSystem);
+    projectileSystem = new ProjectileSystem(scene);
+    enemySystem.setAllyCharacters(characters);
+    enemySystem.impactCallbacks = {
+      onHitstop: (duration) => triggerHitstop(duration),
+      onCameraShake: (intensity, duration, dirX, dirZ) => cam.shake(intensity, duration, dirX, dirZ),
+    };
+    enemySystem.spawnEnemies(8);
   }
 
   // Store callbacks
@@ -556,8 +617,22 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   // Game loop
   let rafId = 0;
   let lastTime = 0;
+  let hitstopTimer = 0;
+
+  /** Trigger a hitstop (freeze gameplay for a duration). */
+  function triggerHitstop(duration: number): void {
+    hitstopTimer = Math.max(hitstopTimer, duration);
+  }
 
   function update(dt: number): void {
+    // Hitstop: freeze gameplay but keep rendering
+    if (hitstopTimer > 0) {
+      hitstopTimer -= dt;
+      // Still update camera (shake plays during hitstop)
+      cam.updatePosition(dt);
+      // Don't call input.update() — queued actions survive until gameplay resumes
+      return;
+    }
     cachedInputState = input.update();
     const { phase, cameraParams } = useGameStore.getState();
     cam.setParams(cameraParams);
@@ -573,9 +648,84 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       // Sync active character's movement params from settings sliders
       syncAllCharacterParams();
 
+      // Player attack on Space (before character update so attack state is set for this frame)
+      if (cachedInputState.action) {
+        const heroId = activeCharacter.voxEntry?.id ?? '';
+        const projConfig = getProjectileConfig(heroId);
+        if (projConfig && projectileSystem) {
+          // Ranged: play attack anim + fire projectile
+          activeCharacter.startAttack();
+          const pos = activeCharacter.getPosition();
+          projectileSystem.fireProjectile(
+            heroId,
+            projConfig,
+            pos.x, pos.z,
+            activeCharacter.groundY,
+            activeCharacter.facing,
+            enemySystem ? enemySystem.getEnemies() : [],
+          );
+        } else {
+          // Melee: auto-aim snap toward nearest enemy, then attack
+          if (enemySystem) {
+            const pos = activeCharacter.getPosition();
+            const aimTarget = findMeleeAimTarget(pos.x, pos.z, activeCharacter.facing, enemySystem.getEnemies());
+            if (aimTarget !== null) {
+              activeCharacter.facing = aimTarget;
+              activeCharacter.mesh.rotation.y = aimTarget;
+            }
+          }
+          activeCharacter.startAttack();
+        }
+      }
+
       // Update all characters uniformly
       for (const char of characters) {
         char.update(dt);
+      }
+
+      // Gore system (body chunks + blood decals)
+      goreSystem.update(dt);
+
+      // Enemy system
+      if (enemySystem) {
+        enemySystem.update(dt, activeCharacter,
+          (damage) => {
+            const s = useGameStore.getState();
+            const newHp = Math.max(0, s.hp - damage);
+            s.setHP(newHp, s.maxHp);
+            if (newHp <= 0) s.setPhase('gameover');
+          },
+          () => {
+            const s = useGameStore.getState();
+            s.setScore(s.score + 10);
+          },
+        );
+      }
+
+      // Projectile system
+      if (projectileSystem && enemySystem) {
+        projectileSystem.update(dt, enemySystem.getEnemies(), (info) => {
+          // VFX: damage number + hit sparks
+          enemySystem!.spawnDamageNumber(info.x, info.y, info.z, info.damage);
+          enemySystem!.spawnHitSparks(info.x, info.y, info.z, info.dirX, info.dirZ);
+          enemySystem!.spawnBloodSplash(info.x, info.y, info.z, info.dirX, info.dirZ, info.enemy.groundY);
+          audioSystem.sfxAt('fleshHit', info.x, info.z);
+
+          // Impact feel
+          const isKill = !info.enemy.isAlive;
+          if (enemySystem!.impactCallbacks) {
+            enemySystem!.impactCallbacks.onHitstop(isKill ? 0.1 : 0.06);
+            enemySystem!.impactCallbacks.onCameraShake(
+              isKill ? 0.2 : 0.12, isKill ? 0.2 : 0.12, info.dirX, info.dirZ,
+            );
+          }
+
+          // Score on kill
+          if (isKill) {
+            const s = useGameStore.getState();
+            s.setScore(s.score + 10);
+          }
+        });
       }
 
       // Update audio listener position for spatial SFX
@@ -626,10 +776,13 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       const chestsOpened = chestSystem.update(dt, activePos, params.stepHeight);
       if (chestsOpened > 0) audioSystem.sfx('chest');
 
-      // Doors — all characters can interact
+      // Doors — all characters + enemies can interact
       const doorSystem = terrain.getDoorSystem();
       if (doorSystem) {
         const charPositions = characters.map(c => c.getPosition());
+        if (enemySystem) {
+          charPositions.push(...enemySystem.getEnemyPositions());
+        }
         doorSystem.update(dt, charPositions, params.stepHeight);
       }
 
@@ -656,6 +809,16 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
         }
       }
 
+      // HP bars (billboard, face camera)
+      for (const char of characters) {
+        char.updateHpBar(cam.camera);
+      }
+      if (enemySystem) {
+        for (const enemy of enemySystem.getEnemies()) {
+          enemy.updateHpBar(cam.camera);
+        }
+      }
+
       // Speech bubbles
       speechSystem.update(dt);
 
@@ -676,7 +839,6 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     for (const sys of Object.values(particleSystems)) {
       if (sys) sys.update(dt);
     }
-    input.consume();
   }
 
   function loop(time: number): void {
@@ -708,6 +870,9 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
         if (sys) sys.dispose();
       }
       for (const char of characters) char.dispose();
+      if (enemySystem) enemySystem.dispose();
+      if (projectileSystem) projectileSystem.dispose();
+      goreSystem.dispose();
       terrain.dispose();
       collectibles.dispose();
       chestSystem.dispose();

@@ -16,6 +16,8 @@ import { PlayerControl, type PlayerControlDeps } from './behaviors/PlayerControl
 import { audioSystem } from '../utils/AudioSystem';
 import type { LadderDef } from './Ladder';
 
+export type MovementMode = 'free' | 'grid';
+
 export interface MovementParams {
   speed: number;
   stepHeight: number;
@@ -23,6 +25,8 @@ export interface MovementParams {
   capsuleRadius: number;
   arrivalReach: number;
   hopHeight: number;
+  movementMode: MovementMode;
+  showPathDebug: boolean;
 }
 
 export function lerpAngle(current: number, target: number, t: number): number {
@@ -70,7 +74,6 @@ interface ClimbState {
 }
 
 // ── Debug visualization constants ───────────────────────────────────
-const DEBUG_PATH = true;
 const DEBUG_LINE_COLOR = 0x00ffaa;
 const DEBUG_NODE_COLOR = 0x00ffaa;
 const DEBUG_GOAL_COLOR = 0xff4466;
@@ -112,7 +115,11 @@ export class Character implements BehaviorAgent {
   private voxFrameTimer = 0;
   private voxLoaded = false;
   /** Frame rates per animation type */
-  private static readonly VOX_FPS: Record<string, number> = { idle: 4.5, walk: 12, action: 9 };
+  private static readonly VOX_FPS: Record<string, number> = { 
+    idle: 2.5, 
+    walk: 10, 
+    action: 9 
+  };
 
   /** Per-character movement parameters (mutable, shared by reference with behaviors) */
   params: MovementParams;
@@ -127,8 +134,41 @@ export class Character implements BehaviorAgent {
   private navGrid: NavGrid;
   private ladderDefs: ReadonlyArray<LadderDef>;
 
+  // ── Combat state ───────────────────────────────────────────────
+  hp = 10;
+  maxHp = 10;
+  isAlive = true;
+  isEnemy = false;
+  knockbackVX = 0;
+  knockbackVZ = 0;
+  invulnTimer = 0;
+  flashTimer = 0;
+  attackTimer = 0;
+  isAttacking = false;
+  attackCount = 0;
+  exhaustTimer = 0;
+  /** Time since last attack — used to reset attackCount after a pause */
+  private timeSinceLastAttack = 0;
+  /** Stun timer — prevents movement/actions while > 0 */
+  stunTimer = 0;
+  /** Last hit direction (from attacker toward this character), used for gore ejection */
+  lastHitDirX = 0;
+  lastHitDirZ = 0;
+  private originalEmissive = new THREE.Color(0, 0, 0);
+  private originalEmissiveIntensity = 0;
+
+  // ── HP bar (3D billboard) ─────────────────────────────────────────
+  private hpBarGroup: THREE.Group | null = null;
+  private hpBarFill: THREE.Mesh | null = null;
+  private hpBarBg: THREE.Mesh | null = null;
+  /** Whether HP bar is currently visible (hp < maxHp) */
+  showingHpBar = false;
+  private static readonly HP_BAR_WIDTH = 0.4;
+  private static readonly HP_BAR_HEIGHT = 0.04;
+  private static readonly HP_BAR_Y_OFFSET = 0.65;
+
   // ── Behavior system ─────────────────────────────────────────────
-  private behavior: Behavior;
+  protected behavior: Behavior;
   private defaultBehavior: Roaming;
   private playerControl: PlayerControl | null = null;
   private _selected = false;
@@ -142,7 +182,7 @@ export class Character implements BehaviorAgent {
   private debugGoalMat: THREE.MeshBasicMaterial | null = null;
   private lastDebugWaypointCount = 0;
 
-  constructor(scene: THREE.Scene, terrain: Terrain, navGrid: NavGrid, type: CharacterType, position: THREE.Vector3, ladderDefs: ReadonlyArray<LadderDef> = []) {
+  constructor(scene: THREE.Scene, terrain: Terrain, navGrid: NavGrid, type: CharacterType, position: THREE.Vector3, ladderDefs: ReadonlyArray<LadderDef> = [], skipAutoSkin = false) {
     this.scene = scene;
     this.terrain = terrain;
     this.navGrid = navGrid;
@@ -156,6 +196,9 @@ export class Character implements BehaviorAgent {
     this.visualGroundY = position.y;
     scene.add(this.mesh);
     this.entity = new Entity(this.mesh, { layer: Layer.Character, radius: 0.25 });
+
+    // HP bar (billboard)
+    this.createHpBar();
 
     // Torch light
     const torch = useGameStore.getState().torchParams;
@@ -183,23 +226,25 @@ export class Character implements BehaviorAgent {
       capsuleRadius: pp.capsuleRadius,
       arrivalReach: pp.arrivalReach,
       hopHeight: pp.hopHeight,
+      movementMode: pp.movementMode,
+      showPathDebug: pp.showPathDebug,
     };
 
     // Default behavior: roaming (receives shared reference to this.params)
     this.defaultBehavior = new Roaming({ navGrid, ladderDefs }, this.params);
     this.behavior = this.defaultBehavior;
 
-    // Debug materials
-    if (DEBUG_PATH) {
-      this.debugLineMat = new THREE.LineBasicMaterial({ color: DEBUG_LINE_COLOR, transparent: true, opacity: 0.6 });
-      this.debugNodeMat = new THREE.MeshBasicMaterial({ color: DEBUG_NODE_COLOR, transparent: true, opacity: 0.7 });
-      this.debugGoalMat = new THREE.MeshBasicMaterial({ color: DEBUG_GOAL_COLOR, transparent: true, opacity: 0.8 });
-    }
+    // Debug materials (always created — toggled at runtime via params.showPathDebug)
+    this.debugLineMat = new THREE.LineBasicMaterial({ color: DEBUG_LINE_COLOR, transparent: true, opacity: 0.6 });
+    this.debugNodeMat = new THREE.MeshBasicMaterial({ color: DEBUG_NODE_COLOR, transparent: true, opacity: 0.7 });
+    this.debugGoalMat = new THREE.MeshBasicMaterial({ color: DEBUG_GOAL_COLOR, transparent: true, opacity: 0.8 });
 
-    // Auto-apply VOX skin from the roster
-    const rosterEntry = voxRoster[type];
-    if (rosterEntry) {
-      this.applyVoxSkin(rosterEntry);
+    // Auto-apply VOX skin from the roster (skip for enemies — they apply their own)
+    if (!skipAutoSkin) {
+      const rosterEntry = voxRoster[type];
+      if (rosterEntry) {
+        this.applyVoxSkin(rosterEntry);
+      }
     }
   }
 
@@ -265,11 +310,43 @@ export class Character implements BehaviorAgent {
   private updateVoxAnimation(dt: number, isMoving: boolean): void {
     if (!this.voxData || !this.voxLoaded) return;
 
+    // If playing action anim, let it finish then revert
+    if (this.voxAnimState === 'action') {
+      const frames = this.voxData.frames['action'];
+      if (!frames || frames.length === 0) {
+        this.voxAnimState = isMoving ? 'walk' : 'idle';
+      } else {
+        const fps = Character.VOX_FPS['action'] ?? 9;
+        this.voxFrameTimer += dt;
+        if (this.voxFrameTimer >= 1 / fps) {
+          this.voxFrameTimer -= 1 / fps;
+          this.voxFrameIndex++;
+          if (this.voxFrameIndex >= frames.length) {
+            // Action done — revert
+            this.voxAnimState = isMoving ? 'walk' : 'idle';
+            this.voxFrameIndex = 0;
+            this.voxFrameTimer = 0;
+          } else {
+            const newGeo = frames[this.voxFrameIndex];
+            if (newGeo && newGeo !== this.mesh.geometry) {
+              this.mesh.geometry = newGeo;
+            }
+          }
+        }
+        return;
+      }
+    }
+
     const newState = isMoving ? 'walk' : 'idle';
     if (newState !== this.voxAnimState) {
       this.voxAnimState = newState;
       this.voxFrameIndex = 0;
       this.voxFrameTimer = 0;
+      // Immediately show first frame of new animation
+      const firstFrames = this.voxData.frames[newState];
+      if (firstFrames.length > 0 && firstFrames[0] && firstFrames[0] !== this.mesh.geometry) {
+        this.mesh.geometry = firstFrames[0];
+      }
     }
 
     const frames = this.voxData.frames[this.voxAnimState];
@@ -323,6 +400,20 @@ export class Character implements BehaviorAgent {
   // ── Update ───────────────────────────────────────────────────────
 
   update(dt: number): void {
+    if (!this.isAlive) return;
+
+    // Combat timers (knockback, invuln, flash, attack)
+    this.updateCombat(dt);
+
+    // Skip behavior if stunned
+    if (this.stunTimer > 0) {
+      this.updateVisualY(dt);
+      this.mesh.position.y = this.visualGroundY;
+      this.updateVoxAnimation(dt, false);
+      this.updateTorch(dt);
+      return;
+    }
+
     // WASD interrupts GoToPoint for player-controlled characters
     if (this._selected && this.playerControl && this.behavior instanceof GoToPoint) {
       if (this.playerControl.hasInput()) {
@@ -341,13 +432,17 @@ export class Character implements BehaviorAgent {
       }
     }
 
-    if (DEBUG_PATH) this.syncDebugVis();
+    if (this.params.showPathDebug) {
+      this.syncDebugVis();
+    } else if (this.debugLine) {
+      this.clearDebugVis();
+    }
     this.updateTorch(dt);
   }
 
   // ── Movement (BehaviorAgent) ─────────────────────────────────────
 
-  move(dx: number, dz: number, speed: number, stepHeight: number, capsuleRadius: number, dt: number, slopeHeight?: number): boolean {
+  move(dx: number, dz: number, speed: number, stepHeight: number, capsuleRadius: number, dt: number, slopeHeight?: number, skipFacing?: boolean): boolean {
     if (Math.abs(dx) < 0.001 && Math.abs(dz) < 0.001) return false;
     this.footSfxTimer += dt;
 
@@ -363,9 +458,11 @@ export class Character implements BehaviorAgent {
 
     this.updateVisualY(dt);
 
-    const targetAngle = Math.atan2(dx, dz) + Math.PI;
-    this.facing = lerpAngle(this.facing, targetAngle, 1 - Math.exp(-12 * dt));
-    this.mesh.rotation.y = this.facing;
+    if (!skipFacing) {
+      const targetAngle = Math.atan2(dx, dz) + Math.PI;
+      this.facing = lerpAngle(this.facing, targetAngle, 1 - Math.exp(-24 * dt));
+      this.mesh.rotation.y = this.facing;
+    }
 
     this.moveTime += dt * this.hopFrequency;
     this.updateVoxAnimation(dt, true);
@@ -415,6 +512,232 @@ export class Character implements BehaviorAgent {
       1 - Math.exp(-15 * dt),
     );
     this.updateVoxAnimation(dt, false);
+  }
+
+  // ── HP bar methods ──────────────────────────────────────────────
+
+  private createHpBar(): void {
+    const W = Character.HP_BAR_WIDTH;
+    const H = Character.HP_BAR_HEIGHT;
+
+    this.hpBarGroup = new THREE.Group();
+
+    // Background (dark)
+    const bgGeo = new THREE.PlaneGeometry(W, H);
+    const bgMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.6, side: THREE.DoubleSide, depthTest: false });
+    this.hpBarBg = new THREE.Mesh(bgGeo, bgMat);
+    this.hpBarGroup.add(this.hpBarBg);
+
+    // Fill (colored)
+    const fillGeo = new THREE.PlaneGeometry(W, H);
+    const fillMat = new THREE.MeshBasicMaterial({ color: 0x44dd66, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthTest: false });
+    this.hpBarFill = new THREE.Mesh(fillGeo, fillMat);
+    this.hpBarGroup.add(this.hpBarFill);
+
+    this.hpBarGroup.visible = false;
+    this.hpBarGroup.renderOrder = 999;
+    this.hpBarBg!.renderOrder = 999;
+    this.hpBarFill!.renderOrder = 1000;
+    this.scene.add(this.hpBarGroup);
+  }
+
+  /** Update HP bar position, scale, color, and visibility */
+  updateHpBar(camera: THREE.Camera): void {
+    if (!this.hpBarGroup || !this.hpBarFill) return;
+
+    const shouldShow = this.isAlive && this.hp < this.maxHp;
+    if (shouldShow !== this.showingHpBar) {
+      this.showingHpBar = shouldShow;
+      this.hpBarGroup.visible = shouldShow;
+    }
+    if (!shouldShow) return;
+
+    const W = Character.HP_BAR_WIDTH;
+    const ratio = this.maxHp > 0 ? this.hp / this.maxHp : 0;
+
+    // Color: green > 50%, orange > 25%, red below
+    const mat = this.hpBarFill.material as THREE.MeshBasicMaterial;
+    if (ratio > 0.5) mat.color.setHex(0x44dd66);
+    else if (ratio > 0.25) mat.color.setHex(0xddaa22);
+    else mat.color.setHex(0xdd3333);
+
+    // Scale fill bar horizontally
+    this.hpBarFill.scale.x = Math.max(0.01, ratio);
+    // Offset fill to align left edge with background left edge
+    this.hpBarFill.position.x = -(W * (1 - ratio)) / 2;
+
+    // Position above character
+    this.hpBarGroup.position.set(
+      this.mesh.position.x,
+      this.mesh.position.y + Character.HP_BAR_Y_OFFSET,
+      this.mesh.position.z,
+    );
+
+    // Billboard: face camera
+    this.hpBarGroup.quaternion.copy(camera.quaternion);
+  }
+
+  // ── Combat methods ───────────────────────────────────────────────
+
+  /** Take damage from an attacker position. Returns false if invulnerable. */
+  takeDamage(amount: number, fromX: number, fromZ: number): boolean {
+    if (!this.isAlive || this.invulnTimer > 0) return false;
+
+    this.hp -= amount;
+    if (this.hp <= 0) {
+      this.hp = 0;
+      this.isAlive = false;
+    }
+
+    // Knockback impulse away from attacker
+    const dx = this.mesh.position.x - fromX;
+    const dz = this.mesh.position.z - fromZ;
+    const dist = Math.sqrt(dx * dx + dz * dz);
+    // Store hit direction (from attacker toward victim) for gore ejection
+    this.lastHitDirX = dist > 0.001 ? dx / dist : 0;
+    this.lastHitDirZ = dist > 0.001 ? dz / dist : 0;
+    const knockbackSpeed = this.isEnemy ? 5 : 4;
+    if (dist > 0.001) {
+      this.knockbackVX = (dx / dist) * knockbackSpeed;
+      this.knockbackVZ = (dz / dist) * knockbackSpeed;
+    } else {
+      // Random direction if on same spot
+      const angle = Math.random() * Math.PI * 2;
+      this.knockbackVX = Math.cos(angle) * knockbackSpeed;
+      this.knockbackVZ = Math.sin(angle) * knockbackSpeed;
+    }
+
+    // Timers
+    this.invulnTimer = this.isEnemy ? 0.5 : 0.8;
+    this.flashTimer = 0.15;
+    this.stunTimer = this.isEnemy ? 0.4 : 0.2;
+
+    // Store original emissive for flash
+    const mat = this.mesh.material as THREE.MeshStandardMaterial;
+    if (mat.emissive) {
+      this.originalEmissive.copy(mat.emissive);
+      this.originalEmissiveIntensity = mat.emissiveIntensity;
+    }
+
+    return true;
+  }
+
+  /** Start an attack. Returns false if exhausted or mid-attack. */
+  startAttack(): boolean {
+    if (!this.isAlive || this.isAttacking || this.exhaustTimer > 0 || this.stunTimer > 0) return false;
+
+    // Reset combo count if player paused between attacks
+    if (this.timeSinceLastAttack > 1.0) {
+      this.attackCount = 0;
+    }
+
+    this.isAttacking = true;
+    this.attackTimer = 0.2;
+    this.timeSinceLastAttack = 0;
+    this.attackCount++;
+
+    // Exhaustion after 7 rapid slashes (togglable from settings)
+    if (useGameStore.getState().playerParams.exhaustionEnabled && this.attackCount >= 7) {
+      this.exhaustTimer = 1.0;
+      this.attackCount = 0;
+    }
+
+    // Play action animation
+    this.playActionAnim();
+
+    return true;
+  }
+
+  /** Play VOX action animation (once, then revert) */
+  private playActionAnim(): void {
+    if (!this.voxData || !this.voxLoaded) return;
+    this.voxAnimState = 'action';
+    this.voxFrameIndex = 0;
+    this.voxFrameTimer = 0;
+    const frames = this.voxData.frames['action'];
+    if (frames && frames.length > 0 && frames[0]) {
+      this.mesh.geometry = frames[0];
+    }
+  }
+
+  /** Update combat timers: knockback, invuln blink, flash, attack, exhaustion */
+  updateCombat(dt: number): void {
+    this.timeSinceLastAttack += dt;
+
+    // Knockback decay (exponential)
+    if (Math.abs(this.knockbackVX) > 0.01 || Math.abs(this.knockbackVZ) > 0.01) {
+      const kbX = this.knockbackVX * dt;
+      const kbZ = this.knockbackVZ * dt;
+      const resolved = this.terrain.resolveMovement(
+        this.mesh.position.x + kbX,
+        this.mesh.position.z + kbZ,
+        this.groundY,
+        this.params.stepHeight,
+        this.params.capsuleRadius,
+        this.mesh.position.x,
+        this.mesh.position.z,
+        this.params.slopeHeight,
+      );
+      this.mesh.position.x = resolved.x;
+      this.mesh.position.z = resolved.z;
+      this.groundY = resolved.y;
+
+      const decay = Math.exp(-5 * dt);
+      this.knockbackVX *= decay;
+      this.knockbackVZ *= decay;
+    }
+
+    // Invuln timer — blink mesh visibility
+    if (this.invulnTimer > 0) {
+      this.invulnTimer -= dt;
+      // Blink every 0.1s
+      this.mesh.visible = Math.floor(this.invulnTimer * 10) % 2 === 0;
+      if (this.invulnTimer <= 0) {
+        this.mesh.visible = true;
+        this.invulnTimer = 0;
+      }
+    }
+
+    // Flash timer — white emissive pulse
+    if (this.flashTimer > 0) {
+      this.flashTimer -= dt;
+      const mat = this.mesh.material as THREE.MeshStandardMaterial;
+      if (mat.emissive) {
+        mat.emissive.setRGB(1, 1, 1);
+        mat.emissiveIntensity = 2.0 * (this.flashTimer / 0.15);
+      }
+      if (this.flashTimer <= 0) {
+        this.flashTimer = 0;
+        if (mat.emissive) {
+          mat.emissive.copy(this.originalEmissive);
+          mat.emissiveIntensity = this.originalEmissiveIntensity;
+        }
+      }
+    }
+
+    // Attack timer
+    if (this.isAttacking) {
+      this.attackTimer -= dt;
+      if (this.attackTimer <= 0) {
+        this.isAttacking = false;
+        this.attackTimer = 0;
+      }
+    }
+
+    // Exhaustion cooldown
+    if (this.exhaustTimer > 0) {
+      this.exhaustTimer -= dt;
+      if (this.exhaustTimer <= 0) {
+        this.exhaustTimer = 0;
+        this.attackCount = 0;
+      }
+    }
+
+    // Stun timer
+    if (this.stunTimer > 0) {
+      this.stunTimer -= dt;
+      if (this.stunTimer <= 0) this.stunTimer = 0;
+    }
   }
 
   updateTorch(dt: number): void {
@@ -751,5 +1074,12 @@ export class Character implements BehaviorAgent {
     (this.mesh.material as THREE.Material).dispose();
     this.scene.remove(this.torchLight);
     this.scene.remove(this.fillLight);
+    if (this.hpBarGroup) {
+      this.scene.remove(this.hpBarGroup);
+      this.hpBarBg?.geometry.dispose();
+      (this.hpBarBg?.material as THREE.Material)?.dispose();
+      this.hpBarFill?.geometry.dispose();
+      (this.hpBarFill?.material as THREE.Material)?.dispose();
+    }
   }
 }

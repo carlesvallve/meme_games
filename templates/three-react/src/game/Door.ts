@@ -10,7 +10,8 @@ import type { DoorDef } from './DungeonGenerator';
 import type { Terrain, DebrisBox } from './Terrain';
 import { Entity, Layer } from './Entity';
 import { getRandomTile } from './VoxDungeonDB';
-import { getTileGeometry, getCellSize } from './VoxDungeonLoader';
+import { getCellSize, getWallTargetHeight } from './VoxDungeonLoader';
+import { loadVoxModel, buildVoxMesh } from '../utils/VoxModelLoader';
 
 function easeInOutCubic(t: number): number {
   return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
@@ -78,30 +79,146 @@ export class DoorSystem {
   }
 
   // ── VOX door creation ──
+  // Procedural blocky frame (two pillars + lintel) with a downscaled VOX door panel inside.
 
   private createVoxDoor(def: DoorDef, cellSize: number): void {
     const isNS = def.orientation === 'NS';
-    const voxCellSize = getCellSize(); // mesh scale (1.5m)
+    const wallH = getWallTargetHeight();
+
+    // Frame dimensions — proportional to cell/wall size
+    const frameW = cellSize * 1.15;        // slightly wider than cell — covers wall gaps without z-fighting
+    const frameThick = cellSize * 0.35;   // shallow depth
+    const pillarW = cellSize * 0.2;       // pillar width (side columns)
+    const lintelH = wallH * 0.18;         // top beam height
+    const openingW = frameW - pillarW * 2;// clear opening between pillars
+    const openingH = wallH - lintelH;     // clear opening below lintel
+
+    // Door panel: snugly fills the opening
+    const doorPanelW = openingW * 0.99;
+    const doorPanelH = openingH * 0.99;
 
     const group = new THREE.Group();
     group.position.set(def.x, 0, def.z);
+    if (isNS) group.rotation.y = Math.PI / 2;
 
-    // VOX door panel faces -Z by default.
-    // NS = narrow in Z, corridor runs along X → door panel perpendicular to X → rotate 90°
-    // EW = narrow in X, corridor runs along Z → door panel perpendicular to Z → no rotation
-    if (isNS) {
-      group.rotation.y = Math.PI / 2;
+    // Blocky frame material — match dungeon wall/floor stone grey
+    const frameMat = new THREE.MeshStandardMaterial({
+      color: 0xa8a0a0,
+      roughness: 0.85,
+      metalness: 0.1,
+    });
+
+    // Left pillar
+    const pillarGeo = new THREE.BoxGeometry(pillarW, wallH, frameThick);
+    const leftPillar = new THREE.Mesh(pillarGeo, frameMat);
+    leftPillar.position.set(-frameW / 2 + pillarW / 2, wallH / 2, 0);
+    leftPillar.castShadow = true;
+    leftPillar.receiveShadow = true;
+    group.add(leftPillar);
+
+    // Right pillar
+    const rightPillar = new THREE.Mesh(pillarGeo, frameMat);
+    rightPillar.position.set(frameW / 2 - pillarW / 2, wallH / 2, 0);
+    rightPillar.castShadow = true;
+    rightPillar.receiveShadow = true;
+    group.add(rightPillar);
+
+    // Lintel (top beam)
+    const lintelGeo = new THREE.BoxGeometry(frameW, lintelH, frameThick);
+    const lintel = new THREE.Mesh(lintelGeo, frameMat);
+    lintel.position.set(0, wallH - lintelH / 2, 0);
+    lintel.castShadow = true;
+    lintel.receiveShadow = true;
+    group.add(lintel);
+
+    // Pivot for the swinging door panel — hinge at left inner edge
+    const pivot = new THREE.Group();
+    pivot.position.set(-openingW / 2, 0, 0);
+    group.add(pivot);
+
+    // Try to load VOX door panel at the correct opening height
+    const doorEntry = getRandomTile('door');
+    if (doorEntry) {
+      // Queue async load — door will pop in once ready
+      this.loadVoxDoorPanel(pivot, doorEntry, doorPanelW, doorPanelH, openingW);
+    } else {
+      // Fallback: procedural wooden panel
+      this.addProceduralPanel(pivot, doorPanelW, doorPanelH, openingW);
     }
 
-    // Get VOX door geometry
-    const doorEntry = getRandomTile('door');
-    const doorGeo = doorEntry ? getTileGeometry(doorEntry) : null;
+    this.parent.add(group);
 
-    if (doorGeo) {
-      const pivot = new THREE.Group();
-      // Hinge at one edge of the cell
-      pivot.position.set(-voxCellSize / 2, 0, 0);
-      group.add(pivot);
+    const halfOpening = cellSize / 2;
+    const entity = new Entity(group, {
+      layer: Layer.Architecture,
+      radius: halfOpening,
+      weight: Infinity,
+    });
+
+    // Door panel debris (dynamic — removed when door opens)
+    const debrisBox: DebrisBox = {
+      x: def.x,
+      z: def.z,
+      halfW: isNS ? frameThick / 2 : halfOpening,
+      halfD: isNS ? halfOpening : frameThick / 2,
+      height: wallH,
+    };
+
+    this.terrain.addDynamicDebris(debrisBox);
+
+    // Pillar debris (static — always blocks passage on the sides)
+    const pillarOffset = frameW / 2 - pillarW / 2;
+    const pillarHalfW = isNS ? frameThick / 2 : pillarW / 2;
+    const pillarHalfD = isNS ? pillarW / 2 : frameThick / 2;
+    const leftPillarDebris: DebrisBox = {
+      x: def.x + (isNS ? 0 : -pillarOffset),
+      z: def.z + (isNS ? -pillarOffset : 0),
+      halfW: pillarHalfW,
+      halfD: pillarHalfD,
+      height: wallH,
+    };
+    const rightPillarDebris: DebrisBox = {
+      x: def.x + (isNS ? 0 : pillarOffset),
+      z: def.z + (isNS ? pillarOffset : 0),
+      halfW: pillarHalfW,
+      halfD: pillarHalfD,
+      height: wallH,
+    };
+    this.terrain.addStaticDebris(leftPillarDebris);
+    this.terrain.addStaticDebris(rightPillarDebris);
+
+    this.doors.push({
+      group,
+      pivots: [pivot],
+      isDouble: false,
+      entity,
+      debrisBox,
+      isOpen: false,
+      openProgress: 0,
+      swingSign: 1,
+      orientation: def.orientation,
+      worldX: def.x,
+      worldZ: def.z,
+    });
+  }
+
+  /** Load a VOX door model at a custom height and add it to the pivot */
+  private async loadVoxDoorPanel(
+    pivot: THREE.Group,
+    entry: import('./VoxDungeonDB').DungeonTileEntry,
+    panelW: number,
+    panelH: number,
+    openingW: number,
+  ): Promise<void> {
+    try {
+      const { model, palette } = await loadVoxModel(entry.voxPath);
+      const geo = buildVoxMesh(model, palette, panelH);
+
+      // Compute actual mesh width to scale it to the desired panel width
+      geo.computeBoundingBox();
+      const bb = geo.boundingBox!;
+      const meshW = bb.max.x - bb.min.x;
+      const scaleX = meshW > 0 ? panelW / meshW : 1;
 
       const voxMat = new THREE.MeshStandardMaterial({
         vertexColors: true,
@@ -109,46 +226,30 @@ export class DoorSystem {
         metalness: 0.15,
       });
 
-      const doorMesh = new THREE.Mesh(doorGeo, voxMat);
-      // Door mesh centered at origin — offset so it extends from the hinge
-      doorMesh.position.set(voxCellSize / 2, 0, 0);
+      const doorMesh = new THREE.Mesh(geo, voxMat);
+      doorMesh.scale.x = scaleX;
+      // Center the panel in the opening, offset from the hinge
+      doorMesh.position.set(openingW / 2, 0, 0);
       doorMesh.castShadow = true;
       doorMesh.receiveShadow = true;
       pivot.add(doorMesh);
-
-      this.parent.add(group);
-
-      const halfOpening = cellSize / 2;
-      const entity = new Entity(group, {
-        layer: Layer.Architecture,
-        radius: halfOpening,
-        weight: Infinity,
-      });
-
-      const debrisBox: DebrisBox = {
-        x: def.x,
-        z: def.z,
-        halfW: isNS ? DOOR_THICK / 2 : halfOpening,
-        halfD: isNS ? halfOpening : DOOR_THICK / 2,
-        height: DOOR_HEIGHT,
-      };
-
-      this.terrain.addDynamicDebris(debrisBox);
-
-      this.doors.push({
-        group,
-        pivots: [pivot],
-        isDouble: false,
-        entity,
-        debrisBox,
-        isOpen: false,
-        openProgress: 0,
-        swingSign: 1,
-        orientation: def.orientation,
-        worldX: def.x,
-        worldZ: def.z,
-      });
+    } catch (err) {
+      console.warn('[Door] Failed to load VOX door panel, using procedural fallback', err);
+      this.addProceduralPanel(pivot, panelW, panelH, openingW);
     }
+  }
+
+  /** Fallback: add a simple procedural wooden panel to the pivot */
+  private addProceduralPanel(pivot: THREE.Group, panelW: number, panelH: number, openingW: number): void {
+    const doorMat = new THREE.MeshStandardMaterial({
+      color: 0x6B4226, roughness: 0.7, metalness: 0.15,
+    });
+    const panelGeo = new THREE.BoxGeometry(panelW, panelH, DOOR_THICK);
+    const panel = new THREE.Mesh(panelGeo, doorMat);
+    panel.position.set(openingW / 2, panelH / 2, 0);
+    panel.castShadow = true;
+    panel.receiveShadow = true;
+    pivot.add(panel);
   }
 
   // ── Procedural door creation (original) ──

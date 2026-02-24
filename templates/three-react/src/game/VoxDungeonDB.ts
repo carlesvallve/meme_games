@@ -148,19 +148,19 @@ const ALL_PROPS: DungeonPropEntry[] = [
   // ── Destroyable ──
 
   // Barrels
-  { id: 'barrel_a', category: 'barrel', voxPath: `${P}/Barrel/Barrel%20A%20(Wood)/VOX/barrel_a_closed.vox`,     baseHeight: 0.35, radius: 0.15, placement: 'wall', destroyable: true },
-  { id: 'barrel_b', category: 'barrel', voxPath: `${P}/Barrel/Barrel%20B%20(Dark%20Wood)/VOX/barrel_b_closed.vox`, baseHeight: 0.35, radius: 0.15, placement: 'wall', destroyable: true },
-  { id: 'barrel_tnt', category: 'barrel', voxPath: `${P}/Barrel/TNT%20Barrel/VOX/tnt_barrel_closed.vox`,        baseHeight: 0.35, radius: 0.15, placement: 'wall', destroyable: true },
+  { id: 'barrel_a', category: 'barrel', voxPath: `${P}/Barrel/Barrel%20A%20(Wood)/VOX/barrel_a_closed.vox`,     baseHeight: 0.22, radius: 0.1, placement: 'wall', destroyable: true },
+  { id: 'barrel_b', category: 'barrel', voxPath: `${P}/Barrel/Barrel%20B%20(Dark%20Wood)/VOX/barrel_b_closed.vox`, baseHeight: 0.22, radius: 0.1, placement: 'wall', destroyable: true },
+  { id: 'barrel_tnt', category: 'barrel', voxPath: `${P}/Barrel/TNT%20Barrel/VOX/tnt_barrel_closed.vox`,        baseHeight: 0.22, radius: 0.1, placement: 'wall', destroyable: true },
 
   // Boxes / crates
-  { id: 'box_a', category: 'box', voxPath: `${P}/Box/Box%20A%20(Wood)/VOX/box_a_a.vox`,           baseHeight: 0.28, radius: 0.15, placement: 'wall', destroyable: true },
-  { id: 'box_b', category: 'box', voxPath: `${P}/Box/Box%20B%20(Dark%20Wood)/VOX/box_b_a.vox`,     baseHeight: 0.28, radius: 0.15, placement: 'wall', destroyable: true },
-  { id: 'box_c', category: 'box', voxPath: `${P}/Box/Box%20C%20(Darkest%20Wood)/VOX/box_c_a.vox`, baseHeight: 0.28, radius: 0.15, placement: 'wall', destroyable: true },
+  { id: 'box_a', category: 'box', voxPath: `${P}/Box/Box%20A%20(Wood)/VOX/box_a_a.vox`,           baseHeight: 0.18, radius: 0.1, placement: 'wall', destroyable: true },
+  { id: 'box_b', category: 'box', voxPath: `${P}/Box/Box%20B%20(Dark%20Wood)/VOX/box_b_a.vox`,     baseHeight: 0.18, radius: 0.1, placement: 'wall', destroyable: true },
+  { id: 'box_c', category: 'box', voxPath: `${P}/Box/Box%20C%20(Darkest%20Wood)/VOX/box_c_a.vox`, baseHeight: 0.18, radius: 0.1, placement: 'wall', destroyable: true },
 
   // Pots
-  { id: 'pot_a', category: 'pot', voxPath: `${P}/Pot/Pot%20A%20(Clay)/VOX/pot_a.vox`,       baseHeight: 0.25, radius: 0.08, placement: 'wall', destroyable: true },
-  { id: 'pot_b', category: 'pot', voxPath: `${P}/Pot/Pot%20B%20(Dark%20Clay)/VOX/pot_b.vox`, baseHeight: 0.25, radius: 0.08, placement: 'wall', destroyable: true },
-  { id: 'pot_d', category: 'pot', voxPath: `${P}/Pot/Pot%20D%20(Metal)/VOX/pot_d.vox`,       baseHeight: 0.25, radius: 0.08, placement: 'wall', destroyable: true },
+  { id: 'pot_a', category: 'pot', voxPath: `${P}/Pot/Pot%20A%20(Clay)/VOX/pot_a.vox`,       baseHeight: 0.16, radius: 0.06, placement: 'wall', destroyable: true },
+  { id: 'pot_b', category: 'pot', voxPath: `${P}/Pot/Pot%20B%20(Dark%20Clay)/VOX/pot_b.vox`, baseHeight: 0.16, radius: 0.06, placement: 'wall', destroyable: true },
+  { id: 'pot_d', category: 'pot', voxPath: `${P}/Pot/Pot%20D%20(Metal)/VOX/pot_d.vox`,       baseHeight: 0.16, radius: 0.06, placement: 'wall', destroyable: true },
 
   // ── Scales with dungeon (architectural) ──
 
@@ -203,10 +203,10 @@ const ALL_PROPS: DungeonPropEntry[] = [
   { id: 'table_large_a', category: 'table_large', voxPath: `${P}/Table/Large%20Table%20A%20(Wood)/VOX/large_table_a.vox`, baseHeight: 0.22, radius: 0.2, placement: 'center' },
 
   // Chairs
-  { id: 'chair_a', category: 'chair', voxPath: `${P}/Chair/Chair%20A%20(Wood)/VOX/chair_a.vox`, baseHeight: 0.3, radius: 0.1, placement: 'center' },
+  { id: 'chair_a', category: 'chair', voxPath: `${P}/Chair/Chair%20A%20(Wood)/VOX/chair_a.vox`, baseHeight: 0.2, radius: 0.08, placement: 'center' },
 
   // Small benches
-  { id: 'bench_small_a', category: 'bench', voxPath: `${P}/Bench/Small%20Bench%20A%20(Wood)/VOX/small_bench_a.vox`, baseHeight: 0.25, radius: 0.15, placement: 'wall' },
+  { id: 'bench_small_a', category: 'bench', voxPath: `${P}/Bench/Small%20Bench%20A%20(Wood)/VOX/small_bench_a.vox`, baseHeight: 0.16, radius: 0.1, placement: 'wall' },
 
   // Treasure chests: closed for placement, open (voxPath) when interacted; fixed scale, face into room
   { id: 'chest_a', category: 'chest', voxPath: `${P}/Treasure%20Chests/Treasure%20Chest%20A%20(Wood)/VOX/treasure_chest_a_unlocked.vox`, voxPathClosed: `${P}/Treasure%20Chests/Treasure%20Chest%20A%20(Wood)/VOX/treasure_chest_a_locked.vox`, baseHeight: 0.3, radius: 0.18, placement: 'wall', wallAligned: true, interactive: true },
@@ -305,6 +305,11 @@ export function getAllPropPaths(): string[] {
 }
 
 /** Get all prop categories */
+/** Get all ground tile IDs for a theme */
+export function getGroundTileIds(theme = 'a_a'): string[] {
+  return getDungeonTiles('ground', theme).map(t => t.id);
+}
+
 export function getPropCategories(): string[] {
   return [...PROP_BY_CATEGORY.keys()];
 }

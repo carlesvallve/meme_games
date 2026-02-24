@@ -36,6 +36,8 @@ export interface DungeonOutput {
   gridDoors: DoorDef[];
   /** Room rects in grid coordinates */
   rooms: { x: number; z: number; w: number; d: number }[];
+  /** Per-cell room index (-1 = corridor, >= 0 = room index) */
+  roomOwnership: number[];
 }
 
 /**
@@ -48,6 +50,7 @@ export function generateDungeon(
   wallGap = 1,
   cellSizeOverride?: number,
   roomSpacing?: number,
+  doorChance = 0.7,
 ): DungeonOutput {
   const cellSize = cellSizeOverride ?? 2;
   const gridW = Math.floor(groundSize / cellSize);
@@ -55,8 +58,8 @@ export function generateDungeon(
   const wallHeight = 2.5;
 
   const result = mode === 'dungeon'
-    ? generateBSPDungeon(gridW, gridD, 3, 6, roomSpacing)
-    : generateAdjacentRooms(gridW, gridD, 4, 4, wallGap);
+    ? generateBSPDungeon(gridW, gridD, 3, 6, roomSpacing, doorChance)
+    : generateAdjacentRooms(gridW, gridD, 4, 4, wallGap, doorChance);
 
   const boxes = convertToBoxDefs(result, cellSize, wallHeight, groundSize);
 
@@ -71,12 +74,14 @@ export function generateDungeon(
   };
 
   const doors: DoorDef[] = [];
+  const shiftedGridDoors: DoorDef[] = [];
   const isVoxelDungeon = cellSizeOverride !== undefined; // voxel dungeon uses cellSizeOverride
   console.log(`[DOOR] mode=${mode}, gridDoors=${(result.doors || []).length}, corridors=${result.corridors.length}, isVoxelDungeon=${isVoxelDungeon}`);
+  const roomGrid = result.roomOwnership;
   for (const d of result.doors || []) {
     // Skip wall-flanking check for voxel dungeon (walls are full cells, not edges)
     // and when roomOwnership exists (wallGap=0 — walls are room-boundary based)
-    if (!result.roomOwnership && !isVoxelDungeon) {
+    if (!roomGrid && !isVoxelDungeon) {
       const gx = Math.round(d.x);
       const gz = Math.round(d.z);
       const hasWalls = d.orientation === 'NS'
@@ -85,12 +90,25 @@ export function generateDungeon(
       if (!hasWalls) continue;
     }
 
-    doors.push({
-      x: -halfWorld + (d.x + 0.5) * cellSize,
-      z: -halfWorld + (d.z + 0.5) * cellSize,
-      orientation: d.orientation,
-      gapWidth: d.gapWidth,
-    });
+    let wx = -halfWorld + (d.x + 0.5) * cellSize;
+    let wz = -halfWorld + (d.z + 0.5) * cellSize;
+
+    // For voxel dungeon: nudge door half a cell toward the nearest room
+    if (isVoxelDungeon && roomGrid) {
+      const dirs: [number, number][] = [[0, -1], [0, 1], [-1, 0], [1, 0]];
+      for (const [sx, sz] of dirs) {
+        const nx = d.x + sx, nz = d.z + sz;
+        if (nx < 0 || nx >= gw || nz < 0 || nz >= gd) continue;
+        if (roomGrid[nz * gw + nx] >= 0) {
+          wx += sx * cellSize * 0.25;
+          wz += sz * cellSize * 0.25;
+          break;
+        }
+      }
+    }
+
+    doors.push({ x: wx, z: wz, orientation: d.orientation, gapWidth: d.gapWidth });
+    shiftedGridDoors.push({ x: d.x, z: d.z, orientation: d.orientation, gapWidth: d.gapWidth });
   }
   console.log(`[DOOR] final world-space doors: ${doors.length}`);
 
@@ -105,8 +123,9 @@ export function generateDungeon(
     roomCount: result.rooms.length,
     corridorCount: result.corridors.length,
     doors,
-    gridDoors: result.doors || [],
+    gridDoors: shiftedGridDoors,
     rooms: result.rooms.map(r => r.rect),
+    roomOwnership: result.roomOwnership ?? new Array(gridW * gridD).fill(-1),
   };
 }
 
@@ -343,6 +362,7 @@ export function generateBSPDungeon(
   minRoomSize = 3,
   maxDepth = 6,
   roomSpacingOverride?: number,
+  doorChance = 0.7,
 ): DungeonResult {
   const border = 2;
   const roomSpacing = Math.max(1, roomSpacingOverride ?? 3);
@@ -389,10 +409,19 @@ export function generateBSPDungeon(
   for (const c of corridors) totalCorridorCells += c.cells.length;
   console.log(`[DOOR] ${rooms.length} rooms, ${corridors.length} corridors (${totalCorridorCells} cells)`);
 
-  const doors = detectCorridorDoors(corridors, roomGrid, openGrid, gridW, gridD);
+  const doors = detectCorridorDoors(corridors, roomGrid, openGrid, gridW, gridD, doorChance);
   console.log(`[DOOR] detectCorridorDoors found ${doors.length} doors`);
 
-  return { rooms, corridors, openGrid, gridW, gridD, doors };
+  // Stamp corridor cells with unique negative IDs (-2, -3, ...) so each corridor gets its own floor
+  for (let ci = 0; ci < corridors.length; ci++) {
+    for (const { gx, gz } of corridors[ci].cells) {
+      if (roomGrid[gz * gridW + gx] === -1) {
+        roomGrid[gz * gridW + gx] = -(ci + 2);
+      }
+    }
+  }
+
+  return { rooms, corridors, openGrid, gridW, gridD, doors, roomOwnership: Array.from(roomGrid) };
 }
 
 /**
@@ -407,6 +436,7 @@ export function generateAdjacentRooms(
   cols = 4,
   rows = 4,
   wallGap = 1,
+  doorChance = 0.7,
 ): DungeonResult {
   const border = 1;
   const openGrid = new Array(gridW * gridD).fill(false);
@@ -539,13 +569,11 @@ export function generateAdjacentRooms(
           const zMin = Math.max(room.rect.z, east.rect.z);
           const zMax = Math.min(room.rect.z + room.rect.d, east.rect.z + east.rect.d);
 
-          if (Math.random() < 0.7 && zMax - zMin >= 1) {
+          if (Math.random() < doorChance && zMax - zMin >= 1) {
             const margin = zMax - zMin > 2 ? 1 : 0;
             const doorZ = zMin + margin + Math.floor(Math.random() * Math.max(1, zMax - zMin - margin * 2));
-            // Door position is between the two rooms (on the boundary edge)
-            const doorGridX = boundaryX + 0.5; // between boundaryX and nextX
+            const doorGridX = boundaryX + 0.5;
             doors.push({ x: doorGridX, z: doorZ, orientation: 'NS', gapWidth: 1 });
-            // Mark both cells at the boundary as door cells (suppress wall between them)
             doorCells.add(`${boundaryX},${doorZ}`);
             doorCells.add(`${nextX},${doorZ}`);
           }
@@ -559,7 +587,7 @@ export function generateAdjacentRooms(
           const xMin = Math.max(room.rect.x, south.rect.x);
           const xMax = Math.min(room.rect.x + room.rect.w, south.rect.x + south.rect.w);
 
-          if (Math.random() < 0.7 && xMax - xMin >= 1) {
+          if (Math.random() < doorChance && xMax - xMin >= 1) {
             const margin = xMax - xMin > 2 ? 1 : 0;
             const doorX = xMin + margin + Math.floor(Math.random() * Math.max(1, xMax - xMin - margin * 2));
             const doorGridZ = boundaryZ + 0.5;
@@ -629,6 +657,7 @@ function detectCorridorDoors(
   openGrid: boolean[],
   gridW: number,
   gridD: number,
+  doorChance = 0.7,
 ): DoorDef[] {
   // Collect candidate positions: corridor cells adjacent to a room cell
   // Determine orientation from corridor shape — check if perpendicular neighbors are corridor cells
@@ -679,6 +708,7 @@ function detectCorridorDoors(
       }
 
       seen.add(key);
+
       candidates.push({ x: gx, z: gz, orientation, gapWidth: 1 });
     }
   }
@@ -691,12 +721,12 @@ function detectCorridorDoors(
     [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
   }
 
-  // Filter: min distance between doors + 90% chance
+  // Filter: min distance between doors + doorChance
   const MIN_DIST_SQ = 3 * 3;
   const doors: DoorDef[] = [];
 
   for (const c of candidates) {
-    if (Math.random() > 0.9) continue;
+    if (Math.random() > doorChance) continue;
     const tooClose = doors.some(d => {
       const dx = c.x - d.x;
       const dz = c.z - d.z;

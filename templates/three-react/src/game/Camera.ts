@@ -50,6 +50,12 @@ export class Camera {
   private _hitPos = new THREE.Vector3();
   private wasOccluded = false;
 
+  // Screen shake
+  private shakeX = 0;
+  private shakeZ = 0;
+  private shakeIntensity = 0;
+  private shakeDecay = 0;
+
   private canvas: HTMLCanvasElement;
   private onPointerDown: (e: PointerEvent) => void;
   private onPointerMove: (e: PointerEvent) => void;
@@ -267,7 +273,30 @@ export class Camera {
     }
 
     this.camera.position.copy(this.currentPos);
+
+    // Apply screen shake
+    if (this.shakeIntensity > 0.001) {
+      this.shakeX += (Math.random() - 0.5) * this.shakeIntensity * 2;
+      this.shakeZ += (Math.random() - 0.5) * this.shakeIntensity * 2;
+      this.shakeX *= 0.5; // dampen toward zero each frame
+      this.shakeZ *= 0.5;
+      this.camera.position.x += this.shakeX;
+      this.camera.position.z += this.shakeZ;
+      this.shakeIntensity = Math.max(0, this.shakeIntensity - this.shakeDecay * dt);
+    }
+
     this.camera.lookAt(this.target);
+  }
+
+  /** Trigger a screen shake. dirX/dirZ is the hit direction (normalized). */
+  shake(intensity = 0.15, duration = 0.15, dirX = 0, dirZ = 0): void {
+    this.shakeIntensity = intensity;
+    this.shakeDecay = intensity / Math.max(0.01, duration);
+    // Bias shake toward the hit direction
+    if (Math.abs(dirX) > 0.01 || Math.abs(dirZ) > 0.01) {
+      this.shakeX = dirX * intensity * 0.5;
+      this.shakeZ = dirZ * intensity * 0.5;
+    }
   }
 
   setParams(p: CameraParams): void {

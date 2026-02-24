@@ -9,6 +9,11 @@ export interface InputState {
 
 export class Input {
   private keys: Record<string, boolean> = {};
+  /**
+   * Queued attack flag — set on keydown/tap, only cleared by update().
+   * Survives across frames (including hitstop) until the game actually reads it.
+   */
+  private actionQueued = false;
   private state: InputState = {
     forward: false, backward: false,
     left: false, right: false,
@@ -28,6 +33,11 @@ export class Input {
   constructor() {
     this.onKeyDown = (e: KeyboardEvent) => {
       this.keys[e.code] = true;
+      if (e.code === 'Space' || e.code === 'KeyF') {
+        this.actionQueued = true;
+        // Prevent Space from activating focused UI buttons
+        e.preventDefault();
+      }
     };
     this.onKeyUp = (e: KeyboardEvent) => {
       this.keys[e.code] = false;
@@ -48,8 +58,8 @@ export class Input {
       const absDy = Math.abs(dy);
 
       if (Math.max(absDx, absDy) < this.minSwipeDistance) {
-        // Tap — treat as action
-        this.state.action = true;
+        // Tap — queue action
+        this.actionQueued = true;
         return;
       }
       if (absDx > absDy) {
@@ -67,18 +77,20 @@ export class Input {
     window.addEventListener('touchend', this.onTouchEnd, { passive: false });
   }
 
+  /**
+   * Read current input state. Consumes queued action — call once per gameplay frame.
+   * Do NOT call during hitstop so queued attacks survive until the game resumes.
+   */
   update(): InputState {
     this.state.forward = !!(this.keys['KeyW'] || this.keys['ArrowUp']);
     this.state.backward = !!(this.keys['KeyS'] || this.keys['ArrowDown']);
     this.state.left = !!(this.keys['KeyA'] || this.keys['ArrowLeft']);
     this.state.right = !!(this.keys['KeyD'] || this.keys['ArrowRight']);
-    this.state.action = this.state.action || !!this.keys['Space'];
+    this.state.action = this.actionQueued;
     this.state.cancel = !!this.keys['Escape'];
+    // Clear the queue — it's been read
+    this.actionQueued = false;
     return { ...this.state };
-  }
-
-  consume(): void {
-    this.state.action = false;
   }
 
   destroy(): void {

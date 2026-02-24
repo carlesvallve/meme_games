@@ -1,15 +1,17 @@
 import { useState, useRef, useEffect } from 'react';
-import { useGameStore, type PlayerParams, type CameraParams, type TorchParams, type LightPreset } from '../store';
+import { useGameStore, type PlayerParams, type CameraParams, type TorchParams, type LightPreset, type MovementMode } from '../store';
 import { Layer } from '../game/Entity';
 import type { TerrainPreset } from '../game/Terrain';
 import type { HeightmapStyle } from '../game/TerrainNoise';
 import { palettes } from '../game/ColorPalettes';
-import { getPropCategories } from '../game/VoxDungeonDB';
+import { getPropCategories, getGroundTileIds } from '../game/VoxDungeonDB';
+import { swapGroundTiles } from '../game/VoxelDungeon';
 
 type ActivePanel = 'player' | 'camera' | 'light' | 'scene' | null;
 
 const TERRAIN_PRESETS: TerrainPreset[] = ['scattered', 'terraced', 'heightmap', 'dungeon', 'rooms', 'voxelDungeon'];
 const PROP_CATEGORIES = getPropCategories().sort();
+const GROUND_TILE_IDS = getGroundTileIds().sort();
 const HEIGHTMAP_STYLES: HeightmapStyle[] = ['rolling', 'terraces', 'islands', 'caves'];
 const PALETTE_NAMES = ['random', ...Object.keys(palettes)];
 
@@ -21,7 +23,7 @@ interface SliderDef<K> {
   step: number;
 }
 
-const PLAYER_PARAMS: SliderDef<keyof PlayerParams>[] = [
+const PLAYER_MOVE_PARAMS: SliderDef<keyof PlayerParams>[] = [
   { key: 'speed', label: 'Speed', min: 1, max: 16, step: 0.5 },
   { key: 'stepHeight', label: 'Step Height', min: 0, max: 2, step: 0.1 },
   { key: 'slopeHeight', label: 'Slope Height', min: 0, max: 4, step: 0.1 },
@@ -208,6 +210,10 @@ function ScenePanel() {
   const setResolutionScale = useGameStore((s) => s.setResolutionScale);
   const testProp = useGameStore((s) => s.testProp);
   const setTestProp = useGameStore((s) => s.setTestProp);
+  const testFloor = useGameStore((s) => s.testFloor);
+  const setTestFloor = useGameStore((s) => s.setTestFloor);
+  const doorChance = useGameStore((s) => s.doorChance);
+  const setDoorChance = useGameStore((s) => s.setDoorChance);
   const propCategories = PROP_CATEGORIES;
   const remesh = useGameStore((s) => s.onRemesh);
   const randomizePalette = useGameStore((s) => s.onRandomizePalette);
@@ -345,6 +351,47 @@ function ScenePanel() {
               <option key={cat} value={cat}>{cat}</option>
             ))}
           </select>
+        </div>
+      )}
+
+      {/* Test Floor dropdown — only for voxelDungeon */}
+      {terrainPreset === 'voxelDungeon' && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+          <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Test Floor</span>
+          <select
+            value={testFloor}
+            onChange={(e) => { setTestFloor(e.target.value); swapGroundTiles(e.target.value); }}
+            style={{
+              flex: 1,
+              padding: '3px 6px',
+              background: 'rgba(255,255,255,0.08)',
+              color: '#ccc',
+              border: '1px solid rgba(255,255,255,0.2)',
+              borderRadius: 3,
+            }}
+          >
+            <option value="">Random</option>
+            {GROUND_TILE_IDS.map((id) => (
+              <option key={id} value={id}>{id}</option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {/* Door chance slider — only for voxelDungeon */}
+      {terrainPreset === 'voxelDungeon' && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+          <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Door Chance</span>
+          <input
+            type="range"
+            min={0} max={1} step={0.1}
+            value={doorChance}
+            onChange={(e) => setDoorChance(parseFloat(e.target.value))}
+            style={{ flex: 1, height: 14, accentColor: '#6af' }}
+          />
+          <span style={{ color: '#fff', width: 36, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+            {doorChance.toFixed(1)}
+          </span>
         </div>
       )}
 
@@ -487,21 +534,81 @@ export function SettingsPanel() {
       {/* Slider panel */}
       {active === 'player' && (
         <div style={{ ...panelStyle, marginBottom: 4 }}>
-          {PLAYER_PARAMS.map(({ key, label, min, max, step }) => (
+          {/* ── Move ── */}
+          <div style={{ color: '#6af', fontSize: 11, fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Move</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+            <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Movement</span>
+            {(['free', 'grid'] as MovementMode[]).map((mode) => (
+              <button
+                key={mode}
+                onClick={() => setPlayerParam('movementMode', mode)}
+                style={{
+                  ...resetBtnStyle,
+                  flex: 1,
+                  background: playerParams.movementMode === mode ? '#6af' : '#333',
+                  color: playerParams.movementMode === mode ? '#000' : '#aaa',
+                  margin: 0,
+                }}
+              >
+                {mode}
+              </button>
+            ))}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+            <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Path Debug</span>
+            {(['on', 'off'] as const).map((val) => (
+              <button
+                key={val}
+                onClick={() => setPlayerParam('showPathDebug', val === 'on')}
+                style={{
+                  ...resetBtnStyle,
+                  flex: 1,
+                  background: (playerParams.showPathDebug ? 'on' : 'off') === val ? '#6af' : '#333',
+                  color: (playerParams.showPathDebug ? 'on' : 'off') === val ? '#000' : '#aaa',
+                  margin: 0,
+                }}
+              >
+                {val}
+              </button>
+            ))}
+          </div>
+          {PLAYER_MOVE_PARAMS.map(({ key, label, min, max, step }) => (
             <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>{label}</span>
               <input
                 type="range"
                 min={min} max={max} step={step}
-                value={playerParams[key]}
-                onChange={(e) => setPlayerParam(key, parseFloat(e.target.value))}
+                value={playerParams[key] as number}
+                onChange={(e) => setPlayerParam(key, parseFloat(e.target.value) as any)}
                 style={{ flex: 1, height: 14, accentColor: '#6af' }}
               />
               <span style={{ color: '#fff', width: 36, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-                {playerParams[key].toFixed(decimals(step))}
+                {(playerParams[key] as number).toFixed(decimals(step))}
               </span>
             </div>
           ))}
+
+          {/* ── Combat ── */}
+          <div style={{ color: '#6af', fontSize: 11, fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: 1, marginTop: 8, marginBottom: 4 }}>Combat</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+            <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Exhaustion</span>
+            {(['on', 'off'] as const).map((val) => (
+              <button
+                key={val}
+                onClick={() => setPlayerParam('exhaustionEnabled', val === 'on')}
+                style={{
+                  ...resetBtnStyle,
+                  flex: 1,
+                  background: (playerParams.exhaustionEnabled ? 'on' : 'off') === val ? '#6af' : '#333',
+                  color: (playerParams.exhaustionEnabled ? 'on' : 'off') === val ? '#000' : '#aaa',
+                  margin: 0,
+                }}
+              >
+                {val}
+              </button>
+            ))}
+          </div>
+
           <button onClick={() => useGameStore.getState().onResetPlayerParams?.()} style={resetBtnStyle}>
             Reset Defaults
           </button>

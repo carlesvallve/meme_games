@@ -15,8 +15,17 @@ export interface PlayerControlDeps {
  * Camera-relative movement, ladder auto-trigger, hop animation + step SFX.
  * Returns 'running' always (never finishes).
  */
+/** How fast current speed ramps toward target speed (units/s²) */
+const ACCEL_RATE = 20;
+const DECEL_RATE = 14;
+
 export class PlayerControl extends Behavior {
   private deps: PlayerControlDeps;
+  /** Grid-settle target when keys released in grid mode */
+  private settleTarget: { x: number; z: number } | null = null;
+  private settleSpeed = 0;
+  /** Current movement speed (smoothed) */
+  private currentSpeed = 0;
 
   constructor(ctx: ConstructorParameters<typeof Behavior>[0], deps: PlayerControlDeps) {
     super(ctx);
@@ -47,6 +56,20 @@ export class PlayerControl extends Behavior {
     if (moveLen > 0.001) {
       mx /= moveLen;
       mz /= moveLen;
+
+      // Grid mode: snap direction to nearest 45° (8 directions)
+      if (params.movementMode === 'grid') {
+        const angle = Math.atan2(mx, mz);
+        const snapped = Math.round(angle / (Math.PI / 4)) * (Math.PI / 4);
+        mx = Math.sin(snapped);
+        mz = Math.cos(snapped);
+      }
+
+      // Cancel any settle — player is actively moving
+      this.settleTarget = null;
+
+      // Accelerate toward target speed
+      this.currentSpeed = Math.min(params.speed, this.currentSpeed + ACCEL_RATE * dt);
 
       // Check for ladder auto-trigger before moving.
       // Must be on a nav-link cell and moving toward the ladder direction.
@@ -92,16 +115,61 @@ export class PlayerControl extends Behavior {
         if (triggered) return 'running';
       }
 
-      agent.move(mx, mz, params.speed, params.stepHeight, params.capsuleRadius, dt, params.slopeHeight);
+      agent.move(mx, mz, this.currentSpeed, params.stepHeight, params.capsuleRadius, dt, params.slopeHeight);
 
       // Hop + step SFX
       const currentHopHalf = agent.applyHop(params.hopHeight);
       // applyHop emits SFX for player-controlled via the Character's overridden method
+    } else if (params.movementMode === 'grid' && this.updateSettle(agent, dt, params)) {
+      // Settling to grid center — handled inside updateSettle
+    } else if (this.currentSpeed > 0.1) {
+      // Decelerate to stop (free mode or grid mode without settle target)
+      this.currentSpeed = Math.max(0, this.currentSpeed - DECEL_RATE * dt);
+      // Keep moving in last direction with decaying speed — handled by idle with visual decay
+      agent.updateIdle(dt);
     } else {
+      this.currentSpeed = 0;
+      this.settleTarget = null;
       agent.updateIdle(dt);
     }
 
     return 'running';
+  }
+
+  /** Glide to nearest grid cell center with deceleration. Returns true while settling. */
+  private updateSettle(agent: BehaviorAgent, dt: number, params: MovementParams): boolean {
+    const navGrid = this.ctx.navGrid;
+
+    // First frame with no input: pick the settle target
+    if (!this.settleTarget) {
+      const snapped = navGrid.snapToGrid(agent.getX(), agent.getZ());
+      this.settleTarget = snapped;
+      this.settleSpeed = this.currentSpeed;
+    }
+
+    const dx = this.settleTarget.x - agent.getX();
+    const dz = this.settleTarget.z - agent.getZ();
+    const dist = Math.sqrt(dx * dx + dz * dz);
+
+    // Close enough — done settling
+    if (dist < 0.01) {
+      this.settleTarget = null;
+      this.currentSpeed = 0;
+      agent.updateIdle(dt);
+      return false;
+    }
+
+    // Decelerate toward target
+    this.settleSpeed = Math.max(params.speed * 0.15, this.settleSpeed - DECEL_RATE * dt);
+    this.currentSpeed = this.settleSpeed;
+    const step = Math.min(this.settleSpeed * dt, dist);
+    const nx = dx / dist;
+    const nz = dz / dist;
+
+    agent.move(nx, nz, step / dt, params.stepHeight, params.capsuleRadius, dt, params.slopeHeight, true);
+    agent.applyHop(params.hopHeight);
+
+    return true;
   }
 
   /** Check if any WASD key is currently pressed */

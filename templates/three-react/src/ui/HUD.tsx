@@ -54,10 +54,40 @@ function StatRow({ icon, label, value, color }: {
   );
 }
 
+function HPBar({ hp, maxHp }: { hp: number; maxHp: number }) {
+  const ratio = maxHp > 0 ? hp / maxHp : 0;
+  const color = ratio > 0.5 ? '#44dd66' : ratio > 0.25 ? '#ddaa22' : '#dd3333';
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
+      <div style={{
+        width: 120,
+        height: 8,
+        background: 'rgba(255,255,255,0.15)',
+        borderRadius: 4,
+        overflow: 'hidden',
+      }}>
+        <div style={{
+          width: `${ratio * 100}%`,
+          height: '100%',
+          background: color,
+          borderRadius: 4,
+          transition: 'width 0.2s ease-out, background 0.2s',
+        }} />
+      </div>
+      <span style={{ fontSize: 10, opacity: 0.7, letterSpacing: 1 }}>
+        {hp} / {maxHp}
+      </span>
+    </div>
+  );
+}
+
 export function HUD() {
   const collectibles = useGameStore((s) => s.collectibles);
   const coins = useGameStore((s) => s.coins);
   const potions = useGameStore((s) => s.potions);
+  const hp = useGameStore((s) => s.hp);
+  const maxHp = useGameStore((s) => s.maxHp);
   const toggles = useGameStore((s) => s.particleToggles);
   const toggle = useGameStore((s) => s.toggleParticle);
   const activeCharacterName = useGameStore((s) => s.activeCharacterName);
@@ -135,6 +165,7 @@ export function HUD() {
             {activeCharacterName}
           </div>
         )}
+        <HPBar hp={hp} maxHp={maxHp} />
         <StatRow icon="💎" label="GEMS" value={collectibles} color="#44ffaa" />
         <StatRow icon="🪙" label="COINS" value={coins} color="#ffd700" />
         <StatRow icon="🧪" label="POTIONS" value={potions} color="#ff6688" />
