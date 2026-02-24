@@ -15,11 +15,16 @@ export interface CameraOptions {
 
 const DRAG_THRESHOLD = 8; // px before considering it a real drag (fixes mobile)
 const COLLISION_SKIN = 0.4; // how far to push camera off the hit surface
+/** Position eases toward orbit target; higher = snappier (less float, less tilt). Orbit center uses followSpeed. */
+const POSITION_FOLLOW_SPEED_MULT = 2;
 
 export class Camera {
   readonly camera: THREE.PerspectiveCamera;
   private target = new THREE.Vector3(0, 0, 0);
+  /** Smoothed orbit center — camera orbits around this and looks at it (avoids tilt when character moves) */
+  private smoothedTarget = new THREE.Vector3(0, 0, 0);
   private currentPos = new THREE.Vector3();
+  private hasInitialTarget = false;
   private distance: number;
   private angleX: number;
   private angleY: number;
@@ -210,6 +215,10 @@ export class Camera {
 
   setTarget(x: number, y: number, z: number): void {
     this.target.set(x, y, z);
+    if (!this.hasInitialTarget) {
+      this.smoothedTarget.copy(this.target);
+      this.hasInitialTarget = true;
+    }
   }
 
   resize(aspect: number): void {
@@ -218,41 +227,38 @@ export class Camera {
   }
 
   updatePosition(dt: number): void {
-    // Compute desired camera position at full orbit distance
+    if (!this.hasInitialTarget) return;
+
+    // Smooth the orbit center (follow target), not the camera — so we can lookAt it without tilt
+    smoothLerpVec3(this.smoothedTarget, this.target, this.followSpeed, dt);
+
     const cosAx = Math.cos(this.angleX);
     const sinAx = Math.sin(-this.angleX);
     const sinAy = Math.sin(this.angleY);
     const cosAy = Math.cos(this.angleY);
 
-    const desiredX = this.target.x + this.distance * cosAx * sinAy;
-    const desiredY = this.target.y + this.distance * sinAx;
-    const desiredZ = this.target.z + this.distance * cosAx * cosAy;
+    const desiredX = this.smoothedTarget.x + this.distance * cosAx * sinAy;
+    const desiredY = this.smoothedTarget.y + this.distance * sinAx;
+    const desiredZ = this.smoothedTarget.z + this.distance * cosAx * cosAy;
     const desired = new THREE.Vector3(desiredX, desiredY, desiredZ);
 
-    // --- Collision: raycast from character toward camera ---
+    // --- Collision: raycast from orbit center toward camera ---
     let finalDesired = desired;
     let occluded = false;
 
     if (this.collisionLayers !== 0) {
-      // Direction from target to desired camera
-      this._dir.copy(desired).sub(this.target).normalize();
-
-      this.raycaster.set(this.target, this._dir);
+      this._dir.copy(desired).sub(this.smoothedTarget).normalize();
+      this.raycaster.set(this.smoothedTarget, this._dir);
       this.raycaster.near = 0.1;
       this.raycaster.far = this.distance;
 
-      // Get occluder meshes from entity registry by layer
       const occluders = entityRegistry.getByLayer(this.collisionLayers).map(e => e.object3D);
       const hits = this.raycaster.intersectObjects(occluders, true);
 
       for (const hit of hits) {
         if (!hit.face) continue;
-
-        // Place camera at hit point, pushed out along the face normal
-        // Transform normal from object-local to world space
         const worldNormal = hit.face.normal.clone()
           .transformDirection(hit.object.matrixWorld);
-
         this._hitPos.copy(hit.point).addScaledVector(worldNormal, COLLISION_SKIN);
         finalDesired = this._hitPos.clone();
         occluded = true;
@@ -261,31 +267,29 @@ export class Camera {
     }
 
     if (occluded) {
-      // Snap camera instantly to collision position
       this.currentPos.copy(finalDesired);
       this.wasOccluded = true;
     } else if (this.wasOccluded) {
-      // Just became unoccluded — start easing from current position
       this.wasOccluded = false;
       smoothLerpVec3(this.currentPos, finalDesired, this.followSpeed, dt);
     } else {
-      smoothLerpVec3(this.currentPos, finalDesired, this.followSpeed, dt);
+      // Light position smoothing — eases toward orbit position for a bit of follow feel without noticeable tilt
+      smoothLerpVec3(this.currentPos, finalDesired, this.followSpeed * POSITION_FOLLOW_SPEED_MULT, dt);
     }
 
     this.camera.position.copy(this.currentPos);
 
-    // Apply screen shake
     if (this.shakeIntensity > 0.001) {
       this.shakeX += (Math.random() - 0.5) * this.shakeIntensity * 2;
       this.shakeZ += (Math.random() - 0.5) * this.shakeIntensity * 2;
-      this.shakeX *= 0.5; // dampen toward zero each frame
+      this.shakeX *= 0.5;
       this.shakeZ *= 0.5;
       this.camera.position.x += this.shakeX;
       this.camera.position.z += this.shakeZ;
       this.shakeIntensity = Math.max(0, this.shakeIntensity - this.shakeDecay * dt);
     }
 
-    this.camera.lookAt(this.target);
+    this.camera.lookAt(this.smoothedTarget);
   }
 
   /** Trigger a screen shake. dirX/dirZ is the hit direction (normalized). */
