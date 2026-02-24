@@ -271,9 +271,12 @@ const SURFACE_CATEGORIES: Record<string, number> = {
   'table_large': 0.20,
   'bookcase_small': 0.55,
   'bookcase_large': 0.85,
-  'bench': 0.20,
-  'altar': 0.45,
+  'bench': 0.14,
+  'altar': 0.6,
   'tomb': 0.25,
+  'barrel': 0.22,
+  'box': 0.18,
+  'pot': 0.16,
 };
 
 // Small items that prefer being placed on surfaces rather than the floor.
@@ -467,7 +470,7 @@ export class DungeonPropSystem {
       for (const item of propList) {
         if (SMALL_ITEM_CATEGORIES.has(item.category)) {
           smallItems.push(item);
-        } else if (item.category === 'chair') {
+        } else if (item.category === 'chair' || item.category === 'bench') {
           chairItems.push(item);
         } else {
           largeItems.push(item);
@@ -589,7 +592,9 @@ export class DungeonPropSystem {
               wz: mesh.position.z,
               surfaceY: floorY + surfaceH * surfScale,
               used: 0,
-              maxItems: entry.category.includes('large') ? 3 : 2,
+              maxItems: entry.category.includes('large') ? 3
+                : (entry.category === 'barrel' || entry.category === 'box' || entry.category === 'pot') ? 1
+                : 2,
               rotation: mesh.rotation.y,
             });
           }
@@ -684,10 +689,13 @@ export class DungeonPropSystem {
 
             const mesh = new THREE.Mesh(geo, voxMat.clone());
             // Use deterministic slot positions so items never overlap
+            // Single-item surfaces (altars etc.) get centered placement
             const SURFACE_SLOTS: [number, number][] = [
               [-0.1, 0], [0.1, 0], [0, -0.1],
             ];
-            const slot = SURFACE_SLOTS[(surface.used - 1) % SURFACE_SLOTS.length];
+            const slot: [number, number] = surface.maxItems === 1
+              ? [0, 0]
+              : SURFACE_SLOTS[(surface.used - 1) % SURFACE_SLOTS.length];
             mesh.position.set(
               surface.wx + slot[0],
               surface.surfaceY,

@@ -11,6 +11,8 @@ export interface ParticleToggles {
   debris: boolean;
 }
 
+export type MovementMode = 'free' | 'grid';
+
 export interface PlayerParams {
   speed: number;
   stepHeight: number;
@@ -20,6 +22,9 @@ export interface PlayerParams {
   hopHeight: number;
   magnetRadius: number;
   magnetSpeed: number;
+  movementMode: MovementMode;
+  showPathDebug: boolean;
+  exhaustionEnabled: boolean;
 }
 
 export type LightPreset = 'default' | 'bright' | 'dark' | 'none';
@@ -49,6 +54,9 @@ export interface CameraParams {
 export const DEFAULT_PLAYER_PARAMS: PlayerParams = {
   speed: 4, stepHeight: 0.4, slopeHeight: 0.75, capsuleRadius: 0.1,
   arrivalReach: 0.05, hopHeight: 0.05, magnetRadius: 1, magnetSpeed: 16,
+  exhaustionEnabled: false,
+  movementMode: 'grid' as MovementMode,
+  showPathDebug: true,
 };
 
 export const DEFAULT_CAMERA_PARAMS: CameraParams = {
@@ -77,6 +85,8 @@ export const DEFAULT_SCENE_SETTINGS = {
   gridOpacity: 0.25,
   resolutionScale: 1,
   testProp: '' as string,  // empty = normal templates, category name = spawn only that
+  testFloor: '' as string, // empty = random ground tiles, tile id = use only that
+  doorChance: 0.7,
 };
 
 // ── localStorage persistence ──────────────────────────────────────────
@@ -98,6 +108,8 @@ interface SavedSettings {
   gridOpacity?: number;
   resolutionScale?: number;
   testProp?: string;
+  testFloor?: string;
+  doorChance?: number;
   particleToggles?: ParticleToggles;
 }
 
@@ -126,6 +138,8 @@ function saveSettings(): void {
     gridOpacity: s.gridOpacity,
     resolutionScale: s.resolutionScale,
     testProp: s.testProp,
+    testFloor: s.testFloor,
+    doorChance: s.doorChance,
     particleToggles: s.particleToggles,
   };
   try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(data)); } catch { /* ignore */ }
@@ -163,6 +177,8 @@ interface GameStore {
   gridOpacity: number;
   resolutionScale: number;
   testProp: string;
+  testFloor: string;
+  doorChance: number;
 
   setPhase: (phase: GameStore['phase']) => void;
   setScore: (score: number) => void;
@@ -176,7 +192,7 @@ interface GameStore {
   addPotions: (n: number) => void;
   setSpeechBubbles: (bubbles: SpeechBubbleData[]) => void;
   toggleParticle: (key: keyof ParticleToggles) => void;
-  setPlayerParam: (key: keyof PlayerParams, value: number) => void;
+  setPlayerParam: <K extends keyof PlayerParams>(key: K, value: PlayerParams[K]) => void;
   setCameraParam: <K extends keyof CameraParams>(key: K, value: CameraParams[K]) => void;
   setLightPreset: (preset: LightPreset) => void;
   toggleTorch: () => void;
@@ -191,6 +207,8 @@ interface GameStore {
   setGridOpacity: (gridOpacity: number) => void;
   setResolutionScale: (scale: number) => void;
   setTestProp: (prop: string) => void;
+  setTestFloor: (floor: string) => void;
+  setDoorChance: (chance: number) => void;
 
   activeCharacterName: string | null;
   activeCharacterColor: string | null;
@@ -242,6 +260,8 @@ export const useGameStore = create<GameStore>((set) => ({
   gridOpacity: saved.gridOpacity ?? DEFAULT_SCENE_SETTINGS.gridOpacity,
   resolutionScale: saved.resolutionScale ?? DEFAULT_SCENE_SETTINGS.resolutionScale,
   testProp: saved.testProp ?? DEFAULT_SCENE_SETTINGS.testProp,
+  testFloor: saved.testFloor ?? DEFAULT_SCENE_SETTINGS.testFloor,
+  doorChance: saved.doorChance ?? DEFAULT_SCENE_SETTINGS.doorChance,
 
   setPhase: (phase) => set({ phase }),
   setScore: (score) => set({ score }),
@@ -282,6 +302,8 @@ export const useGameStore = create<GameStore>((set) => ({
   setGridOpacity: (gridOpacity) => set({ gridOpacity }),
   setResolutionScale: (resolutionScale) => set({ resolutionScale }),
   setTestProp: (testProp) => set({ testProp }),
+  setTestFloor: (testFloor) => set({ testFloor }),
+  setDoorChance: (doorChance) => set({ doorChance }),
 
   activeCharacterName: null,
   activeCharacterColor: null,

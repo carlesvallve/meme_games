@@ -518,12 +518,13 @@ export class Terrain {
   }
 
   private createGridLines(): void {
+    const gridOpacity = useGameStore.getState().gridOpacity;
     const grid = new THREE.GridHelper(this.groundSize, this.groundSize / HALF, 0x444466, 0x333355);
     grid.position.y = 0.01;
     const mats = Array.isArray(grid.material) ? grid.material : [grid.material];
     for (const mat of mats) {
       mat.transparent = true;
-      mat.opacity = 0.9;
+      mat.opacity = gridOpacity;
       mat.depthWrite = false;
     }
     this.group.add(grid);
@@ -1175,8 +1176,8 @@ export class Terrain {
   }
 
   private createDungeonDebris(): void {
-    const { wallGap } = useGameStore.getState();
-    const output = generateDungeon(this.preset as 'dungeon' | 'rooms', this.groundSize, wallGap);
+    const { wallGap, doorChance } = useGameStore.getState();
+    const output = generateDungeon(this.preset as 'dungeon' | 'rooms', this.groundSize, wallGap, undefined, undefined, doorChance);
     this.walkMask = output.walkMask;
     this.effectiveGroundSize = this.groundSize;
 
@@ -1197,13 +1198,29 @@ export class Terrain {
   }
 
   private createVoxelDungeonDebris(): void {
-    const { wallGap, roomSpacing, tileSize } = useGameStore.getState();
-    const output = generateDungeon('dungeon', this.groundSize, wallGap, tileSize, roomSpacing);
+    const { wallGap, roomSpacing, tileSize, doorChance } = useGameStore.getState();
+    const output = generateDungeon('dungeon', this.groundSize, wallGap, tileSize, roomSpacing, doorChance);
     this.walkMask = output.walkMask;
     this.effectiveGroundSize = this.groundSize;
     const cellSize = output.walkMask.cellSize;
 
     console.log(`[Terrain] voxelDungeon: ${output.roomCount} rooms, ${output.corridorCount} corridors, ${output.doors.length} doors`);
+
+    // Mark door-flanking cells (pillar cells) as unwalkable so only the central cell is passable
+    const { openGrid, gridW, gridD } = output.walkMask;
+    for (const d of output.gridDoors) {
+      const gx = Math.round(d.x);
+      const gz = Math.round(d.z);
+      if (d.orientation === 'NS') {
+        // Corridor runs along X — pillars above and below
+        if (gz - 1 >= 0) openGrid[(gz - 1) * gridW + gx] = false;
+        if (gz + 1 < gridD) openGrid[(gz + 1) * gridW + gx] = false;
+      } else {
+        // Corridor runs along Z — pillars left and right
+        if (gx - 1 >= 0) openGrid[gz * gridW + (gx - 1)] = false;
+        if (gx + 1 < gridW) openGrid[gz * gridW + (gx + 1)] = false;
+      }
+    }
 
     const voxConfig = {
       openGrid: output.walkMask.openGrid,
@@ -1213,6 +1230,7 @@ export class Terrain {
       groundSize: this.groundSize,
       doors: output.doors,
       gridDoors: output.gridDoors,
+      roomOwnership: output.roomOwnership,
     };
 
     const vdResult = buildVoxelDungeonCollision(voxConfig, this.group);
@@ -1265,6 +1283,9 @@ export class Terrain {
         const chests = this.propSystem.getInteractiveChests();
         if (chests.length > 0) this.propChestRegistrar(chests);
       }
+
+      // Apply grid opacity to async-loaded grid overlay
+      this.setGridOpacity(useGameStore.getState().gridOpacity);
     });
   }
 
@@ -1881,6 +1902,11 @@ export class Terrain {
     return this.debris;
   }
 
+  /** Add a static debris box (permanent collision, e.g. door pillars) */
+  addStaticDebris(box: DebrisBox): void {
+    this.debris.push(box);
+  }
+
   /** Add a dynamic debris box (e.g. closed door) for collision checks */
   addDynamicDebris(box: DebrisBox): void {
     if (!this.dynamicDebris.includes(box)) {
@@ -1911,6 +1937,14 @@ export class Terrain {
 
 
   /** Get the ground/debris height at a point, optionally expanded by a radius */
+  /** Floor height ignoring small prop debris (walls only). Used by loot physics. */
+  getFloorY(x: number, z: number): number {
+    if (this.heightmapData) {
+      return sampleHeightmap(this.heightmapData, this.heightmapRes, this.heightmapGroundSize, x, z);
+    }
+    return this.baseFloorY;
+  }
+
   getTerrainY(x: number, z: number, radius = 0): number {
     // Heightmap: O(1) bilinear interpolation
     if (this.heightmapData) {

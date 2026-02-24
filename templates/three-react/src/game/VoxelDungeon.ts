@@ -14,7 +14,7 @@
 
 import * as THREE from 'three';
 import { Entity, Layer } from './Entity';
-import { getFirstTile, getRandomTile, getTileById } from './VoxDungeonDB';
+import { getFirstTile, getRandomTile, getTileById, getDungeonTiles } from './VoxDungeonDB';
 import type { TileRole } from './VoxDungeonDB';
 import { preloadTheme, getTileGeometry, setCellSize, getWallTargetHeight, clearCache } from './VoxDungeonLoader';
 import type { DoorDef } from './DungeonGenerator';
@@ -39,12 +39,34 @@ export interface VoxelDungeonConfig {
   gridDoors: DoorDef[];   // grid-space doors (for entrance tile placement)
   wallHeight?: number;
   theme?: string;         // defaults to 'a_a'
+  /** Per-cell room index (-1 = corridor, >= 0 = room index) */
+  roomOwnership?: number[];
 }
 
 export interface VoxelDungeonResult {
   debris: DebrisBox[];
   entities: Entity[];
   wallHeight: number;
+}
+
+// ── Ground mesh tracking (for live floor swaps) ──
+let groundMeshes: THREE.Mesh[] = [];
+let cachedGroundTheme = 'a_a';
+
+/** Swap all ground tile geometries at once (called when testFloor dropdown changes) */
+export function swapGroundTiles(tileId: string): void {
+  const groundTiles = getDungeonTiles('ground', cachedGroundTheme);
+  if (groundTiles.length === 0) return;
+
+  const forced = tileId ? getTileById(tileId) : null;
+  // When randomizing, only use normal (_a) variants
+  const normalTiles = groundTiles.filter(t => t.id.endsWith('_a'));
+
+  for (const mesh of groundMeshes) {
+    const tile = forced ?? normalTiles[Math.floor(Math.random() * normalTiles.length)];
+    const geo = getTileGeometry(tile);
+    if (geo) mesh.geometry = geo;
+  }
 }
 
 // ── Main builder ──
@@ -148,8 +170,58 @@ export async function loadVoxelDungeonVisuals(
   let groundCount = 0;
   let wallCount = 0;
 
-  // Use the bordered ground tile (square line pattern)
-  const groundTile = getTileById('ground_c_a') ?? getFirstTile('ground', theme);
+  // Ground tiles: randomized per-room/per-corridor, only normal (_a suffix) variants
+  const { useGameStore } = await import('../store');
+  const testFloor = useGameStore.getState().testFloor;
+  const groundTiles = getDungeonTiles('ground', theme);
+  const normalGroundTiles = groundTiles.filter(t => t.id.endsWith('_a'));
+  const forcedGroundTile = testFloor ? getTileById(testFloor) : null;
+
+  // Pre-assign a random normal floor tile per room and per corridor
+  const ownership = config.roomOwnership;
+  const roomCount = ownership ? Math.max(0, ...ownership) + 1 : 0;
+  const roomFloorTiles = normalGroundTiles.length > 0
+    ? Array.from({ length: roomCount }, () => normalGroundTiles[Math.floor(Math.random() * normalGroundTiles.length)])
+    : [];
+  // Corridors use negative IDs: -2, -3, ... → index as (-id - 2)
+  // For each corridor, find an adjacent room and inherit its floor tile.
+  // Fallback to random if no adjacent room found.
+  const minOwnership = ownership ? Math.min(0, ...ownership) : 0;
+  const corridorCount = minOwnership <= -2 ? (-minOwnership - 2) + 1 : 0;
+  const corridorFloorTiles: (typeof normalGroundTiles[0] | null)[] = new Array(corridorCount).fill(null);
+  if (ownership && corridorCount > 0 && normalGroundTiles.length > 0) {
+    // For each corridor, scan its cells for an adjacent room
+    const corridorAdjacentRoom = new Int16Array(corridorCount).fill(-1);
+    for (let gz = 0; gz < gridD; gz++) {
+      for (let gx = 0; gx < gridW; gx++) {
+        const oid = ownership[gz * gridW + gx];
+        if (oid > -2) continue; // not a corridor cell
+        const ci = -oid - 2;
+        if (corridorAdjacentRoom[ci] >= 0) continue; // already found
+        // Check 4 neighbors for a room cell
+        const neighbors = [
+          gx > 0 ? ownership[gz * gridW + gx - 1] : -1,
+          gx < gridW - 1 ? ownership[gz * gridW + gx + 1] : -1,
+          gz > 0 ? ownership[(gz - 1) * gridW + gx] : -1,
+          gz < gridD - 1 ? ownership[(gz + 1) * gridW + gx] : -1,
+        ];
+        for (const n of neighbors) {
+          if (n >= 0) { corridorAdjacentRoom[ci] = n; break; }
+        }
+      }
+    }
+    for (let ci = 0; ci < corridorCount; ci++) {
+      const ri = corridorAdjacentRoom[ci];
+      corridorFloorTiles[ci] = ri >= 0 && roomFloorTiles[ri]
+        ? roomFloorTiles[ri]
+        : normalGroundTiles[Math.floor(Math.random() * normalGroundTiles.length)];
+    }
+  }
+
+  // Reset ground mesh tracking
+  groundMeshes = [];
+  cachedGroundTheme = theme;
+
   // Use corner variant c for convex room corners
   const convexCornerTile = getTileById('outer_wall_corner_c') ?? getFirstTile('outer_wall_corner', theme);
 
@@ -160,7 +232,20 @@ export async function loadVoxelDungeonVisuals(
 
       const wx = toWorldX(gx);
       const wz = toWorldZ(gz);
-      placeVox(group, wx, wz, 'ground', 0, voxMat, groundTile);
+
+      let tile = forcedGroundTile;
+      if (!tile && ownership) {
+        const ownerId = ownership[gz * gridW + gx];
+        if (ownerId >= 0) {
+          tile = roomFloorTiles[ownerId] ?? null;
+        } else if (ownerId <= -2) {
+          tile = corridorFloorTiles[-ownerId - 2] ?? null;
+        }
+      }
+      if (!tile) tile = normalGroundTiles[Math.floor(Math.random() * normalGroundTiles.length)] ?? null;
+
+      const mesh = placeVoxReturn(group, wx, wz, 'ground', 0, voxMat, tile);
+      if (mesh) groundMeshes.push(mesh);
       groundCount++;
 
     }
@@ -237,7 +322,7 @@ export async function loadVoxelDungeonVisuals(
     const mats = Array.isArray(grid.material) ? grid.material : [grid.material];
     for (const mat of mats) {
       mat.transparent = true;
-      mat.opacity = 0.9;
+      mat.opacity = useGameStore.getState().gridOpacity;
       mat.depthWrite = false;
     }
     group.add(grid);
@@ -248,7 +333,7 @@ export async function loadVoxelDungeonVisuals(
 
 // ── Helpers ──
 
-function placeVox(
+function placeVoxReturn(
   group: THREE.Group,
   wx: number,
   wz: number,
@@ -256,12 +341,12 @@ function placeVox(
   rotation: number,
   material: THREE.Material,
   specificEntry?: import('./VoxDungeonDB').DungeonTileEntry | null,
-): void {
+): THREE.Mesh | null {
   const entry = specificEntry ?? getFirstTile(role);
-  if (!entry) return;
+  if (!entry) return null;
 
   const geo = getTileGeometry(entry);
-  if (!geo) return;
+  if (!geo) return null;
 
   const mesh = new THREE.Mesh(geo, material);
   mesh.position.set(wx, 0, wz);
@@ -272,4 +357,17 @@ function placeVox(
   mesh.castShadow = true;
   mesh.receiveShadow = true;
   group.add(mesh);
+  return mesh;
+}
+
+function placeVox(
+  group: THREE.Group,
+  wx: number,
+  wz: number,
+  role: TileRole,
+  rotation: number,
+  material: THREE.Material,
+  specificEntry?: import('./VoxDungeonDB').DungeonTileEntry | null,
+): void {
+  placeVoxReturn(group, wx, wz, role, rotation, material, specificEntry);
 }

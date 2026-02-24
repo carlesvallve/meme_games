@@ -170,7 +170,9 @@ export class SpeechBubbleSystem {
     for (const b of this.bubbles) {
       const mesh = b.character.mesh;
       mesh.getWorldPosition(pos);
-      pos.y += BUBBLE_Y_OFFSET;
+      // Shift bubble up when HP bar is visible
+      const hpBarExtra = b.character.showingHpBar ? 0.1 : 0;
+      pos.y += BUBBLE_Y_OFFSET + hpBarExtra;
 
       const projected = pos.clone().project(this.camera);
 

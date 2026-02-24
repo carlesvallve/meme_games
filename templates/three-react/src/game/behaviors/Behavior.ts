@@ -7,8 +7,8 @@ import type { LadderDef } from '../Ladder';
 export interface BehaviorAgent {
   getX(): number;
   getZ(): number;
-  /** Move toward direction. Returns true if actually moved. */
-  move(dx: number, dz: number, speed: number, stepHeight: number, capsuleRadius: number, dt: number, slopeHeight?: number): boolean;
+  /** Move toward direction. Returns true if actually moved. skipFacing=true keeps current orientation. */
+  move(dx: number, dz: number, speed: number, stepHeight: number, capsuleRadius: number, dt: number, slopeHeight?: number, skipFacing?: boolean): boolean;
   applyHop(hopHeight: number): number;
   updateIdle(dt: number): void;
   /** Start climbing a ladder */

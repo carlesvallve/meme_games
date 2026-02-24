@@ -83,12 +83,12 @@ export function DebugPanel() {
                 min={min}
                 max={max}
                 step={step}
-                value={params[key]}
-                onChange={(e) => setParam(key, parseFloat(e.target.value))}
+                value={params[key] as number}
+                onChange={(e) => setParam(key, parseFloat(e.target.value) as any)}
                 style={{ flex: 1, height: 14, accentColor: '#6af' }}
               />
               <span style={{ color: '#fff', width: 36, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-                {params[key].toFixed(step < 0.1 ? 2 : 1)}
+                {(params[key] as number).toFixed(step < 0.1 ? 2 : 1)}
               </span>
             </div>
           ))}

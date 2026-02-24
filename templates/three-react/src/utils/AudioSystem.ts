@@ -10,6 +10,10 @@ import { sfxCoin } from './sfx/coin';
 import { sfxChest } from './sfx/chest';
 import { sfxThud } from './sfx/thud';
 import { sfxPotion } from './sfx/potion';
+import { sfxSlash } from './sfx/slash';
+import { sfxFleshHit } from './sfx/fleshHit';
+import { sfxHurt } from './sfx/hurt';
+import { sfxShoot } from './sfx/shoot';
 
 /**
  * Spatial audio attenuation
@@ -127,9 +131,13 @@ class AudioSystemClass {
         case 'coin':   sfxCoin(ctx, dest); break;
         case 'chest':  sfxChest(ctx, dest); break;
         case 'thud':   sfxThud(ctx, intensity, bounceCount, dest); break;
-        case 'land':   sfxLand(ctx, dest); break;
-        case 'potion': sfxPotion(ctx, dest); break;
-        default:       playTone(ctx, 440, 0.1, 'sine', 0.08); break;
+        case 'land':     sfxLand(ctx, dest); break;
+        case 'potion':   sfxPotion(ctx, dest); break;
+        case 'slash':    sfxSlash(ctx, dest); break;
+        case 'fleshHit': sfxFleshHit(ctx, dest); break;
+        case 'hurt':     sfxHurt(ctx, dest); break;
+        case 'shoot':    sfxShoot(ctx, dest); break;
+        default:         playTone(ctx, 440, 0.1, 'sine', 0.08); break;
       }
     } catch {
       // ignore
