@@ -94,6 +94,8 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   // Terrain + dependent systems (mutable for regeneration)
   const { terrainPreset: initPreset, heightmapStyle: initStyle, paletteName: initPalette } = useGameStore.getState();
   let terrain = new Terrain(scene, initPreset, initStyle, initPalette);
+  cam.terrainHeightAt = (x, z) => terrain.getFloorY(x, z);
+  cam.terrainMesh = terrain.getTerrainMesh();
   useGameStore.getState().setPaletteActive(terrain.getPaletteName());
   const { playerParams: initParams } = useGameStore.getState();
   let navGrid = terrain.buildNavGrid(initParams.stepHeight, initParams.capsuleRadius, navCellForPreset(initPreset), initParams.slopeHeight);
@@ -156,6 +158,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
 
     // Rebuild
     terrain = new Terrain(scene, terrainPreset, heightmapStyle, palPick);
+    cam.terrainMesh = terrain.getTerrainMesh();
     useGameStore.getState().setPaletteActive(terrain.getPaletteName());
     navGrid = terrain.buildNavGrid(pp.stepHeight, pp.capsuleRadius, navCellForPreset(terrainPreset), pp.slopeHeight);
     terrain.setGridOpacity(useGameStore.getState().gridOpacity);

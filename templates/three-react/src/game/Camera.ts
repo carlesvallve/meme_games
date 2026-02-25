@@ -18,7 +18,7 @@ export interface CameraOptions {
 }
 
 const DRAG_THRESHOLD = 8; // px before considering it a real drag (fixes mobile)
-const COLLISION_SKIN = 0.4; // how far to push camera off the hit surface
+const DEFAULT_COLLISION_SKIN = 0.1;
 /** Position eases toward orbit target; higher = snappier (less float, less tilt). Orbit center uses followSpeed. */
 const POSITION_FOLLOW_SPEED_MULT = 2;
 
@@ -57,7 +57,15 @@ export class Camera {
   private raycaster = new THREE.Raycaster();
   private _dir = new THREE.Vector3();
   private _hitPos = new THREE.Vector3();
-  private wasOccluded = false;
+  private collisionDist = 0; // 0 = no collision active
+  private collisionCooldown = 0;
+
+  /** How far to push camera off collision surfaces */
+  collisionSkin = DEFAULT_COLLISION_SKIN;
+  /** Optional: query terrain height at (x,z) — camera stays above ground */
+  terrainHeightAt: ((x: number, z: number) => number) | null = null;
+  /** Optional: heightmap mesh for cliff collision (separate from Architecture raycast) */
+  terrainMesh: THREE.Object3D | null = null;
 
   // Screen shake
   private shakeX = 0;
@@ -270,25 +278,122 @@ export class Camera {
         if (!hit.face) continue;
         const worldNormal = hit.face.normal.clone()
           .transformDirection(hit.object.matrixWorld);
-        this._hitPos.copy(hit.point).addScaledVector(worldNormal, COLLISION_SKIN);
+        this._hitPos.copy(hit.point).addScaledVector(worldNormal, this.collisionSkin);
         finalDesired = this._hitPos.clone();
         occluded = true;
         break;
       }
     }
 
+    // Terrain cliff collision: separate raycast with larger near to skip ground at feet
+    if (!occluded && this.terrainMesh) {
+      this._dir.copy(desired).sub(this.smoothedTarget).normalize();
+      this.raycaster.set(this.smoothedTarget, this._dir);
+      this.raycaster.near = 0.5;
+      this.raycaster.far = this.distance;
+
+      const hits = this.raycaster.intersectObject(this.terrainMesh, true);
+      for (const hit of hits) {
+        if (!hit.face) continue;
+        const wn = hit.face.normal.clone().transformDirection(hit.object.matrixWorld);
+        if (wn.y > 0.5) continue; // skip ground/gentle slopes
+        this._hitPos.copy(hit.point).addScaledVector(wn, this.collisionSkin);
+        finalDesired = this._hitPos.clone();
+        occluded = true;
+        break;
+      }
+    }
+
+
+    // Terrain height: pull camera forward until above ground (Unity-style)
+    if (!occluded && this.terrainHeightAt) {
+      const dir = new THREE.Vector3().subVectors(desired, this.smoothedTarget);
+      const fullDist = dir.length();
+      dir.normalize();
+
+      const groundY = this.terrainHeightAt(desired.x, desired.z) + this.collisionSkin;
+      if (desired.y < groundY) {
+        // Step backward from full distance toward player until above ground
+        let safeDist = fullDist;
+        const steps = 10;
+        for (let i = steps; i >= 0; i--) {
+          const t = i / steps;
+          const d = fullDist * t;
+          const p = this.smoothedTarget.clone().addScaledVector(dir, d);
+          const gy = this.terrainHeightAt(p.x, p.z) + this.collisionSkin;
+          if (p.y >= gy) {
+            safeDist = d;
+            break;
+          }
+          safeDist = d;
+        }
+        finalDesired = this.smoothedTarget.clone().addScaledVector(dir, safeDist);
+        occluded = true;
+      }
+    }
+
+    // Visibility check: is terrain between camera and player?
+    if (!occluded && this.terrainMesh) {
+      const camToTarget = new THREE.Vector3().subVectors(this.smoothedTarget, this.currentPos);
+      const viewDist = camToTarget.length();
+      if (viewDist > 0.5) {
+        camToTarget.normalize();
+        this.raycaster.set(this.currentPos, camToTarget);
+        this.raycaster.near = 0.3;
+        this.raycaster.far = viewDist;
+        const hits = this.raycaster.intersectObject(this.terrainMesh, true);
+        if (hits.length > 0) {
+          // Terrain blocks the view — pull camera to just before the hit
+          const hitDist = hits[0].distance;
+          const orbitDir = new THREE.Vector3().subVectors(desired, this.smoothedTarget).normalize();
+          const safeDist = Math.max(1.5, viewDist - hitDist);
+          finalDesired = this.smoothedTarget.clone().addScaledVector(orbitDir, safeDist);
+          occluded = true;
+        }
+      }
+    }
+
+    // --- Orbit follow: always at full speed (rotation/zoom unaffected) ---
+    smoothLerpVec3(this.currentPos, desired, this.followSpeed * POSITION_FOLLOW_SPEED_MULT, dt);
+
+    // --- Collision distance: independent from orbit speed ---
+    const hitDist = occluded ? finalDesired.distanceTo(this.smoothedTarget) : this.distance;
+
+    const MIN_COLLISION_DIST = 1.5;
+
     if (occluded) {
-      this.currentPos.copy(finalDesired);
-      this.wasOccluded = true;
-    } else if (this.wasOccluded) {
-      this.wasOccluded = false;
-      smoothLerpVec3(this.currentPos, finalDesired, this.followSpeed, dt);
-    } else {
-      // Light position smoothing — eases toward orbit position for a bit of follow feel without noticeable tilt
-      smoothLerpVec3(this.currentPos, finalDesired, this.followSpeed * POSITION_FOLLOW_SPEED_MULT, dt);
+      const clampedHit = Math.max(MIN_COLLISION_DIST, hitDist);
+      if (this.collisionDist <= 0) {
+        this.collisionDist = clampedHit;
+      } else {
+        this.collisionDist += (clampedHit - this.collisionDist) * Math.min(1, 15 * dt);
+      }
+      this.collisionCooldown = 0.2;
+    } else if (this.collisionCooldown > 0) {
+      this.collisionCooldown -= dt;
+    } else if (this.collisionDist > 0) {
+      this.collisionDist += (this.distance - this.collisionDist) * 2.0 * dt;
+      if (this.distance - this.collisionDist < 0.05) this.collisionDist = 0;
+    }
+
+    // Clamp camera to collision distance (post-process, doesn't affect orbit)
+    if (this.collisionDist > 0) {
+      const fromTarget = new THREE.Vector3().subVectors(this.currentPos, this.smoothedTarget);
+      const currentDist = fromTarget.length();
+      if (currentDist > this.collisionDist) {
+        fromTarget.multiplyScalar(this.collisionDist / currentDist);
+        this.currentPos.copy(this.smoothedTarget).add(fromTarget);
+      }
     }
 
     this.camera.position.copy(this.currentPos);
+
+    // Minimum height above terrain so floor doesn't clip through near plane
+    if (this.terrainHeightAt) {
+      const groundAtCam = this.terrainHeightAt(this.camera.position.x, this.camera.position.z);
+      const minY = groundAtCam + this.collisionSkin * 0.1;
+      if (this.camera.position.y < minY) this.camera.position.y = minY;
+    }
 
     if (this.shakeIntensity > 0.001) {
       this.shakeX += (Math.random() - 0.5) * this.shakeIntensity * 2;
@@ -326,6 +431,7 @@ export class Camera {
     this.rotationSpeed = p.rotationSpeed;
     this.zoomSpeed = p.zoomSpeed;
     this.collisionLayers = p.collisionLayers;
+    this.collisionSkin = p.collisionSkin;
     // Sync distance from store (e.g. from settings slider); clamp to min/max
     const nextDistance = Math.max(this.minDistance, Math.min(this.maxDistance, p.distance));
     this.distance = nextDistance;
