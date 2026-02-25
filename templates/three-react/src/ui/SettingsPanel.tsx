@@ -521,6 +521,12 @@ function ScenePanel() {
 
 export function SettingsPanel() {
   const [active, setActive] = useState<ActivePanel>(null);
+  const setSettingsPanelOpen = useGameStore((s) => s.setSettingsPanelOpen);
+
+  useEffect(() => {
+    setSettingsPanelOpen(active !== null);
+    return () => setSettingsPanelOpen(false);
+  }, [active, setSettingsPanelOpen]);
   const playerParams = useGameStore((s) => s.playerParams);
   const cameraParams = useGameStore((s) => s.cameraParams);
   const torchParams = useGameStore((s) => s.torchParams);

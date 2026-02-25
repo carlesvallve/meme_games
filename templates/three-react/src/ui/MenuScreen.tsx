@@ -2,18 +2,11 @@ import { useGameStore } from '../store';
 
 export function MenuScreen() {
   const phase = useGameStore((s) => s.phase);
-  const score = useGameStore((s) => s.score);
-
-  const isGameOver = phase === 'gameover';
   const isPaused = phase === 'paused';
 
-  const title = isGameOver ? 'GAME OVER' : isPaused ? 'PAUSED' : 'THREE REACT';
-  const subtitle = isGameOver
-    ? `Collectibles: ${score}`
-    : isPaused
-      ? 'Press ESC to resume'
-      : 'Voxel character demo';
-  const buttonText = isGameOver ? 'PLAY AGAIN' : isPaused ? 'RESUME' : 'START';
+  const title = isPaused ? 'PAUSED' : 'THREE REACT';
+  const subtitle = isPaused ? 'Press ESC to resume' : 'Voxel character demo';
+  const buttonText = isPaused ? 'RESUME' : 'START';
 
   const handleClick = () => {
     if (isPaused) {

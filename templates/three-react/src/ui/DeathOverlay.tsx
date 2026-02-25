@@ -22,24 +22,22 @@ export function DeathOverlay() {
 
   useEffect(() => {
     if (phase !== 'player_dead' || !showPrompt) return;
-    const goToGameOver = () => {
-      setPhase('gameover');
-    };
-    const onKeydown = () => goToGameOver();
+    const goToMenu = () => setPhase('menu');
+    const onKeydown = () => goToMenu();
     const onClick = () => {
       if (useGameStore.getState().lastPointerUpWasAfterDrag) {
         useGameStore.getState().setLastPointerUpWasAfterDrag(false);
         return;
       }
-      goToGameOver();
+      goToMenu();
     };
     window.addEventListener('keydown', onKeydown);
     window.addEventListener('click', onClick);
-    window.addEventListener('touchstart', goToGameOver, { passive: true });
+    window.addEventListener('touchstart', goToMenu, { passive: true });
     return () => {
       window.removeEventListener('keydown', onKeydown);
       window.removeEventListener('click', onClick);
-      window.removeEventListener('touchstart', goToGameOver);
+      window.removeEventListener('touchstart', goToMenu);
     };
   }, [phase, showPrompt, setPhase]);
 

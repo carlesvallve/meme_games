@@ -189,7 +189,7 @@ function saveSettings(): void {
 // ── Store ─────────────────────────────────────────────────────────────
 
 interface GameStore {
-  phase: 'menu' | 'select' | 'playing' | 'paused' | 'player_dead' | 'gameover';
+  phase: 'menu' | 'select' | 'playing' | 'paused' | 'player_dead';
   /** When phase became 'player_dead' (Date.now()); used for cooldown before "Press any key" */
   playerDeadAt: number | null;
   /** Set by Camera on pointer up after drag so death overlay does not treat release-as-click as tap to continue */
@@ -224,6 +224,10 @@ interface GameStore {
   testFloor: string;
   doorChance: number;
   roomLabels: boolean;
+
+  /** True when any settings sub-panel (Scene/Player/Camera/Light) is open; game loop pauses. */
+  settingsPanelOpen: boolean;
+  setSettingsPanelOpen: (v: boolean) => void;
 
   setPhase: (phase: GameStore['phase']) => void;
   setPlayerDeadAt: (at: number | null) => void;
@@ -322,6 +326,9 @@ export const useGameStore = create<GameStore>((set) => ({
   testFloor: saved.testFloor ?? DEFAULT_SCENE_SETTINGS.testFloor,
   doorChance: saved.doorChance ?? DEFAULT_SCENE_SETTINGS.doorChance,
   roomLabels: saved.roomLabels ?? DEFAULT_SCENE_SETTINGS.roomLabels,
+
+  settingsPanelOpen: false,
+  setSettingsPanelOpen: (settingsPanelOpen) => set({ settingsPanelOpen }),
 
   setPhase: (phase) =>
     set((s) =>

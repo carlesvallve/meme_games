@@ -28,7 +28,6 @@ export function UIOverlay() {
       {phase === 'playing' && <SettingsPanel />}
       {phase === 'player_dead' && <DeathOverlay />}
       {phase === 'paused' && <MenuScreen />}
-      {phase === 'gameover' && <MenuScreen />}
       {message && <DialogUI message={message} />}
     </div>
   );
