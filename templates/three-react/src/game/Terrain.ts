@@ -192,6 +192,11 @@ export class Terrain {
     const geo = new THREE.PlaneGeometry(size, size, 64, 64);
     geo.rotateX(-Math.PI / 2);
 
+    // Dungeon modes have their own floors — no water plane needed
+    if (this.preset === 'dungeon' || this.preset === 'rooms' || this.preset === 'voxelDungeon') {
+      return;
+    }
+
     // Scattered / terraced: solid floor plane instead of water
     if (this.preset === 'scattered' || this.preset === 'terraced') {
       const floorMat = new THREE.MeshStandardMaterial({
@@ -956,6 +961,7 @@ export class Terrain {
     mesh.receiveShadow = true;
     this.group.add(mesh);
     this.heightmapMesh = mesh;
+    new Entity(mesh, { layer: Layer.Architecture, radius: groundSize * 0.5, weight: Infinity });
 
     // ── Build grid line overlay ──
     // Wireframe grid + contour rungs. Per-vertex color: black on bright terrain, light gray on dark (cave) so grid is visible.
@@ -2278,6 +2284,7 @@ export class Terrain {
 
     // Dispose old mesh, grid, and ladder visuals
     if (this.heightmapMesh) {
+      (this.heightmapMesh.userData.entity as Entity)?.destroy();
       this.group.remove(this.heightmapMesh);
       this.heightmapMesh.geometry.dispose();
       (this.heightmapMesh.material as THREE.Material).dispose();
