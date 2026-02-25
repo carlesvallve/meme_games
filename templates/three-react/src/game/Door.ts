@@ -150,7 +150,7 @@ export class DoorSystem {
 
     const halfOpening = cellSize / 2;
     const entity = new Entity(group, {
-      layer: Layer.Architecture,
+      layer: Layer.Prop,
       radius: halfOpening,
       weight: Infinity,
     });
@@ -331,7 +331,7 @@ export class DoorSystem {
 
     const entityRadius = halfOpening;
     const entity = new Entity(group, {
-      layer: Layer.Architecture,
+      layer: Layer.Prop,
       radius: entityRadius,
       weight: Infinity,
     });

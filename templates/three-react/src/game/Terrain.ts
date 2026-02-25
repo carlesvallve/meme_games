@@ -13,6 +13,7 @@ import { buildVoxelDungeonCollision, loadVoxelDungeonVisuals } from './VoxelDung
 import { DungeonPropSystem, clearPropCache } from './DungeonProps';
 import { useGameStore } from '../store';
 import { randomPalette, palettes } from './ColorPalettes';
+import { patchRevealMaterial } from './RevealShader';
 import type { TerrainPalette } from './ColorPalettes';
 
 const HALF = 0.25;
@@ -159,6 +160,7 @@ export class Terrain {
   private propSystem: DungeonPropSystem | null = null;
   /** Called when voxel dungeon props are ready; used to register prop chests with ChestSystem */
   private propChestRegistrar: ((list: { position: THREE.Vector3; mesh: THREE.Mesh; entity: Entity; openGeo?: THREE.BufferGeometry }[]) => void) | null = null;
+
 
   constructor(scene: THREE.Scene, preset: TerrainPreset = 'scattered', heightmapStyle: HeightmapStyle = 'rolling', palettePick: string = 'random') {
     this.preset = preset;
@@ -947,6 +949,7 @@ export class Terrain {
       polygonOffsetFactor: 1,
       polygonOffsetUnits: 1,
     });
+    patchRevealMaterial(mat);
 
     const mesh = new THREE.Mesh(geo, mat);
     mesh.castShadow = true;
@@ -1528,6 +1531,7 @@ export class Terrain {
     const color = colors[Math.floor(Math.random() * colors.length)];
     const variation = 0.85 + Math.random() * 0.3;
     const baseColor = new THREE.Color(color).multiplyScalar(variation);
+
     const mat = new THREE.MeshStandardMaterial({
       color: baseColor,
       roughness: 0.85,
@@ -1536,6 +1540,7 @@ export class Terrain {
       polygonOffsetFactor: 1,
       polygonOffsetUnits: 1,
     });
+    // Reveal shader is auto-applied via Architecture entity layer
 
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.set(x, h / 2, z);
@@ -1543,8 +1548,9 @@ export class Terrain {
     mesh.receiveShadow = true;
     this.boxGroup.add(mesh);
 
+    const isWall = h > 0.2;
     const entity = new Entity(mesh, {
-      layer: Layer.Architecture,
+      layer: isWall ? Layer.Architecture : Layer.Prop,
       radius: Math.max(hw, hd),
       weight: Infinity,
     });
@@ -2407,4 +2413,5 @@ export class Terrain {
     }
     return new THREE.Vector3(0, 0, 0);
   }
+
 }

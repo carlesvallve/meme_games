@@ -521,7 +521,7 @@ export class DungeonPropSystem {
             this.parent.add(mesh);
 
             // No entity/collision — wall mounts are decorative
-            const dummyEntity = new Entity(mesh, { layer: Layer.Architecture, radius: 0.01, weight: 0 });
+            const dummyEntity = new Entity(mesh, { layer: Layer.Prop, radius: 0.01, weight: 0 });
             this.props.push({ mesh, entity: dummyEntity, entry, gridCell: { gx: cell.gx, gz: cell.gz } });
             continue;
           }
@@ -578,7 +578,7 @@ export class DungeonPropSystem {
 
           const propScale = entry.scalesWithDungeon ? cellSize : 1;
           const entity = new Entity(mesh, {
-            layer: Layer.Architecture,
+            layer: Layer.Prop,
             radius: entry.radius * propScale,
             weight: entry.destroyable ? 3 : 5,
           });
@@ -646,7 +646,7 @@ export class DungeonPropSystem {
             mesh.castShadow = true;
             this.parent.add(mesh);
 
-            const dummyEntity = new Entity(mesh, { layer: Layer.Architecture, radius: 0.01, weight: 0 });
+            const dummyEntity = new Entity(mesh, { layer: Layer.Prop, radius: 0.01, weight: 0 });
             this.props.push({ mesh, entity: dummyEntity, entry, gridCell: { gx: 0, gz: 0 } });
           } else {
             // No table — place against wall
@@ -668,7 +668,7 @@ export class DungeonPropSystem {
             mesh.castShadow = true;
             this.parent.add(mesh);
 
-            const entity = new Entity(mesh, { layer: Layer.Architecture, radius: entry.radius, weight: 3 });
+            const entity = new Entity(mesh, { layer: Layer.Prop, radius: entry.radius, weight: 3 });
             this.props.push({ mesh, entity, entry, gridCell: { gx: cell.gx, gz: cell.gz } });
           }
         }
@@ -708,7 +708,7 @@ export class DungeonPropSystem {
             this.parent.add(mesh);
 
             // Small items are decorative — no collision entity
-            const dummyEntity = new Entity(mesh, { layer: Layer.Architecture, radius: 0.01, weight: 0 });
+            const dummyEntity = new Entity(mesh, { layer: Layer.Prop, radius: 0.01, weight: 0 });
             this.props.push({ mesh, entity: dummyEntity, entry, gridCell: { gx: 0, gz: 0 } });
           } else {
             // No surfaces available — place on floor as fallback
@@ -724,7 +724,7 @@ export class DungeonPropSystem {
             mesh.castShadow = true;
             this.parent.add(mesh);
 
-            const dummyEntity = new Entity(mesh, { layer: Layer.Architecture, radius: 0.01, weight: 0 });
+            const dummyEntity = new Entity(mesh, { layer: Layer.Prop, radius: 0.01, weight: 0 });
             this.props.push({ mesh, entity: dummyEntity, entry, gridCell: { gx: cell.gx, gz: cell.gz } });
           }
         }
@@ -886,7 +886,7 @@ export class DungeonPropSystem {
       mesh.receiveShadow = true;
       this.parent.add(mesh);
 
-      const dummyEntity = new Entity(mesh, { layer: Layer.Architecture, radius: 0.01, weight: 0 });
+      const dummyEntity = new Entity(mesh, { layer: Layer.Prop, radius: 0.01, weight: 0 });
       this.props.push({ mesh, entity: dummyEntity, entry, gridCell: { gx: cell.gx, gz: cell.gz } });
     }
 

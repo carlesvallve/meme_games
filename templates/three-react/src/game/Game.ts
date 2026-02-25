@@ -19,6 +19,7 @@ import { createDustMotes, createRainEffect, createDebrisEffect } from '../utils/
 import type { ParticleToggles } from '../store';
 import type { ParticleSystem } from '../types';
 import { audioSystem } from '../utils/AudioSystem';
+import { updateReveal, patchSceneArchitecture } from './RevealShader';
 import type { GameInstance } from '../types';
 import { CHARACTER_TEAM_COLORS, getSlots, getCharacterName, rerollRoster, type CharacterType } from './characters';
 import { VOX_HEROES, VOX_ENEMIES } from './VoxCharacterDB';
@@ -545,7 +546,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       onHitstop: (duration) => triggerHitstop(duration),
       onCameraShake: (intensity, duration, dirX, dirZ) => cam.shake(intensity, duration, dirX, dirZ),
     };
-    enemySystem.spawnEnemies(8);
+    enemySystem.spawnEnemies(0);
   }
 
   // Store callbacks
@@ -772,6 +773,25 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       // Update audio listener position for spatial SFX
       const pp = activeCharacter.getPosition();
       audioSystem.setPlayerPosition(pp.x, pp.z);
+
+      // Auto-patch any new Architecture-layer materials (e.g. async-loaded vox doors)
+      patchSceneArchitecture();
+
+      // X-ray reveal: always on for dungeons, raycast-gated for heightmap
+      const playerWorldPos = new THREE.Vector3(pp.x, activeCharacter.mesh.position.y + 0.5, pp.z);
+      const isDungeonPreset = terrain.preset === 'dungeon' || terrain.preset === 'rooms' || terrain.preset === 'voxelDungeon';
+      let isOccluded = isDungeonPreset;
+      if (!isDungeonPreset) {
+        const revealRayDir = new THREE.Vector3().subVectors(playerWorldPos, cam.camera.position).normalize();
+        const revealRay = new THREE.Raycaster(cam.camera.position.clone(), revealRayDir);
+        const camToPlayerDist = cam.camera.position.distanceTo(playerWorldPos);
+        const terrainMesh = terrain.getTerrainMesh();
+        if (terrainMesh) {
+          const hits = revealRay.intersectObject(terrainMesh);
+          isOccluded = hits.some(h => h.distance < camToPlayerDist - 0.5);
+        }
+      }
+      updateReveal(playerWorldPos, cam.camera.position, isOccluded, terrain.preset);
 
       // Sync light preset
       const preset = useGameStore.getState().lightPreset;
