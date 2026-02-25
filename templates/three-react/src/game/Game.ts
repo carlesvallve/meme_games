@@ -653,8 +653,13 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       return;
     }
     cachedInputState = input.update();
-    const { phase, cameraParams, settingsPanelOpen } = useGameStore.getState();
+    const { phase, cameraParams } = useGameStore.getState();
     cam.setParams(cameraParams);
+
+    if (cachedInputState.pause && (phase === 'playing' || phase === 'paused')) {
+      useGameStore.getState().onPauseToggle?.();
+      return;
+    }
 
     // Check for character selection
     const selected = useGameStore.getState().selectedCharacter;
@@ -663,7 +668,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       spawnCharacters(selected);
     }
 
-    if ((phase === 'playing' || phase === 'player_dead') && activeCharacter && !settingsPanelOpen) {
+    if ((phase === 'playing' || phase === 'player_dead') && activeCharacter) {
       const playerChar = activeCharacter;
       // Sync active character's movement params from settings sliders
       syncAllCharacterParams();
@@ -881,11 +886,6 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
 
       // Speech bubbles
       speechSystem.update(dt);
-
-      // Pause on Escape (only while playing, not during death sequence)
-      if (phase === 'playing' && cachedInputState.cancel) {
-        useGameStore.getState().onPauseToggle?.();
-      }
     } else if (phase === 'playing') {
       // No characters yet, still update collectibles visually
       collectibles.update(dt, new THREE.Vector3(9999, 0, 9999));
