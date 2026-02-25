@@ -8,6 +8,7 @@ import { Enemy } from './Enemy';
 import { audioSystem } from '../utils/AudioSystem';
 import { isRangedHeroId } from './CombatConfig';
 import type { GoreSystem } from './GoreSystem';
+import { useGameStore } from '../store';
 
 // ── Character collision constants ────────────────────────────────────
 
@@ -398,6 +399,7 @@ export class EnemySystem {
 
     const r = CHAR_COLLISION_RADIUS;
     const minDist = r * 2;
+    const characterPushEnabled = useGameStore.getState().characterPushEnabled;
 
     // O(n^2) pair-wise push apart — fine for < 50 characters
     for (let i = 0; i < allChars.length; i++) {
@@ -416,10 +418,21 @@ export class EnemySystem {
 
           // Push both apart equally (clamped to half overlap for stability)
           const pushClamped = Math.min(push, overlap * 0.5);
-          a.mesh.position.x -= nx * pushClamped;
-          a.mesh.position.z -= nz * pushClamped;
-          b.mesh.position.x += nx * pushClamped;
-          b.mesh.position.z += nz * pushClamped;
+          if (characterPushEnabled) {
+            a.mesh.position.x -= nx * pushClamped;
+            a.mesh.position.z -= nz * pushClamped;
+            b.mesh.position.x += nx * pushClamped;
+            b.mesh.position.z += nz * pushClamped;
+          } else {
+            // Only push the non-player so the player is never moved by other characters
+            if (a === playerChar) {
+              b.mesh.position.x += nx * pushClamped;
+              b.mesh.position.z += nz * pushClamped;
+            } else {
+              a.mesh.position.x -= nx * pushClamped;
+              a.mesh.position.z -= nz * pushClamped;
+            }
+          }
         }
       }
     }

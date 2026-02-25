@@ -537,6 +537,8 @@ export function SettingsPanel() {
   const setTorchParam = useGameStore((s) => s.setTorchParam);
   const toggleTorch = useGameStore((s) => s.toggleTorch);
   const setLightPreset = useGameStore((s) => s.setLightPreset);
+  const characterPushEnabled = useGameStore((s) => s.characterPushEnabled);
+  const setCharacterPushEnabled = useGameStore((s) => s.setCharacterPushEnabled);
 
   const toggle = (panel: ActivePanel) =>
     setActive((cur) => (cur === panel ? null : panel));
@@ -589,6 +591,24 @@ export function SettingsPanel() {
                   flex: 1,
                   background: (playerParams.showPathDebug ? 'on' : 'off') === val ? '#6af' : '#333',
                   color: (playerParams.showPathDebug ? 'on' : 'off') === val ? '#000' : '#aaa',
+                  margin: 0,
+                }}
+              >
+                {val}
+              </button>
+            ))}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+            <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Character push</span>
+            {(['on', 'off'] as const).map((val) => (
+              <button
+                key={val}
+                onClick={() => setCharacterPushEnabled(val === 'on')}
+                style={{
+                  ...resetBtnStyle,
+                  flex: 1,
+                  background: (characterPushEnabled ? 'on' : 'off') === val ? '#6af' : '#333',
+                  color: (characterPushEnabled ? 'on' : 'off') === val ? '#000' : '#aaa',
                   margin: 0,
                 }}
               >

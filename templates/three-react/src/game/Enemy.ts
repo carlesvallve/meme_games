@@ -24,20 +24,16 @@ export class Enemy extends Character {
     this.hp = 4;
     this.maxHp = 4;
 
-    this.params.speed = 0.5 + Math.random() * 1;
-    this.params.hopHeight = 0.03;
-    this.params.attackReach = 0.5;
-    this.params.attackArcHalf = Math.PI / 3;
-    this.params.attackDamage = 1;
-    this.params.attackCooldown = 1.2;
-    this.params.chaseRange = 8;
-    this.params.knockbackSpeed = 2;
-    this.params.knockbackDecay = 14;
-    this.params.invulnDuration = 0.5;
-    this.params.flashDuration = 0.15;
-    this.params.stunDuration = 0.15;
-    this.params.attackDuration = 0.2;
-    this.params.exhaustDuration = 1.0;
+    // Override only what differs from DEFAULT_CHARACTER_PARAMS (from CharacterParams via super)
+    Object.assign(this.params, {
+      speed: 0.5 + Math.random() * 1,
+      hopHeight: 0.03,
+      attackCooldown: 1.2,
+      chaseRange: 8,
+      knockbackSpeed: 2,
+      invulnDuration: 0.5,
+      stunDuration: 0.15,
+    });
 
     // Remove torch lights (enemies don't carry torches)
     this.torchLight.intensity = 0;
