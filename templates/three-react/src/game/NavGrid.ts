@@ -467,7 +467,7 @@ export class NavGrid {
     const charRadius = 0.25;
     const sampleR = charRadius * 0.5;
     const effectiveSlopeHeight = slopeHeight ?? stepHeight * 2;
-    const maxSlope = (effectiveSlopeHeight / hmCellSize) * 0.5;
+    const maxSlope = (effectiveSlopeHeight / hmCellSize) * 0.4;
     const eps = hmCellSize * 0.5;
 
     // Sample max height at a point + 4 cardinal offsets (matches getTerrainY with radius)

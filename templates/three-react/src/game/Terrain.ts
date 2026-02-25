@@ -412,7 +412,7 @@ export class Terrain {
     const maxHeight = this.heightmapMaxHeight;
     const hmCellSize = groundSize / res;
     const eps = hmCellSize * 0.5;
-    const maxPassableSlope = 1.0;
+    const maxPassableSlope = (0.75 / hmCellSize) * 0.4;
     const waterY = this.getWaterY();
     const verts = res + 1;
 
@@ -784,11 +784,11 @@ export class Terrain {
     const caveFloorMaxY = config.maxHeight * 0.65;
 
     // Slope threshold matching NavGrid passability exactly.
-    // NavGrid: eps = hmCellSize * 0.5, maxSlope = (slopeHeight / navCellSize) * 0.5
-    // We use the same eps and sampleHeightmap for identical gradient computation.
+    // NavGrid: maxSlope = (slopeHeight / hmCellSize) * 0.4
+    // Default slopeHeight=0.75 from CharacterParams.
     const hmCellSize = groundSize / res;
     const eps = hmCellSize * 0.5;
-    const maxPassableSlope = 1.0; // (1.0 / 0.5) * 0.5
+    const maxPassableSlope = (0.75 / hmCellSize) * 0.4;
 
     // First pass: compute positions
     for (let z = 0; z < verts; z++) {
@@ -2081,17 +2081,20 @@ export class Terrain {
     // along the contour, same as sliding along a vertical wall.
     if (this.heightmapData) {
       const sampleR = radius * 0.5;
-      const hmCellSize = this.heightmapGroundSize / this.heightmapRes;
+      const heights = this.heightmapData;
+      const hmRes = this.heightmapRes;
+      const hmGround = this.heightmapGroundSize;
+      const hmCellSize = hmGround / hmRes;
       const effectiveSlopeHeight = slopeHeight ?? stepHeight * 2;
-      const maxSlope = (effectiveSlopeHeight / hmCellSize) * 0.5;
+      const maxSlope = (effectiveSlopeHeight / hmCellSize) * 0.45;
       const eps = hmCellSize * 0.5;
 
-      /** Compute gradient at a position */
+      /** Gradient using plain bilinear sampling — matches NavGrid exactly */
       const gradientAt = (px: number, pz: number): { gx: number; gz: number; mag: number } => {
-        const hL = this.getTerrainY(px - eps, pz, sampleR);
-        const hR = this.getTerrainY(px + eps, pz, sampleR);
-        const hU = this.getTerrainY(px, pz - eps, sampleR);
-        const hD = this.getTerrainY(px, pz + eps, sampleR);
+        const hL = sampleHeightmap(heights, hmRes, hmGround, px - eps, pz);
+        const hR = sampleHeightmap(heights, hmRes, hmGround, px + eps, pz);
+        const hU = sampleHeightmap(heights, hmRes, hmGround, px, pz - eps);
+        const hD = sampleHeightmap(heights, hmRes, hmGround, px, pz + eps);
         const gx = (hR - hL) / (2 * eps);
         const gz = (hD - hU) / (2 * eps);
         return { gx, gz, mag: Math.sqrt(gx * gx + gz * gz) };
