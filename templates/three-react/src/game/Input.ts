@@ -5,6 +5,7 @@ export interface InputState {
   right: boolean;
   action: boolean;
   cancel: boolean;
+  pause: boolean;
 }
 
 export class Input {
@@ -14,10 +15,11 @@ export class Input {
    * Survives across frames (including hitstop) until the game actually reads it.
    */
   private actionQueued = false;
+  private pauseQueued = false;
   private state: InputState = {
     forward: false, backward: false,
     left: false, right: false,
-    action: false, cancel: false,
+    action: false, cancel: false, pause: false,
   };
 
   private touchStartX = 0;
@@ -35,8 +37,10 @@ export class Input {
       this.keys[e.code] = true;
       if (e.code === 'Space' || e.code === 'KeyF') {
         this.actionQueued = true;
-        // Prevent Space from activating focused UI buttons
         e.preventDefault();
+      }
+      if (e.code === 'KeyP' || e.code === 'Escape') {
+        this.pauseQueued = true;
       }
     };
     this.onKeyUp = (e: KeyboardEvent) => {
@@ -88,8 +92,9 @@ export class Input {
     this.state.right = !!(this.keys['KeyD'] || this.keys['ArrowRight']);
     this.state.action = this.actionQueued;
     this.state.cancel = !!this.keys['Escape'];
-    // Clear the queue — it's been read
+    this.state.pause = this.pauseQueued;
     this.actionQueued = false;
+    this.pauseQueued = false;
     return { ...this.state };
   }
 
