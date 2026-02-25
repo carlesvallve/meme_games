@@ -219,6 +219,12 @@ function ScenePanel() {
   const setDoorChance = useGameStore((s) => s.setDoorChance);
   const roomLabels = useGameStore((s) => s.roomLabels);
   const setRoomLabels = useGameStore((s) => s.setRoomLabels);
+  const natureEnabled = useGameStore((s) => s.natureEnabled);
+  const setNatureEnabled = useGameStore((s) => s.setNatureEnabled);
+  const useBiomes = useGameStore((s) => s.useBiomes);
+  const setUseBiomes = useGameStore((s) => s.setUseBiomes);
+  const debugBiomes = useGameStore((s) => s.debugBiomes);
+  const setDebugBiomes = useGameStore((s) => s.setDebugBiomes);
   const propCategories = PROP_CATEGORIES;
   const remesh = useGameStore((s) => s.onRemesh);
   const randomizePalette = useGameStore((s) => s.onRandomizePalette);
@@ -412,6 +418,46 @@ function ScenePanel() {
             {roomLabels ? 'On' : 'Off'}
           </button>
         </div>
+      )}
+
+      {/* Nature toggle — only for heightmap-based terrains */}
+      {(terrainPreset === 'heightmap' || terrainPreset === 'terraced') && (
+        <>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+            <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Nature</span>
+            <button
+              type="button"
+              onClick={() => setNatureEnabled(!natureEnabled)}
+              style={{ ...btnStyle(natureEnabled), flex: 1 }}
+            >
+              {natureEnabled ? 'On' : 'Off'}
+            </button>
+          </div>
+          {natureEnabled && (
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Biomes</span>
+                <button
+                  type="button"
+                  onClick={() => setUseBiomes(!useBiomes)}
+                  style={{ ...btnStyle(useBiomes), flex: 1 }}
+                >
+                  {useBiomes ? 'On' : 'Off'}
+                </button>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Debug</span>
+                <button
+                  type="button"
+                  onClick={() => setDebugBiomes(!debugBiomes)}
+                  style={{ ...btnStyle(debugBiomes), flex: 1 }}
+                >
+                  {debugBiomes ? 'On' : 'Off'}
+                </button>
+              </div>
+            </>
+          )}
+        </>
       )}
 
       {/* Palette dropdown */}

@@ -109,6 +109,9 @@ export const DEFAULT_SCENE_SETTINGS = {
   testFloor: '' as string, // empty = random ground tiles, tile id = use only that
   doorChance: 0.7,
   roomLabels: true, // voxelDungeon: show room name labels (e.g. "Barracks")
+  natureEnabled: true,
+  useBiomes: true,
+  debugBiomes: false,
 };
 
 // ── localStorage persistence ──────────────────────────────────────────
@@ -133,6 +136,9 @@ interface SavedSettings {
   testFloor?: string;
   doorChance?: number;
   roomLabels?: boolean;
+  natureEnabled?: boolean;
+  useBiomes?: boolean;
+  debugBiomes?: boolean;
   characterPushEnabled?: boolean;
   particleToggles?: ParticleToggles;
 }
@@ -165,6 +171,9 @@ function saveSettings(): void {
     testFloor: s.testFloor,
     doorChance: s.doorChance,
     roomLabels: s.roomLabels,
+    natureEnabled: s.natureEnabled,
+    useBiomes: s.useBiomes,
+    debugBiomes: s.debugBiomes,
     characterPushEnabled: s.characterPushEnabled,
     particleToggles: s.particleToggles,
   };
@@ -210,6 +219,12 @@ interface GameStore {
   testFloor: string;
   doorChance: number;
   roomLabels: boolean;
+  natureEnabled: boolean;
+  setNatureEnabled: (on: boolean) => void;
+  useBiomes: boolean;
+  setUseBiomes: (on: boolean) => void;
+  debugBiomes: boolean;
+  setDebugBiomes: (on: boolean) => void;
 
   /** If true, characters push each other apart when overlapping; if false, only the non-player is pushed (player stays put). */
   characterPushEnabled: boolean;
@@ -316,6 +331,12 @@ export const useGameStore = create<GameStore>((set) => ({
   testFloor: saved.testFloor ?? DEFAULT_SCENE_SETTINGS.testFloor,
   doorChance: saved.doorChance ?? DEFAULT_SCENE_SETTINGS.doorChance,
   roomLabels: saved.roomLabels ?? DEFAULT_SCENE_SETTINGS.roomLabels,
+  natureEnabled: saved.natureEnabled ?? DEFAULT_SCENE_SETTINGS.natureEnabled,
+  setNatureEnabled: (natureEnabled) => set({ natureEnabled }),
+  useBiomes: saved.useBiomes ?? DEFAULT_SCENE_SETTINGS.useBiomes,
+  setUseBiomes: (useBiomes) => set({ useBiomes }),
+  debugBiomes: saved.debugBiomes ?? DEFAULT_SCENE_SETTINGS.debugBiomes,
+  setDebugBiomes: (debugBiomes) => set({ debugBiomes }),
 
   characterPushEnabled: saved.characterPushEnabled ?? true,
   setCharacterPushEnabled: (characterPushEnabled) => set({ characterPushEnabled }),

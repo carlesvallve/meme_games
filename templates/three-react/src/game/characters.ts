@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { VOX_HEROES, type VoxCharEntry } from './VoxCharacterDB';
+import { ALL_VOX_CHARACTERS, type VoxCharEntry } from './VoxCharacterDB';
 
 // ── Character slots ──
 // One slot per hero; all VOX_HEROES are shown on the start screen grid.
@@ -14,11 +14,12 @@ const ALL_SLOTS: CharacterType[] = [
 ];
 
 // ── VOX Roster ──
-// All heroes in order; each slot maps to one VOX_HEROES entry.
+// Each slot maps to a random character from the full roster (heroes + monsters).
 
 function pickRoster(): Record<CharacterType, VoxCharEntry> {
+  const shuffled = [...ALL_VOX_CHARACTERS].sort(() => Math.random() - 0.5);
   return Object.fromEntries(
-    ALL_SLOTS.map((slot, i) => [slot, VOX_HEROES[i]]),
+    ALL_SLOTS.map((slot, i) => [slot, shuffled[i % shuffled.length]]),
   ) as Record<CharacterType, VoxCharEntry>;
 }
 
