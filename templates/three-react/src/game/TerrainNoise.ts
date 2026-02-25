@@ -838,11 +838,11 @@ function ensureConnectivity(
           const rdz = lowIsA ? dz : -dz;
 
           // Check room: ramp extends backward from cliff into low terrace
-          const rampLen = Math.max(3, Math.ceil(heightDiff / RAMP_SLOPE));
-          const backX = lowX - rdx * (rampLen + 6); // max pushBack(4) + pad(2)
-          const backZ = lowZ - rdz * (rampLen + 6);
-          const fwdX = lowX + rdx * 2; // pad past cliff
-          const fwdZ = lowZ + rdz * 2;
+          const estSlopeLen = Math.max(4, Math.ceil(heightDiff / RAMP_SLOPE) + 3);
+          const backX = lowX - rdx * (estSlopeLen + 1);
+          const backZ = lowZ - rdz * (estSlopeLen + 1);
+          const fwdX = lowX + rdx * 1;
+          const fwdZ = lowZ + rdz * 1;
           if (backX < 1 || backX >= verts - 1 || backZ < 1 || backZ >= verts - 1 ||
               fwdX < 1 || fwdX >= verts - 1 || fwdZ < 1 || fwdZ >= verts - 1) continue;
 
@@ -872,66 +872,53 @@ function ensureConnectivity(
 
     if (bestScore === Infinity) break; // no valid crossing found
 
-    // Ramp geometry
+    // Ramp geometry — slope spans the full length (no flat dead zone before the climb).
     const heightDiff = bestHighH - bestLowH;
-    const rampLen = Math.max(3, Math.ceil(heightDiff / RAMP_SLOPE));
     const perpX = -bestDirZ;
     const perpZ = bestDirX;
-    const PAD = 2; // flat padding at entry/exit
+    const PAD = 1; // small flat padding at entry/exit
 
-    // Push the ramp start AWAY from the wall, back into the low terrace.
-    // This makes the ramp "grow" from the low side up to the cliff rather than
-    // cutting into the high side. Random offset 2-4 cells for variety.
-    const pushBack = 2 + (iter % 3); // 2, 3, or 4 cells back from cliff edge
+    // Ramp extends from cliff edge back into the low terrace.
+    // Random extra length 1-3 cells for variety + gentler slope.
+    const extraLen = 1 + (iter % 3);
+    const slopeLen = Math.max(4, Math.ceil(heightDiff / RAMP_SLOPE) + extraLen);
+    const totalLen = PAD + slopeLen + PAD;
 
-    // Ramp start: pushBack + rampLen cells behind the cliff on the low side
-    // [PAD flat low] [rampLen slope] [PAD flat high past cliff]
-    const startX = bestLowX - bestDirX * (rampLen + PAD + pushBack);
-    const startZ = bestLowZ - bestDirZ * (rampLen + PAD + pushBack);
+    const startX = bestLowX - bestDirX * (slopeLen + PAD);
+    const startZ = bestLowZ - bestDirZ * (slopeLen + PAD);
     const endX = bestLowX + bestDirX * PAD;
     const endZ = bestLowZ + bestDirZ * PAD;
 
-    // Bounds check
     const inBounds = (bx: number, bz: number) =>
       bx >= 0 && bx < verts && bz >= 0 && bz < verts;
     if (!inBounds(startX, startZ) || !inBounds(endX, endZ)) break;
 
-    // Sample actual ground height at ramp start — the cliff-edge bestLowH may be
-    // elevated by rolling noise above the true terrace floor.
+    // Sample actual ground height at ramp start
     const actualLowH = grid[startZ * verts + startX];
     const rampLowH = Math.min(bestLowH, actualLowH);
-
-    // Recompute ramp length with corrected height diff
-    const actualDiff = bestHighH - rampLowH;
-    const actualRampLen = Math.max(3, Math.ceil(actualDiff / RAMP_SLOPE));
-    const totalLen = PAD + pushBack + actualRampLen + PAD;
 
     // Use noise to vary ramp width per row and add height jitter for organic look
     const rampNoisePerm = buildPerm(seed + 7777 + iter * 31);
 
     // Randomly pick ramp or stairs mode per connection
-    // Scale stair step to terrace level height so stairs are always climbable
     const terraceStep = maxHeight / Math.max(1, _quantizeStep > 0 ? Math.round(maxHeight / _quantizeStep) : 6);
-    const STAIR_STEP = Math.min(0.25, terraceStep * 0.8);  // vertical rise per stair step
-    const STAIR_TREAD = 2;   // cells per flat tread
+    const STAIR_STEP = Math.min(0.25, terraceStep * 0.8);
+    const STAIR_TREAD = 2;
     const useStairs = valueNoise2D(bestLowX * 0.3, bestLowZ * 0.3, rampNoisePerm) > 0.5;
 
     for (let i = 0; i <= totalLen; i++) {
       let h: number;
-      const slopeStart = PAD + pushBack;
-      if (i < slopeStart) {
+      if (i < PAD) {
         h = rampLowH;
-      } else if (i >= slopeStart + actualRampLen) {
+      } else if (i >= PAD + slopeLen) {
         h = bestHighH;
       } else if (useStairs) {
-        // Blocky stairs: flat treads of STAIR_TREAD cells, then a sharp 0.5m jump
-        const cellsIntoSlope = i - slopeStart;
+        const cellsIntoSlope = i - PAD;
         const stepIndex = Math.floor(cellsIntoSlope / STAIR_TREAD);
         h = rampLowH + stepIndex * STAIR_STEP;
         h = Math.min(h, bestHighH);
       } else {
-        // Smooth ramp: linear interpolation
-        const t = (i - slopeStart) / Math.max(1, actualRampLen - 1);
+        const t = (i - PAD) / Math.max(1, slopeLen - 1);
         h = rampLowH + (bestHighH - rampLowH) * t;
       }
       const rx = startX + bestDirX * i;
@@ -963,7 +950,7 @@ function ensureConnectivity(
       }
     }
 
-    console.log(`[Ramp ${iter + 1}] ${heightDiff.toFixed(1)}m, ${rampLen} slope cells, pushBack=${pushBack} at (${bestLowX},${bestLowZ}) dir=(${bestDirX},${bestDirZ})`);
+    console.log(`[Ramp ${iter + 1}] ${heightDiff.toFixed(1)}m, ${slopeLen} slope cells at (${bestLowX},${bestLowZ}) dir=(${bestDirX},${bestDirZ})`);
   }
 
   return allRampCells;
