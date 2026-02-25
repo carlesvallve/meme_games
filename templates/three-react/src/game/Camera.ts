@@ -13,6 +13,8 @@ export interface CameraOptions {
   followSpeed?: number;
   /** Called when distance changes (scroll/pinch) so store can stay in sync */
   onDistanceChange?: (distance: number) => void;
+  /** Called when pointer up after a confirmed drag (so UI can ignore the following click as "tap") */
+  onPointerUpAfterDrag?: () => void;
 }
 
 const DRAG_THRESHOLD = 8; // px before considering it a real drag (fixes mobile)
@@ -83,6 +85,7 @@ export class Camera {
       angleY = 45,
       followSpeed = 8,
       onDistanceChange,
+      onPointerUpAfterDrag,
     } = opts;
 
     this.camera = new THREE.PerspectiveCamera(fov, aspect, near, far);
@@ -141,6 +144,7 @@ export class Camera {
     this.onPointerUp = () => {
       this.activePointers = Math.max(0, this.activePointers - 1);
       if (this.activePointers === 0) {
+        if (this.dragConfirmed) onPointerUpAfterDrag?.();
         this.isDragging = false;
         this.dragConfirmed = false;
       }

@@ -212,7 +212,7 @@ const HEIGHTMAP_STYLES: Record<HeightmapStyle, HeightmapStyleConfig> = {
   },
   terraces: {
     resolution: 72,
-    maxHeight: 4.0,
+    maxHeight: 6.0,
     octaves: 2,
     lacunarity: 2.0,
     persistence: 0.35,
@@ -224,7 +224,7 @@ const HEIGHTMAP_STYLES: Record<HeightmapStyle, HeightmapStyleConfig> = {
   },
   islands: {
     resolution: 72,
-    maxHeight: 3.5,
+    maxHeight: 7.0,
     octaves: 5,
     lacunarity: 2.0,
     persistence: 0.55,
@@ -236,7 +236,7 @@ const HEIGHTMAP_STYLES: Record<HeightmapStyle, HeightmapStyleConfig> = {
   },
   caves: {
     resolution: 72,
-    maxHeight: 4.0,
+    maxHeight: 5.5,
     octaves: 3,
     lacunarity: 2.0,
     persistence: 0.45,

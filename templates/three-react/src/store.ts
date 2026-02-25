@@ -189,7 +189,11 @@ function saveSettings(): void {
 // ── Store ─────────────────────────────────────────────────────────────
 
 interface GameStore {
-  phase: 'menu' | 'select' | 'playing' | 'paused' | 'gameover';
+  phase: 'menu' | 'select' | 'playing' | 'paused' | 'player_dead' | 'gameover';
+  /** When phase became 'player_dead' (Date.now()); used for cooldown before "Press any key" */
+  playerDeadAt: number | null;
+  /** Set by Camera on pointer up after drag so death overlay does not treat release-as-click as tap to continue */
+  lastPointerUpWasAfterDrag: boolean;
   score: number;
   hp: number;
   maxHp: number;
@@ -222,6 +226,8 @@ interface GameStore {
   roomLabels: boolean;
 
   setPhase: (phase: GameStore['phase']) => void;
+  setPlayerDeadAt: (at: number | null) => void;
+  setLastPointerUpWasAfterDrag: (v: boolean) => void;
   setScore: (score: number) => void;
   setHP: (hp: number, maxHp: number) => void;
   setFloor: (floor: number) => void;
@@ -275,6 +281,8 @@ const saved = loadSettings();
 
 export const useGameStore = create<GameStore>((set) => ({
   phase: 'menu',
+  playerDeadAt: null,
+  lastPointerUpWasAfterDrag: false,
   score: 0,
   hp: 100,
   maxHp: 100,
@@ -315,7 +323,14 @@ export const useGameStore = create<GameStore>((set) => ({
   doorChance: saved.doorChance ?? DEFAULT_SCENE_SETTINGS.doorChance,
   roomLabels: saved.roomLabels ?? DEFAULT_SCENE_SETTINGS.roomLabels,
 
-  setPhase: (phase) => set({ phase }),
+  setPhase: (phase) =>
+    set((s) =>
+      phase === 'player_dead'
+        ? { phase: 'player_dead' as const, playerDeadAt: Date.now() }
+        : { phase, playerDeadAt: null },
+    ),
+  setPlayerDeadAt: (playerDeadAt) => set({ playerDeadAt }),
+  setLastPointerUpWasAfterDrag: (lastPointerUpWasAfterDrag) => set({ lastPointerUpWasAfterDrag }),
   setScore: (score) => set({ score }),
   setHP: (hp, maxHp) => set({ hp, maxHp }),
   setFloor: (floor) => set({ floor }),
