@@ -33,6 +33,12 @@ export class PlayerControl extends Behavior {
   }
 
   update(agent: BehaviorAgent, dt: number): BehaviorStatus {
+    // Clear movement state when player just took damage so we don't walk (e.g. grid settle) after hit
+    if (agent.consumeJustTookDamage?.()) {
+      this.settleTarget = null;
+      this.currentSpeed = 0;
+    }
+
     // If climbing, bypass WASD movement
     if (agent.isClimbing()) {
       agent.updateClimb(dt);
@@ -121,7 +127,7 @@ export class PlayerControl extends Behavior {
       const currentHopHalf = agent.applyHop(params.hopHeight);
       // applyHop emits SFX for player-controlled via the Character's overridden method
     } else if (params.movementMode === 'grid' && this.updateSettle(agent, dt, params)) {
-      // Settling to grid center — handled inside updateSettle
+      // Settling to grid center (only when we were moving with intent — not when pushed)
     } else if (this.currentSpeed > 0.1) {
       // Decelerate to stop (free mode or grid mode without settle target)
       this.currentSpeed = Math.max(0, this.currentSpeed - DECEL_RATE * dt);
@@ -136,12 +142,13 @@ export class PlayerControl extends Behavior {
     return 'running';
   }
 
-  /** Glide to nearest grid cell center with deceleration. Returns true while settling. */
+  /** Glide to nearest grid cell center with deceleration. Only when we were moving with intent (player released keys), not when pushed. */
   private updateSettle(agent: BehaviorAgent, dt: number, params: MovementParams): boolean {
     const navGrid = this.ctx.navGrid;
 
-    // First frame with no input: pick the settle target
+    // Only start a settle when we had intentional movement (player released keys after moving). If we're idle and got pushed, don't snap.
     if (!this.settleTarget) {
+      if (this.currentSpeed <= 0.1) return false; // wasn't moving with intent — e.g. pushed by monsters — don't walk to grid
       const snapped = navGrid.snapToGrid(agent.getX(), agent.getZ());
       this.settleTarget = snapped;
       this.settleSpeed = this.currentSpeed;

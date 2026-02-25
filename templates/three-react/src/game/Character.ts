@@ -171,7 +171,7 @@ export class Character implements BehaviorAgent {
   private static readonly VOX_FPS: Record<string, number> = { 
     idle: 2.5, 
     walk: 10, 
-    action: 9 
+    action: 10 
   };
 
   /** Per-character movement parameters (mutable, shared by reference with behaviors) */
@@ -194,11 +194,15 @@ export class Character implements BehaviorAgent {
   isEnemy = false;
   knockbackVX = 0;
   knockbackVZ = 0;
+  /** Set true in takeDamage(); consumed by PlayerControl to clear settle/speed so we don't walk after hit. */
+  private justTookDamage = false;
   invulnTimer = 0;
   flashTimer = 0;
   attackTimer = 0;
   isAttacking = false;
   attackJustStarted = false;
+  /** True after we've applied hit this attack (one hit per attack, at climax). */
+  private attackHitApplied = false;
   attackCount = 0;
   exhaustTimer = 0;
   /** Time since last attack — used to reset attackCount after a pause */
@@ -643,6 +647,19 @@ export class Character implements BehaviorAgent {
 
   // ── Combat methods ───────────────────────────────────────────────
 
+  /** Hide mesh and HP bar (e.g. after death so only gore remains). Position/camera target still valid. */
+  hideBody(): void {
+    this.mesh.visible = false;
+    if (this.hpBarGroup) this.hpBarGroup.visible = false;
+  }
+
+  /** Consume and clear justTookDamage flag (used by PlayerControl to clear settle/speed after hit). */
+  consumeJustTookDamage(): boolean {
+    const v = this.justTookDamage;
+    this.justTookDamage = false;
+    return v;
+  }
+
   /** Take damage from an attacker position. Returns false if invulnerable. */
   takeDamage(amount: number, fromX: number, fromZ: number): boolean {
     if (!this.isAlive || this.invulnTimer > 0) return false;
@@ -652,6 +669,7 @@ export class Character implements BehaviorAgent {
       this.hp = 0;
       this.isAlive = false;
     }
+    this.justTookDamage = true;
 
     // Knockback impulse away from attacker
     const dx = this.mesh.position.x - fromX;
@@ -708,6 +726,30 @@ export class Character implements BehaviorAgent {
     this.playActionAnim();
 
     return true;
+  }
+
+  /** Fraction of attack duration for time-based fallback when VOX action has no frames (same for all). */
+  private static readonly MELEE_HIT_WINDOW_RATIO = 0.5;
+
+  /** True when in the melee hit window (climax). Prefer last frame of action animation so it's relative to animation speed; fallback to time. */
+  isInAttackHitWindow(): boolean {
+    if (!this.isAttacking) return false;
+    if (this.voxData?.frames['action']?.length) {
+      const actionFrames = this.voxData.frames['action'];
+      const climaxFrameIndex = actionFrames.length - 1;
+      return this.voxAnimState === 'action' && this.voxFrameIndex === climaxFrameIndex;
+    }
+    return this.attackTimer <= this.params.attackDuration * Character.MELEE_HIT_WINDOW_RATIO;
+  }
+
+  /** Call after applying attack hit so we only register one hit per attack. */
+  markAttackHitApplied(): void {
+    this.attackHitApplied = true;
+  }
+
+  /** True when we can apply melee hit (in hit window and not yet applied this attack). */
+  canApplyAttackHit(): boolean {
+    return this.isInAttackHitWindow() && !this.attackHitApplied;
   }
 
   /** Play VOX action animation (once, then revert) */
@@ -784,6 +826,7 @@ export class Character implements BehaviorAgent {
       if (this.attackTimer <= 0) {
         this.isAttacking = false;
         this.attackTimer = 0;
+        this.attackHitApplied = false;
       }
     }
 

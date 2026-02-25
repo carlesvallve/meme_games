@@ -262,41 +262,43 @@ export class EnemySystem {
       const px = playerChar.mesh.position.x;
       const pz = playerChar.mesh.position.z;
 
-      // Slash swoosh SFX + visual arc (once per attack, on first frame)
+      // Slash swoosh SFX + visual arc (once per attack, on first frame — wind-up pose)
       if (playerChar.attackJustStarted) {
         playerChar.attackJustStarted = false;
         audioSystem.sfx('slash');
         if (showSlashEffect) this.slashArcs.push(createSlashArc(playerChar.mesh));
       }
 
-      for (const enemy of this.enemies) {
-        if (!enemy.isAlive || hitThisFrame.has(enemy)) continue;
-        if (isInAttackArc(px, playerChar.groundY, pz, playerChar.facing, enemy.mesh.position.x, enemy.groundY, enemy.mesh.position.z, playerChar.params.attackReach, playerChar.params.attackArcHalf)) {
-          const hit = enemy.takeDamage(this.playerDamage, px, pz);
-          if (hit) {
-            hitThisFrame.add(enemy);
-            const ex = enemy.mesh.position.x;
-            const ey = enemy.mesh.position.y;
-            const ez = enemy.mesh.position.z;
-            this.damageNumbers.push(createDamageNumber(this.scene, ex, ey + 0.3, ez, this.playerDamage));
-            audioSystem.sfxAt('fleshHit', ex, ez);
+      // Melee hit only during climax (second half of attack), one hit per attack
+      if (playerChar.canApplyAttackHit()) {
+        for (const enemy of this.enemies) {
+          if (!enemy.isAlive || hitThisFrame.has(enemy)) continue;
+          if (isInAttackArc(px, playerChar.groundY, pz, playerChar.facing, enemy.mesh.position.x, enemy.groundY, enemy.mesh.position.z, playerChar.params.attackReach, playerChar.params.attackArcHalf)) {
+            const hit = enemy.takeDamage(this.playerDamage, px, pz);
+            if (hit) {
+              playerChar.markAttackHitApplied();
+              hitThisFrame.add(enemy);
+              const ex = enemy.mesh.position.x;
+              const ey = enemy.mesh.position.y;
+              const ez = enemy.mesh.position.z;
+              this.damageNumbers.push(createDamageNumber(this.scene, ex, ey + 0.3, ez, this.playerDamage));
+              audioSystem.sfxAt('fleshHit', ex, ez);
 
-            // Hit impact feel: hitstop + camera shake + sparks
-            const hdx = ex - px, hdz = ez - pz;
-            const hdist = Math.sqrt(hdx * hdx + hdz * hdz) || 1;
-            const hitDirX = hdx / hdist, hitDirZ = hdz / hdist;
+              const hdx = ex - px, hdz = ez - pz;
+              const hdist = Math.sqrt(hdx * hdx + hdz * hdz) || 1;
+              const hitDirX = hdx / hdist, hitDirZ = hdz / hdist;
 
-            this.hitSparks.push(createHitSparks(this.scene, ex, ey, ez, hitDirX, hitDirZ));
+              this.hitSparks.push(createHitSparks(this.scene, ex, ey, ez, hitDirX, hitDirZ));
 
-            // Blood splash on hit (splatter on attacker)
-            if (this.goreSystem) {
-              this.goreSystem.spawnBloodSplash(ex, ey, ez, enemy.groundY, playerChar.mesh);
-            }
+              if (this.goreSystem) {
+                this.goreSystem.spawnBloodSplash(ex, ey, ez, enemy.groundY, playerChar.mesh);
+              }
 
-            if (this.impactCallbacks) {
-              const isKill = !enemy.isAlive;
-              this.impactCallbacks.onHitstop(isKill ? 0.1 : 0.06);
-              this.impactCallbacks.onCameraShake(isKill ? 0.2 : 0.12, isKill ? 0.2 : 0.12, hitDirX, hitDirZ);
+              if (this.impactCallbacks) {
+                const isKill = !enemy.isAlive;
+                this.impactCallbacks.onHitstop(isKill ? 0.1 : 0.06);
+                this.impactCallbacks.onCameraShake(isKill ? 0.2 : 0.12, isKill ? 0.2 : 0.12, hitDirX, hitDirZ);
+              }
             }
           }
         }
@@ -325,28 +327,36 @@ export class EnemySystem {
       enemy.setChaseTarget(playerChar);
       enemy.update(dt);
 
-      // Enemy attack check
+      // Enemy melee: start on wantsToAttack (wind-up), evaluate hit only at climax
       if (enemy.wantsToAttack() && enemy.stunTimer <= 0) {
         const started = enemy.startAttack();
         if (started) {
-          // Slash arc + SFX for enemy attacks
           audioSystem.sfxAt('slash', enemy.mesh.position.x, enemy.mesh.position.z);
           if (showSlashEffect) this.slashArcs.push(createSlashArc(enemy.mesh));
-
-          const ex = enemy.mesh.position.x;
-          const ez = enemy.mesh.position.z;
-          if (isInAttackArc(ex, enemy.groundY, ez, enemy.facing, playerChar.mesh.position.x, playerChar.groundY, playerChar.mesh.position.z, enemy.params.attackReach, enemy.params.attackArcHalf)) {
-            const hit = playerChar.takeDamage(enemy.params.attackDamage, ex, ez);
-            if (hit) {
-              onPlayerHit(enemy.params.attackDamage);
-              audioSystem.sfxAt('fleshHit', playerChar.mesh.position.x, playerChar.mesh.position.z);
-              if (this.impactCallbacks) {
-                const pdx = playerChar.mesh.position.x - ex;
-                const pdz = playerChar.mesh.position.z - ez;
-                const pdist = Math.sqrt(pdx * pdx + pdz * pdz) || 1;
-                this.impactCallbacks.onHitstop(0.08);
-                this.impactCallbacks.onCameraShake(0.18, 0.15, pdx / pdist, pdz / pdist);
-              }
+        }
+      }
+      if (enemy.isAttacking && enemy.canApplyAttackHit()) {
+        const ex = enemy.mesh.position.x;
+        const ez = enemy.mesh.position.z;
+        if (isInAttackArc(ex, enemy.groundY, ez, enemy.facing, playerChar.mesh.position.x, playerChar.groundY, playerChar.mesh.position.z, enemy.params.attackReach, enemy.params.attackArcHalf)) {
+          const hit = playerChar.takeDamage(enemy.params.attackDamage, ex, ez);
+          if (hit) {
+            enemy.markAttackHitApplied();
+            onPlayerHit(enemy.params.attackDamage);
+            const px = playerChar.mesh.position.x;
+            const py = playerChar.mesh.position.y;
+            const pz = playerChar.mesh.position.z;
+            audioSystem.sfxAt('fleshHit', px, pz);
+            const hitDirX = px - ex;
+            const hitDirZ = pz - ez;
+            const hitDist = Math.sqrt(hitDirX * hitDirX + hitDirZ * hitDirZ) || 1;
+            this.hitSparks.push(createHitSparks(this.scene, px, py, pz, hitDirX / hitDist, hitDirZ / hitDist));
+            if (this.goreSystem) {
+              this.goreSystem.spawnBloodSplash(px, py, pz, playerChar.groundY, enemy.mesh);
+            }
+            if (this.impactCallbacks) {
+              this.impactCallbacks.onHitstop(0.08);
+              this.impactCallbacks.onCameraShake(0.18, 0.15, hitDirX / hitDist, hitDirZ / hitDist);
             }
           }
         }

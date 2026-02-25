@@ -11,6 +11,8 @@ export interface BehaviorAgent {
   move(dx: number, dz: number, speed: number, stepHeight: number, capsuleRadius: number, dt: number, slopeHeight?: number, skipFacing?: boolean): boolean;
   applyHop(hopHeight: number): number;
   updateIdle(dt: number): void;
+  /** If implemented, called once after agent took damage (so behavior can clear settle/speed and avoid walk-after-hit). */
+  consumeJustTookDamage?(): boolean;
   /** Start climbing a ladder */
   startClimb(ladder: LadderDef, direction: 'up' | 'down'): void;
   /** Update climbing animation, returns true while climbing */

@@ -1,6 +1,7 @@
 import { useGameStore } from '../store';
 import { HUD } from './HUD';
 import { MenuScreen } from './MenuScreen';
+import { DeathOverlay } from './DeathOverlay';
 import { DialogUI } from './DialogUI';
 import { CharacterSelect } from './CharacterSelect';
 import { SpeechBubbles } from './SpeechBubbles';
@@ -25,6 +26,7 @@ export function UIOverlay() {
       {(phase === 'playing' || phase === 'paused') && <HUD />}
       {phase === 'playing' && <SpeechBubbles />}
       {phase === 'playing' && <SettingsPanel />}
+      {phase === 'player_dead' && <DeathOverlay />}
       {phase === 'paused' && <MenuScreen />}
       {phase === 'gameover' && <MenuScreen />}
       {message && <DialogUI message={message} />}

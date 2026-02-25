@@ -84,6 +84,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     angleX: -35,
     angleY: 45,
     onDistanceChange: (d) => useGameStore.getState().setCameraParam('distance', d),
+    onPointerUpAfterDrag: () => useGameStore.getState().setLastPointerUpWasAfterDrag(true),
   });
 
   // Input
@@ -658,24 +659,25 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       spawnCharacters(selected);
     }
 
-    if (phase === 'playing' && activeCharacter) {
+    if ((phase === 'playing' || phase === 'player_dead') && activeCharacter) {
+      const playerChar = activeCharacter;
       // Sync active character's movement params from settings sliders
       syncAllCharacterParams();
 
-      // Player attack on Space (before character update so attack state is set for this frame)
-      if (cachedInputState.action) {
-        const heroId = activeCharacter.voxEntry?.id ?? '';
+      // Player attack on Space only while alive (before character update so attack state is set for this frame)
+      if (phase === 'playing' && cachedInputState.action) {
+        const heroId = playerChar.voxEntry?.id ?? '';
         const projConfig = getProjectileConfig(heroId);
         if (projConfig && projectileSystem) {
           // Ranged: play attack anim + fire from muzzle (spawn point)
-          activeCharacter.startAttack();
-          const pos = activeCharacter.getPosition();
-          const facing = activeCharacter.facing;
+          playerChar.startAttack();
+          const pos = playerChar.getPosition();
+          const facing = playerChar.facing;
           const muzzle = getMuzzleOffset(heroId);
           const faceDirX = -Math.sin(facing);
           const faceDirZ = -Math.cos(facing);
           const spawnX = pos.x + faceDirX * muzzle.forward;
-          const spawnY = activeCharacter.groundY + muzzle.up;
+          const spawnY = playerChar.groundY + muzzle.up;
           const spawnZ = pos.z + faceDirZ * muzzle.forward;
           projectileSystem.fireProjectile(
             heroId,
@@ -691,14 +693,14 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
         } else {
           // Melee: auto-aim snap toward nearest enemy, then attack
           if (enemySystem) {
-            const pos = activeCharacter.getPosition();
-            const aimTarget = findMeleeAimTarget(pos.x, pos.z, activeCharacter.facing, enemySystem.getEnemies());
+            const pos = playerChar.getPosition();
+            const aimTarget = findMeleeAimTarget(pos.x, pos.z, playerChar.facing, enemySystem.getEnemies());
             if (aimTarget !== null) {
-              activeCharacter.facing = aimTarget;
-              activeCharacter.mesh.rotation.y = aimTarget;
+              playerChar.facing = aimTarget;
+              playerChar.mesh.rotation.y = aimTarget;
             }
           }
-          activeCharacter.startAttack();
+          playerChar.startAttack();
         }
       }
 
@@ -713,12 +715,19 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       // Enemy system
       if (enemySystem) {
         const showSlashEffect = useGameStore.getState().playerParams.showSlashEffect;
-        enemySystem.update(dt, activeCharacter,
+        enemySystem.update(dt, playerChar,
           (damage) => {
             const s = useGameStore.getState();
             const newHp = Math.max(0, s.hp - damage);
             s.setHP(newHp, s.maxHp);
-            if (newHp <= 0) s.setPhase('gameover');
+            if (newHp <= 0) {
+              s.setPhase('player_dead');
+              const pos = playerChar.mesh.position.clone();
+              goreSystem.spawnGore(playerChar.mesh, playerChar.groundY, []);
+              lootSystem.spawnLoot(pos);
+              audioSystem.sfxAt('death', pos.x, pos.z);
+              playerChar.hideBody();
+            }
           },
           () => {
             const s = useGameStore.getState();
@@ -861,8 +870,8 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       // Speech bubbles
       speechSystem.update(dt);
 
-      // Pause on Escape
-      if (cachedInputState.cancel) {
+      // Pause on Escape (only while playing, not during death sequence)
+      if (phase === 'playing' && cachedInputState.cancel) {
         useGameStore.getState().onPauseToggle?.();
       }
     } else if (phase === 'playing') {

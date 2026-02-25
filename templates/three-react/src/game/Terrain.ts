@@ -180,6 +180,11 @@ export class Terrain {
     scene.add(this.group);
   }
 
+  /** Water plane Y. Lower for caves so only low areas flood. */
+  private getWaterY(): number {
+    return this.preset === 'heightmap' && this.heightmapStyle === 'caves' ? -0.5 : -0.05;
+  }
+
   private createGround(): void {
     const size = this.groundSize;
     const geo = new THREE.PlaneGeometry(size, size, 64, 64);
@@ -340,7 +345,7 @@ export class Terrain {
     this.waterMaterial = waterMat;
 
     const water = new THREE.Mesh(geo, waterMat);
-    water.position.y = -0.05;
+    water.position.y = this.getWaterY();
     this.waterMesh = water;
     this.group.add(water);
   }
@@ -402,7 +407,7 @@ export class Terrain {
     const hmCellSize = groundSize / res;
     const eps = hmCellSize * 0.5;
     const maxPassableSlope = 1.0;
-    const waterY = -0.05;
+    const waterY = this.getWaterY();
     const verts = res + 1;
 
     const colorFlat = new THREE.Color(pal.flat);
@@ -412,6 +417,19 @@ export class Terrain {
     const colorSand = new THREE.Color(pal.sand);
     const colorWetSand = new THREE.Color(pal.wetSand);
     const tmpColor = new THREE.Color();
+
+    const isCaves = this.preset === 'heightmap' && this.heightmapStyle === 'caves';
+    const colorCaveFloor = (() => {
+      const c = new THREE.Color(pal.flat);
+      const hsl = { h: 0, s: 0, l: 0 };
+      c.getHSL(hsl);
+      hsl.l *= 0.28;       // darker
+      hsl.s *= 0.9;
+      hsl.h = (hsl.h + 0.08) % 1;  // shift toward brown/orange
+      c.setHSL(hsl.h, hsl.s, hsl.l);
+      return c;
+    })();
+    const caveFloorMaxY = maxHeight * 0.65; // most of cave volume + lower walls get tint
 
     for (let z = 0; z < verts; z++) {
       for (let x = 0; x < verts; x++) {
@@ -493,6 +511,14 @@ export class Terrain {
               const t = (hC - beachMid) / (beachTop - beachMid);
               tmpColor.lerp(colorSand, (1.0 - t) * 0.8);
             }
+          }
+        }
+
+        // Caves: carved floor (low mesh) = brown; non-carved terraces (high) = keep palette (e.g. green)
+        if (isCaves) {
+          if (hC < caveFloorMaxY) {
+            const t = 1 - hC / caveFloorMaxY; // 1 at floor, 0 at threshold
+            tmpColor.lerp(colorCaveFloor, Math.max(0, Math.min(1, t)) * 0.95);
           }
         }
 
@@ -736,7 +762,20 @@ export class Terrain {
     const colorSand = new THREE.Color(pal.sand);
     const colorWetSand = new THREE.Color(pal.wetSand);
     const tmpColor = new THREE.Color();
-    const waterY = -0.05;
+    const waterY = this.getWaterY();
+
+    const isCaves = this.preset === 'heightmap' && this.heightmapStyle === 'caves';
+    const colorCaveFloor = (() => {
+      const c = new THREE.Color(pal.flat);
+      const hsl = { h: 0, s: 0, l: 0 };
+      c.getHSL(hsl);
+      hsl.l *= 0.28;       // darker
+      hsl.s *= 0.9;
+      hsl.h = (hsl.h + 0.08) % 1;  // shift toward brown/orange
+      c.setHSL(hsl.h, hsl.s, hsl.l);
+      return c;
+    })();
+    const caveFloorMaxY = config.maxHeight * 0.65;
 
     // Slope threshold matching NavGrid passability exactly.
     // NavGrid: eps = hmCellSize * 0.5, maxSlope = (slopeHeight / navCellSize) * 0.5
@@ -864,6 +903,14 @@ export class Terrain {
           }
         }
 
+        // Caves: carved floor (low mesh) = brown; non-carved terraces (high) = keep palette (e.g. green)
+        if (isCaves) {
+          if (hC < caveFloorMaxY) {
+            const t = 1 - hC / caveFloorMaxY;
+            tmpColor.lerp(colorCaveFloor, Math.max(0, Math.min(1, t)) * 0.95);
+          }
+        }
+
         if (DEBUG_RAMPS && rampCells.has(idx)) {
           tmpColor.setRGB(0.9, 0.15, 0.1);
         }
@@ -908,9 +955,7 @@ export class Terrain {
     this.heightmapMesh = mesh;
 
     // ── Build grid line overlay ──
-    // 1. Wireframe edges connecting adjacent vertices on the surface
-    // 2. Horizontal "rungs" at HALF intervals on steep cell faces (contour lines on walls)
-    // Lines use per-vertex colors: black on bright terrain, white on dark terrain.
+    // Wireframe grid + contour rungs. Per-vertex color: black on bright terrain, light gray on dark (cave) so grid is visible.
     const linePoints: number[] = [];
     const lineColors: number[] = [];
     const bias = 0.02; // slight offset to prevent z-fighting
@@ -921,32 +966,28 @@ export class Terrain {
     const by = (i: number) => positions[i * 3 + 1] + normals.getY(i) * bias;
     const bz = (i: number) => positions[i * 3 + 2] + normals.getZ(i) * bias;
 
-    /** Compute luminance of terrain vertex color and return contrasting line color (0=black, 1=white) */
+    /** Line color from vertex luminance: 0 = black on bright, 0.7 = light gray on dark (cave floor). */
     const contrastForVertex = (vi: number): number => {
       const r = colors[vi * 3], g = colors[vi * 3 + 1], b = colors[vi * 3 + 2];
       const lum = 0.299 * r + 0.587 * g + 0.114 * b;
-      return lum > 0.18 ? 0 : 0.3; // black on bright, white 30% on dark
+      return lum > 0.18 ? 0 : 0.7;
     };
 
-    const WATER_Y = 0; // lines below this are hidden
+    const gridWaterY = waterY; // hide grid only when fully below water (caves: -0.5, else -0.05)
 
-    /** Push a line segment with per-vertex contrast colors based on terrain brightness */
     const pushLine = (x1: number, y1: number, z1: number, vi1: number,
                       x2: number, y2: number, z2: number, vi2: number) => {
-      // Skip lines fully underwater
-      if (y1 < WATER_Y && y2 < WATER_Y) return;
+      if (y1 < gridWaterY && y2 < gridWaterY) return;
       linePoints.push(x1, y1, z1, x2, y2, z2);
       const c1 = contrastForVertex(vi1);
       const c2 = contrastForVertex(vi2);
       lineColors.push(c1, c1, c1, c2, c2, c2);
     };
 
-    /** Push a line segment at arbitrary world positions (for contour rungs).
-     *  Finds the nearest vertex index for color lookup. */
     const pushLineWorld = (x1: number, y1: number, z1: number,
                            x2: number, y2: number, z2: number,
                            nearestVi: number) => {
-      if (y1 < WATER_Y && y2 < WATER_Y) return;
+      if (y1 < gridWaterY && y2 < gridWaterY) return;
       linePoints.push(x1, y1, z1, x2, y2, z2);
       const c = contrastForVertex(nearestVi);
       lineColors.push(c, c, c, c, c, c);
@@ -1047,7 +1088,7 @@ export class Terrain {
     const lineMat = new THREE.LineBasicMaterial({
       vertexColors: true,
       transparent: true,
-      opacity: 0.25,
+      opacity: 0.5,
       depthWrite: false,
     });
     const gridLines = new THREE.LineSegments(lineGeo, lineMat);
@@ -1708,8 +1749,8 @@ export class Terrain {
     if (heightDiff < 0.3) return false;
 
     // Skip ladders where bottom is underwater
-    const WATER_Y = -0.05;
-    if (lowCell.surfaceHeight < WATER_Y + 0.1) return false;
+    const waterY = this.getWaterY();
+    if (lowCell.surfaceHeight < waterY + 0.1) return false;
 
     let fdx = lowWorld.x - highWorld.x;
     let fdz = lowWorld.z - highWorld.z;
