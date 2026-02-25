@@ -6,8 +6,8 @@ export interface GoToPointBehaviorOptions {
   waypointReach?: number;
 }
 
-const STUCK_TIME_LIMIT = 1.5;
-const STUCK_MIN_DISTANCE = 0.15;
+const STUCK_TIME_LIMIT = 0.8;
+const STUCK_MIN_PROGRESS = 0.08;
 
 /**
  * Move to a specific world point via A* pathfinding, then report 'done'.
@@ -141,11 +141,14 @@ export class GoToPoint extends Behavior {
       return 'running';
     }
 
-    // Stuck detection
-    const movedX = agent.getX() - this.lastProgressX;
-    const movedZ = agent.getZ() - this.lastProgressZ;
-    const movedDist = Math.sqrt(movedX * movedX + movedZ * movedZ);
-    if (movedDist > STUCK_MIN_DISTANCE) {
+    // Stuck detection: check progress TOWARD target, not total movement.
+    // Sliding along a cliff contour shouldn't count as progress.
+    const curDistToTarget = dist;
+    const prevDx = target.x - this.lastProgressX;
+    const prevDz = target.z - this.lastProgressZ;
+    const prevDistToTarget = Math.sqrt(prevDx * prevDx + prevDz * prevDz);
+    const progressToward = prevDistToTarget - curDistToTarget;
+    if (progressToward > STUCK_MIN_PROGRESS) {
       this.resetStuck(agent);
     } else {
       this.stuckTimer += dt;

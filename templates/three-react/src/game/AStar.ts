@@ -88,6 +88,13 @@ class BinaryHeap {
   }
 }
 
+/** Count set bits in an 8-bit passability mask */
+function popcount8(v: number): number {
+  v = v - ((v >> 1) & 0x55);
+  v = (v & 0x33) + ((v >> 2) & 0x33);
+  return (v + (v >> 4)) & 0x0F;
+}
+
 /** Chebyshev distance heuristic — admissible for 8-dir with cardinal=1, diagonal=√2 */
 function heuristic(ax: number, az: number, bx: number, bz: number): number {
   const dx = Math.abs(ax - bx);
@@ -119,6 +126,13 @@ export function findPath(
   const goalCell = grid.getCell(goal.gx, goal.gz);
   if (!startCell || startCell.blocked || (startCell.passable === 0 && !grid.getNavLinks(start.gx, start.gz)) ||
       !goalCell || goalCell.blocked || (goalCell.passable === 0 && !grid.getNavLinks(goal.gx, goal.gz))) {
+    return { found: false, path: [], rawPath: [], meta: [] };
+  }
+
+  // Reject goal cells at cliff edges — too few passable directions to be a
+  // meaningful destination. The character would reach the cell but get stuck.
+  const goalEdgeCount = popcount8(goalCell.passable);
+  if (goalEdgeCount < 3 && !grid.getNavLinks(goal.gx, goal.gz)) {
     return { found: false, path: [], rawPath: [], meta: [] };
   }
 
