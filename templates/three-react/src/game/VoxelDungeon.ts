@@ -19,7 +19,6 @@ import type { TileRole } from './VoxDungeonDB';
 import { preloadTheme, getTileGeometry, setCellSize, getWallTargetHeight, clearCache } from './VoxDungeonLoader';
 import type { DoorDef } from './DungeonGenerator';
 import type { DebrisBox } from './Terrain';
-
 // ── Rotation ──
 // Default VOX wall segment faces north (-Z). The decorated brick face
 // and top trim line point toward -Z at rotation 0.
@@ -167,6 +166,18 @@ export async function loadVoxelDungeonVisuals(
     metalness: 0.1,
   });
 
+  const wallMat = new THREE.MeshStandardMaterial({
+    vertexColors: true,
+    roughness: 0.85,
+    metalness: 0.1,
+  });
+
+  // All visual wall meshes go into this group, which is registered as
+  // an Architecture entity so the reveal shader auto-patches its materials.
+  const wallVisualGroup = new THREE.Group();
+  group.add(wallVisualGroup);
+  new Entity(wallVisualGroup, { layer: Layer.Architecture, radius: groundSize, weight: 0 });
+
   let groundCount = 0;
   let wallCount = 0;
 
@@ -305,7 +316,7 @@ export async function loadVoxelDungeonVisuals(
         else         rot = BASE_ROT + 270;
       }
 
-      placeVox(group, wx, wz, role, rot, voxMat, tileOverride);
+      placeVox(wallVisualGroup, wx, wz, role, rot, wallMat, tileOverride);
       wallCount++;
     }
   }

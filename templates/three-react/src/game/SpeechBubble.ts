@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { useGameStore } from '../store';
 import { entityRegistry, Layer } from './Entity';
+import { revealUniforms } from './RevealShader';
 import type { SpeechBubbleData } from '../types';
 import type { Character } from './Character';
 
@@ -142,6 +143,7 @@ export class SpeechBubbleSystem {
 
   private isOccluded(worldPos: THREE.Vector3): boolean {
     if (!this.camera) return false;
+    if (revealUniforms.u_revealActive.value > 0.5) return false;
 
     const camPos = this.camera.position;
     this._dir.copy(worldPos).sub(camPos);
