@@ -236,7 +236,7 @@ const HEIGHTMAP_STYLES: Record<HeightmapStyle, HeightmapStyleConfig> = {
   },
   caves: {
     resolution: 72,
-    maxHeight: 3.5,
+    maxHeight: 2.5,
     octaves: 3,
     lacunarity: 2.0,
     persistence: 0.45,
@@ -679,11 +679,11 @@ const REF_MAX_HEIGHT = 4.0;
 const SLOPE_HEIGHT_FRAC = 0.5 / REF_MAX_HEIGHT;      // ~12.5% — max rise per vertex step
 const HEIGHT_CEILING_FRAC = 0.85;                      // regions above this fraction stay disconnected
 const MAX_RAMP_ITER = 30;
-const RAMP_HALF_WIDTH = 2;                             // 5 cells wide (center ± 2)
-const RAMP_SLOPE_FRAC = 0.12 / REF_MAX_HEIGHT;         // ~3% — max height rise per ramp cell (very gentle)
-const MAX_RAMP_HEIGHT_FRAC = 3.6 / REF_MAX_HEIGHT;    // ~90% — max cliff height ramps will bridge
+const RAMP_HALF_WIDTH = 1;                             // 3 cells wide (center ± 1)
+const RAMP_SLOPE_FRAC = 0.25 / REF_MAX_HEIGHT;         // ~6.25% — walkable slope (must stay ≤ stepHeight 0.4)
+const MAX_RAMP_HEIGHT_FRAC = 1.5 / REF_MAX_HEIGHT;    // ~37.5% — only bridge 1-2 terrace steps; taller cliffs use ladders
 const MIN_RAMP_HEIGHT_FRAC = 0.2 / REF_MAX_HEIGHT;    // ~5% — min cliff height to place a ramp
-const ROLLING_AMP_FRAC = 0.1 / REF_MAX_HEIGHT;        // ~2.5% — very subtle rolling noise on ramps
+const ROLLING_AMP_FRAC = 0.15 / REF_MAX_HEIGHT;       // ~3.75% — subtle rolling noise on ramps
 
 /** BFS flood-fill that labels connected regions.
  *  Two vertices connect if |h1-h2| <= slopeHeight and both are below ceiling.
@@ -872,53 +872,40 @@ function ensureConnectivity(
 
     if (bestScore === Infinity) break; // no valid crossing found
 
-    // Ramp geometry — slope spans the full length (no flat dead zone before the climb).
     const heightDiff = bestHighH - bestLowH;
     const perpX = -bestDirZ;
     const perpZ = bestDirX;
-    const PAD = 3; // flat padding at entry/exit for smooth transitions
 
-    // Ramp extends from cliff edge back into the low terrace.
-    // Random extra length 1-3 cells for variety + gentler slope.
-    const extraLen = 1 + (iter % 3);
-    const slopeLen = Math.max(5, Math.ceil(heightDiff / RAMP_SLOPE) + extraLen);
-    const totalLen = PAD + slopeLen + PAD;
+    const slopeLen = Math.max(2, Math.ceil(heightDiff / RAMP_SLOPE));
 
-    const startX = bestLowX - bestDirX * (slopeLen + PAD);
-    const startZ = bestLowZ - bestDirZ * (slopeLen + PAD);
-    const endX = bestLowX + bestDirX * PAD;
-    const endZ = bestLowZ + bestDirZ * PAD;
+    const startX = bestLowX - bestDirX * slopeLen;
+    const startZ = bestLowZ - bestDirZ * slopeLen;
+    const endX = bestLowX;
+    const endZ = bestLowZ;
 
     const inBounds = (bx: number, bz: number) =>
       bx >= 0 && bx < verts && bz >= 0 && bz < verts;
     if (!inBounds(startX, startZ) || !inBounds(endX, endZ)) break;
 
-    // Sample actual ground height at ramp start
     const actualLowH = grid[startZ * verts + startX];
     const rampLowH = Math.min(bestLowH, actualLowH);
 
-    // Use noise to vary ramp width per row and add height jitter for organic look
     const rampNoisePerm = buildPerm(seed + 7777 + iter * 31);
 
-    // Randomly pick ramp or stairs mode per connection
     const terraceStep = maxHeight / Math.max(1, _quantizeStep > 0 ? Math.round(maxHeight / _quantizeStep) : 6);
-    const STAIR_STEP = Math.min(0.25, terraceStep * 0.8);
-    const STAIR_TREAD = 2;
+    const numStairSteps = Math.max(2, Math.ceil(heightDiff / Math.min(0.25, terraceStep * 0.5)));
     const useStairs = valueNoise2D(bestLowX * 0.3, bestLowZ * 0.3, rampNoisePerm) > 0.5;
 
-    for (let i = 0; i <= totalLen; i++) {
+    for (let i = 0; i <= slopeLen; i++) {
+      const t = (i + 1) / (slopeLen + 1);
       let h: number;
-      if (i < PAD) {
-        h = rampLowH;
-      } else if (i >= PAD + slopeLen) {
-        h = bestHighH;
-      } else if (useStairs) {
-        const cellsIntoSlope = i - PAD;
-        const stepIndex = Math.floor(cellsIntoSlope / STAIR_TREAD);
-        h = rampLowH + stepIndex * STAIR_STEP;
-        h = Math.min(h, bestHighH);
+      if (useStairs) {
+        const stepIndex = Math.min(
+          numStairSteps,
+          Math.round(t * numStairSteps),
+        );
+        h = rampLowH + (stepIndex / numStairSteps) * (bestHighH - rampLowH);
       } else {
-        const t = (i - PAD) / Math.max(1, slopeLen - 1);
         h = rampLowH + (bestHighH - rampLowH) * t;
       }
       const rx = startX + bestDirX * i;
@@ -930,14 +917,15 @@ function ensureConnectivity(
         ? RAMP_HALF_WIDTH  // stairs: consistent width for clean blocky look
         : RAMP_HALF_WIDTH + (widthNoise > 0.7 ? 1 : 0);
 
-      // Rolling noise: ramps get organic undulation, stairs stay flat/blocky
+      // Rolling noise: ramps get organic undulation, but don't flatten the start
       let rowH = h;
       if (!useStairs) {
         const rollingNoise = fbm(
           rx / resolution * rollingScale, rz / resolution * rollingScale,
           rollingPerm, 3, 2.0, 0.5,
         );
-        rowH = h + (rollingNoise - 0.5) * rollingAmp * 2;
+        const damp = i === 0 ? 0 : (i === 1 ? 0.5 : 1);
+        rowH = h + (rollingNoise - 0.5) * rollingAmp * 2 * damp;
       }
 
       for (let w = -rowHalfWidth; w <= rowHalfWidth; w++) {
@@ -950,22 +938,14 @@ function ensureConnectivity(
       }
     }
 
-    // Smooth apron: entry/exit + sides so no sharp edges anywhere
-    const APRON = 3;
-    const SIDE_BLEND = 2;
+    const APRON = 1;
+    const SIDE_BLEND = 1;
 
-    // Entry/exit aprons
+    // Exit apron only: blend ramp into high terrace (no flat entry apron)
     for (let a = 1; a <= APRON; a++) {
       const apronW = RAMP_HALF_WIDTH + a;
       const blend = a / (APRON + 1);
       for (let w = -apronW; w <= apronW; w++) {
-        const bx = startX - bestDirX * a + perpX * w;
-        const bz = startZ - bestDirZ * a + perpZ * w;
-        if (bx >= 0 && bx < verts && bz >= 0 && bz < verts) {
-          const ci = bz * verts + bx;
-          grid[ci] = grid[ci] * blend + rampLowH * (1 - blend);
-          allRampCells.add(ci);
-        }
         const tx = endX + bestDirX * a + perpX * w;
         const tz = endZ + bestDirZ * a + perpZ * w;
         if (tx >= 0 && tx < verts && tz >= 0 && tz < verts) {
@@ -976,9 +956,8 @@ function ensureConnectivity(
       }
     }
 
-    // Side aprons: blend cells just outside ramp width into the ramp surface
-    for (let i = 0; i <= totalLen; i++) {
-      const t = Math.max(0, Math.min(1, (i - PAD) / Math.max(1, slopeLen - 1)));
+    for (let i = 0; i <= slopeLen; i++) {
+      const t = (i + 1) / (slopeLen + 1);
       const rampH = rampLowH + (bestHighH - rampLowH) * t;
       const rx2 = startX + bestDirX * i;
       const rz2 = startZ + bestDirZ * i;

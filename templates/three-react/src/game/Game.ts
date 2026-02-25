@@ -71,7 +71,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
   // Scene
-  const { scene, lights: sceneLights } = createScene();
+  const { scene, lights: sceneLights, sceneSky } = createScene();
   let currentLightPreset: LightPreset = useGameStore.getState().lightPreset;
   let currentGridOpacity = useGameStore.getState().gridOpacity;
   let currentRoomLabels = useGameStore.getState().roomLabels;
@@ -97,6 +97,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   cam.terrainHeightAt = (x, z) => terrain.getFloorY(x, z);
   cam.terrainMesh = terrain.getTerrainMesh();
   useGameStore.getState().setPaletteActive(terrain.getPaletteName());
+  sceneSky.setPalette(terrain.getPaletteName());
   const { playerParams: initParams } = useGameStore.getState();
   let navGrid = terrain.buildNavGrid(initParams.stepHeight, initParams.capsuleRadius, navCellForPreset(initPreset), initParams.slopeHeight);
   terrain.setGridOpacity(useGameStore.getState().gridOpacity);
@@ -160,6 +161,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     terrain = new Terrain(scene, terrainPreset, heightmapStyle, palPick);
     cam.terrainMesh = terrain.getTerrainMesh();
     useGameStore.getState().setPaletteActive(terrain.getPaletteName());
+    sceneSky.setPalette(terrain.getPaletteName());
     navGrid = terrain.buildNavGrid(pp.stepHeight, pp.capsuleRadius, navCellForPreset(terrainPreset), pp.slopeHeight);
     terrain.setGridOpacity(useGameStore.getState().gridOpacity);
     collectibles = new CollectibleSystem(scene, terrain);
@@ -580,6 +582,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       const { name, palette } = randomPalette();
       terrain.applyPalette(palette, name);
       useGameStore.getState().setPaletteActive(name);
+      sceneSky.setPalette(name);
     },
     onResetPlayerParams: () => {
       const d = DEFAULT_PLAYER_PARAMS;
