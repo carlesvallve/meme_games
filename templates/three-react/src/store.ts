@@ -65,6 +65,7 @@ export interface CameraParams {
   rotationSpeed: number;
   zoomSpeed: number;
   collisionLayers: number;
+  collisionSkin: number;
 }
 
 // ── Defaults ──────────────────────────────────────────────────────────
@@ -81,7 +82,7 @@ export const DEFAULT_PLAYER_PARAMS: PlayerParams = {
 export const DEFAULT_CAMERA_PARAMS: CameraParams = {
   fov: 60,
   minDistance: 5, maxDistance: 25, distance: 12, pitchMin: -80, pitchMax: -10,
-  rotationSpeed: 0.005, zoomSpeed: 0.01, collisionLayers: Layer.None,
+  rotationSpeed: 0.005, zoomSpeed: 0.01, collisionLayers: Layer.None, collisionSkin: 0.1,
 };
 
 export const DEFAULT_TORCH_PARAMS: TorchParams = {

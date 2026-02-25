@@ -13,7 +13,6 @@ import { buildVoxelDungeonCollision, loadVoxelDungeonVisuals } from './VoxelDung
 import { DungeonPropSystem, clearPropCache } from './DungeonProps';
 import { useGameStore } from '../store';
 import { randomPalette, palettes } from './ColorPalettes';
-import { patchRevealMaterial } from './RevealShader';
 import type { TerrainPalette } from './ColorPalettes';
 
 const HALF = 0.25;
@@ -954,14 +953,12 @@ export class Terrain {
       polygonOffsetFactor: 1,
       polygonOffsetUnits: 1,
     });
-    patchRevealMaterial(mat);
 
     const mesh = new THREE.Mesh(geo, mat);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     this.group.add(mesh);
     this.heightmapMesh = mesh;
-    new Entity(mesh, { layer: Layer.Architecture, radius: groundSize * 0.5, weight: Infinity });
 
     // ── Build grid line overlay ──
     // Wireframe grid + contour rungs. Per-vertex color: black on bright terrain, light gray on dark (cave) so grid is visible.
@@ -2284,7 +2281,6 @@ export class Terrain {
 
     // Dispose old mesh, grid, and ladder visuals
     if (this.heightmapMesh) {
-      (this.heightmapMesh.userData.entity as Entity)?.destroy();
       this.group.remove(this.heightmapMesh);
       this.heightmapMesh.geometry.dispose();
       (this.heightmapMesh.material as THREE.Material).dispose();
