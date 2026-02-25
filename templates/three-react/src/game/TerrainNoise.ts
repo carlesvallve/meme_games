@@ -356,12 +356,13 @@ export function generateHeightmap(
 
   // Rolling micro-variation: add subtle FBM undulation to flat posterized surfaces.
   // This makes terrace/island/cave floors feel organic instead of perfectly flat.
-  // fbm returns [0,1], so center around 0 with (noise - 0.5) for ± variation.
-  // Applied at final resolution using normalized coords (resolution-independent).
+  // Amplitude must stay well below the terrace step height to avoid creating
+  // slopes that confuse navgrid passability or break ramp connectivity.
   if (config.posterize > 0 || algorithm === 'caves') {
     const rollingPerm = buildPerm(actualSeed + 4444);
     const rollingScale = 5.0;
-    const rollingAmp = 1.2; // ±1.2m — organic undulation on all terraces
+    const rollingRng = mulberry32(actualSeed + 5678);
+    const rollingAmp = 0.4 + rollingRng() * 1.2;
     for (let z = 0; z < verts; z++) {
       for (let x = 0; x < verts; x++) {
         const noise = fbm(
@@ -373,14 +374,13 @@ export function generateHeightmap(
     }
   }
 
-  // Carve connectivity ramps for posterized terrain (terraces, islands, caves).
+  // Carve connectivity ramps for posterized terrain and caves.
   // Use a generous slope threshold (1.5×) so rolling noise doesn't fragment terraces.
   // Ramp carving uses a gentler slope to produce gradual paths.
-  // Applied at final resolution so ramps benefit from higher mesh detail.
   let rampCells = new Set<number>();
-  if (config.posterize > 0) {
+  if (config.posterize > 0 || algorithm === 'caves') {
     const slopeH = config.maxHeight * SLOPE_HEIGHT_FRAC;
-    rampCells = ensureConnectivity(grid, verts, resolution, slopeH * 1.5, quantizeStep, config.maxHeight, actualSeed);
+    rampCells = ensureConnectivity(grid, verts, resolution, slopeH * 1.5, quantizeStep || 0.5, config.maxHeight, actualSeed);
   }
 
   // Ladder detection is now handled at the NavGrid level (Terrain.buildNavGrid)
@@ -680,10 +680,10 @@ const SLOPE_HEIGHT_FRAC = 0.5 / REF_MAX_HEIGHT;      // ~12.5% — max rise per 
 const HEIGHT_CEILING_FRAC = 0.85;                      // regions above this fraction stay disconnected
 const MAX_RAMP_ITER = 30;
 const RAMP_HALF_WIDTH = 1;                             // 3 cells wide (center ± 1)
-const RAMP_SLOPE_FRAC = 0.3 / REF_MAX_HEIGHT;          // ~7.5% — max height rise per ramp cell
+const RAMP_SLOPE_FRAC = 0.25 / REF_MAX_HEIGHT;         // ~6.25% — max height rise per ramp cell
 const MAX_RAMP_HEIGHT_FRAC = 3.0 / REF_MAX_HEIGHT;    // ~75% — max cliff height ramps will bridge
 const MIN_RAMP_HEIGHT_FRAC = 0.2 / REF_MAX_HEIGHT;    // ~5% — min cliff height to place a ramp
-const ROLLING_AMP_FRAC = 0.6 / REF_MAX_HEIGHT;        // ~15% — rolling noise amplitude on ramps
+const ROLLING_AMP_FRAC = 0.2 / REF_MAX_HEIGHT;        // ~5% — subtle rolling noise on ramps
 
 /** BFS flood-fill that labels connected regions.
  *  Two vertices connect if |h1-h2| <= slopeHeight and both are below ceiling.
