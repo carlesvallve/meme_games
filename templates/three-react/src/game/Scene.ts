@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { LightPreset } from '../store';
+import { ProceduralSky, createSunLensflare, getSkyColors, type SkyColors } from './Sky';
 
 export interface SceneLights {
   ambient: THREE.AmbientLight;
@@ -7,6 +8,14 @@ export interface SceneLights {
   dirFill: THREE.DirectionalLight;
   dirRim: THREE.DirectionalLight;
   hemi: THREE.HemisphereLight;
+}
+
+export interface SceneSky {
+  sky: ProceduralSky;
+  lensflare: THREE.Object3D;
+  setColors: (colors: SkyColors) => void;
+  setPalette: (paletteName: string) => void;
+  dispose: () => void;
 }
 
 // Store default intensities so presets can scale them
@@ -34,11 +43,9 @@ export function applyLightPreset(lights: SceneLights, preset: LightPreset): void
   lights.hemi.intensity = DEFAULTS.hemi * s;
 }
 
-export function createScene(): { scene: THREE.Scene; lights: SceneLights } {
+export function createScene(paletteName = 'meadow'): { scene: THREE.Scene; lights: SceneLights; sceneSky: SceneSky } {
   const scene = new THREE.Scene();
-  const bgColor = 0x0a0a14;
-  scene.background = new THREE.Color(bgColor);
-  scene.fog = new THREE.Fog(bgColor, 20, 50);
+  scene.background = null; // sky mesh replaces solid background
 
   // Ambient light
   const ambient = new THREE.AmbientLight(0x7070a0, DEFAULTS.ambient);
@@ -72,5 +79,35 @@ export function createScene(): { scene: THREE.Scene; lights: SceneLights } {
   const hemi = new THREE.HemisphereLight(0x8080b0, 0x2a2a45, DEFAULTS.hemi);
   scene.add(hemi);
 
-  return { scene, lights: { ambient, dirPrimary, dirFill, dirRim, hemi } };
+  // Procedural sky + lensflare
+  const skyColors = getSkyColors(paletteName);
+  scene.fog = new THREE.Fog(new THREE.Color(skyColors.fog), 20, 50);
+
+  const sunDir = dirPrimary.position.clone().normalize();
+  const sky = new ProceduralSky(sunDir, skyColors);
+  scene.add(sky.mesh);
+
+  const sunFarPos = sunDir.clone().multiplyScalar(100);
+  const lensflare = createSunLensflare(sunFarPos, skyColors);
+  scene.add(lensflare);
+
+  const sceneSky: SceneSky = {
+    sky,
+    lensflare,
+    setColors(colors: SkyColors) {
+      sky.setColors(colors);
+      (scene.fog as THREE.Fog).color.set(colors.fog);
+    },
+    setPalette(name: string) {
+      const c = getSkyColors(name);
+      this.setColors(c);
+    },
+    dispose() {
+      scene.remove(sky.mesh);
+      scene.remove(lensflare);
+      sky.dispose();
+    },
+  };
+
+  return { scene, lights: { ambient, dirPrimary, dirFill, dirRim, hemi }, sceneSky };
 }
