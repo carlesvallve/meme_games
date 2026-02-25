@@ -3,6 +3,7 @@ import type { CharacterType, SpeechBubbleData } from './types';
 import { Layer } from './game/Entity';
 import type { TerrainPreset } from './game/Terrain';
 import type { HeightmapStyle } from './game/TerrainNoise';
+import { DEFAULT_CHARACTER_PARAMS } from './game/CharacterParams';
 
 export interface ParticleToggles {
   dust: boolean;
@@ -68,30 +69,12 @@ export interface CameraParams {
 
 // ── Defaults ──────────────────────────────────────────────────────────
 
+/** Player params: character defaults + player-only overrides (magnet, exhaustion, slash effect). */
 export const DEFAULT_PLAYER_PARAMS: PlayerParams = {
-  speed: 4,
-  stepHeight: 0.4,
-  slopeHeight: 0.75,
-  capsuleRadius: 0.1,
-  arrivalReach: 0.05,
-  hopHeight: 0.05,
+  ...DEFAULT_CHARACTER_PARAMS,
   magnetRadius: 1,
   magnetSpeed: 16,
-  movementMode: 'grid' as MovementMode,
-  showPathDebug: true,
   exhaustionEnabled: false,
-  attackReach: 0.5,
-  attackArcHalf: Math.PI / 3,
-  attackDamage: 1,
-  attackCooldown: 0,
-  chaseRange: 0,
-  knockbackSpeed: 1.5,
-  knockbackDecay: 14,
-  invulnDuration: 0.8,
-  flashDuration: 0.15,
-  stunDuration: 0.08,
-  attackDuration: 0.2,
-  exhaustDuration: 1.0,
   showSlashEffect: true,
 };
 
@@ -149,6 +132,7 @@ interface SavedSettings {
   testFloor?: string;
   doorChance?: number;
   roomLabels?: boolean;
+  characterPushEnabled?: boolean;
   particleToggles?: ParticleToggles;
 }
 
@@ -180,6 +164,7 @@ function saveSettings(): void {
     testFloor: s.testFloor,
     doorChance: s.doorChance,
     roomLabels: s.roomLabels,
+    characterPushEnabled: s.characterPushEnabled,
     particleToggles: s.particleToggles,
   };
   try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(data)); } catch { /* ignore */ }
@@ -224,6 +209,10 @@ interface GameStore {
   testFloor: string;
   doorChance: number;
   roomLabels: boolean;
+
+  /** If true, characters push each other apart when overlapping; if false, only the non-player is pushed (player stays put). */
+  characterPushEnabled: boolean;
+  setCharacterPushEnabled: (v: boolean) => void;
 
   /** True when any settings sub-panel (Scene/Player/Camera/Light) is open; game loop pauses. */
   settingsPanelOpen: boolean;
@@ -326,6 +315,9 @@ export const useGameStore = create<GameStore>((set) => ({
   testFloor: saved.testFloor ?? DEFAULT_SCENE_SETTINGS.testFloor,
   doorChance: saved.doorChance ?? DEFAULT_SCENE_SETTINGS.doorChance,
   roomLabels: saved.roomLabels ?? DEFAULT_SCENE_SETTINGS.roomLabels,
+
+  characterPushEnabled: saved.characterPushEnabled ?? true,
+  setCharacterPushEnabled: (characterPushEnabled) => set({ characterPushEnabled }),
 
   settingsPanelOpen: false,
   setSettingsPanelOpen: (settingsPanelOpen) => set({ settingsPanelOpen }),

@@ -15,67 +15,10 @@ import { IdleBehavior } from './behaviors/IdleBehavior';
 import { PlayerControl, type PlayerControlDeps } from './behaviors/PlayerControl';
 import { audioSystem } from '../utils/AudioSystem';
 import type { LadderDef } from './Ladder';
+import { DEFAULT_CHARACTER_PARAMS, type MovementParams } from './CharacterParams';
 
-export type MovementMode = 'free' | 'grid';
-
-export interface MovementParams {
-  speed: number;
-  stepHeight: number;
-  slopeHeight: number;
-  capsuleRadius: number;
-  arrivalReach: number;
-  hopHeight: number;
-  movementMode: MovementMode;
-  showPathDebug: boolean;
-  /** Melee attack reach (distance); used for arc check. */
-  attackReach: number;
-  /** Melee attack arc half-angle in radians (total arc = 2 * attackArcHalf). */
-  attackArcHalf: number;
-  /** Melee damage dealt per hit. */
-  attackDamage: number;
-  /** Seconds between melee attacks (AI). */
-  attackCooldown: number;
-  /** Chase/aggro range for AI (units). */
-  chaseRange: number;
-  /** Knockback impulse speed when hit. */
-  knockbackSpeed: number;
-  /** Knockback velocity decay rate (exp(-knockbackDecay * dt)). */
-  knockbackDecay: number;
-  /** Invulnerability duration after hit (seconds). */
-  invulnDuration: number;
-  /** Hit flash duration (seconds). */
-  flashDuration: number;
-  /** Stun duration when hit (seconds). */
-  stunDuration: number;
-  /** Attack animation / hit window duration (seconds). */
-  attackDuration: number;
-  /** Exhaustion duration after combo (seconds). */
-  exhaustDuration: number;
-}
-
-/** Default params for any character. Enemy overrides in constructor. */
-export const DEFAULT_CHARACTER_PARAMS: MovementParams = {
-  speed: 4,
-  stepHeight: 0.4,
-  slopeHeight: 0.75,
-  capsuleRadius: 0.1,
-  arrivalReach: 0.05,
-  hopHeight: 0.05,
-  movementMode: 'grid' as MovementMode,
-  showPathDebug: true,
-  attackReach: 0.5,
-  attackArcHalf: Math.PI / 3,
-  attackDamage: 1,
-  attackCooldown: 0,
-  chaseRange: 0,
-  knockbackSpeed: 1.5,
-  knockbackDecay: 14,
-  invulnDuration: 0.8,
-  flashDuration: 0.15,
-  stunDuration: 0.08,
-  attackDuration: 0.2,
-  exhaustDuration: 1.0,
-};
+export type { MovementParams, MovementMode } from './CharacterParams';
+export { DEFAULT_CHARACTER_PARAMS } from './CharacterParams';
 
 export function lerpAngle(current: number, target: number, t: number): number {
   let diff = target - current;
