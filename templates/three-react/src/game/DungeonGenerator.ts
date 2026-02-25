@@ -58,7 +58,7 @@ export function generateDungeon(
   const wallHeight = 2.5;
 
   const result = mode === 'dungeon'
-    ? generateBSPDungeon(gridW, gridD, 3, 6, roomSpacing, doorChance)
+    ? generateBSPDungeon(gridW, gridD, 2, 6, roomSpacing ?? 2, doorChance)
     : generateAdjacentRooms(gridW, gridD, 4, 4, wallGap, doorChance);
 
   const boxes = convertToBoxDefs(result, cellSize, wallHeight, groundSize);
