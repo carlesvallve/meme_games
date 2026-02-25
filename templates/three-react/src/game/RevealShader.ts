@@ -17,6 +17,7 @@ export const revealUniforms = {
 export function patchRevealMaterial(mat: THREE.MeshStandardMaterial): void {
   mat.transparent = true;
   mat.depthWrite = true;
+  mat.needsUpdate = true;
 
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.u_revealCenter = revealUniforms.u_revealCenter;
@@ -53,6 +54,12 @@ varying vec3 v_worldPos;`,
 vec3 toPlayer = u_revealCenter - u_cameraPos;
 vec3 lineDir = normalize(toPlayer + vec3(0.001));
 
+// How horizontal is the view? 0 = top-down, 1 = side-on
+float xzLen = length(vec2(toPlayer.x, toPlayer.z));
+float horizontalness = xzLen / max(length(toPlayer), 0.001);
+// Disable reveal when camera is nearly overhead (nothing occluded)
+float viewGate = smoothstep(0.05, 0.15, horizontalness);
+
 // Direction from player toward camera in XZ
 vec2 lineDirXZ = normalize(vec2(lineDir.x, lineDir.z) + vec2(0.0001));
 vec2 toCamXZ = -lineDirXZ;
@@ -64,7 +71,7 @@ vec2 fragDirXZ = fragDeltaXZ / max(fragDistXZ, 0.001);
 
 // Angle check: only fragments toward the camera direction
 float angleDot = dot(fragDirXZ, toCamXZ);
-float inCone = smoothstep(-0.1, 0.3, angleDot);
+float inCone = smoothstep(-0.1, 0.3, angleDot) * viewGate;
 
 // Distance fade from player in XZ
 float distFade = smoothstep(u_revealRadius, u_revealRadius + u_revealFalloff, fragDistXZ);
@@ -111,9 +118,6 @@ export function updateReveal(
   if (preset === 'voxelDungeon') {
     revealUniforms.u_revealRadius.value = 3.0;
     revealUniforms.u_revealFalloff.value = 2.0;
-  } else if (preset === 'dungeon' || preset === 'rooms') {
-    revealUniforms.u_revealRadius.value = 20.0;
-    revealUniforms.u_revealFalloff.value = 5.0;
   } else {
     revealUniforms.u_revealRadius.value = 20.0;
     revealUniforms.u_revealFalloff.value = 5.0;
