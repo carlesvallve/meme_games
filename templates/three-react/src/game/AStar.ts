@@ -203,11 +203,13 @@ export function findPath(
       if (closed[nIdx]) continue;
 
       const baseCost = dir % 2 === 0 ? 1 : SQRT2;
-      // Penalize height changes so NPCs prefer flat routes over climbing
       const currentCell = grid.getCell(cgx, cgz)!;
       const neighborCell = grid.getCell(ngx, ngz)!;
       const heightDelta = Math.abs(currentCell.surfaceHeight - neighborCell.surfaceHeight);
-      const cost = baseCost + heightDelta * ELEVATION_PENALTY;
+      // Penalize constrained cells (cliff/ramp edges) so A* routes around corners
+      const edgeCount = popcount8(neighborCell.passable);
+      const edgePenalty = edgeCount < 4 ? (4 - edgeCount) * 2 : 0;
+      const cost = baseCost + heightDelta * ELEVATION_PENALTY + edgePenalty;
       const tentativeG = currentG + cost;
 
       if (tentativeG < gScore[nIdx]) {
