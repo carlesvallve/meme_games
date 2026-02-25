@@ -170,10 +170,11 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       terrain.setPropChestRegistrar((list) => list.forEach(({ position, mesh, entity, openGeo }) => chestSystem.registerPropChest(position, mesh, entity, openGeo)));
     }
 
-    // Re-spawn characters if a character was selected
-    if (lastSelectedCharacter) {
-      spawnCharacters(lastSelectedCharacter);
-    }
+    // Randomize character on regeneration
+    const slots = getSlots();
+    lastSelectedCharacter = slots[Math.floor(Math.random() * slots.length)];
+    useGameStore.getState().selectCharacter(lastSelectedCharacter);
+    spawnCharacters(lastSelectedCharacter);
   }
 
   function createParticleSystem(key: keyof ParticleToggles): ParticleSystem {

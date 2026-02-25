@@ -236,7 +236,7 @@ const HEIGHTMAP_STYLES: Record<HeightmapStyle, HeightmapStyleConfig> = {
   },
   caves: {
     resolution: 72,
-    maxHeight: 5.5,
+    maxHeight: 3.5,
     octaves: 3,
     lacunarity: 2.0,
     persistence: 0.45,
@@ -679,11 +679,11 @@ const REF_MAX_HEIGHT = 4.0;
 const SLOPE_HEIGHT_FRAC = 0.5 / REF_MAX_HEIGHT;      // ~12.5% — max rise per vertex step
 const HEIGHT_CEILING_FRAC = 0.85;                      // regions above this fraction stay disconnected
 const MAX_RAMP_ITER = 30;
-const RAMP_HALF_WIDTH = 1;                             // 3 cells wide (center ± 1)
-const RAMP_SLOPE_FRAC = 0.25 / REF_MAX_HEIGHT;         // ~6.25% — max height rise per ramp cell
-const MAX_RAMP_HEIGHT_FRAC = 3.0 / REF_MAX_HEIGHT;    // ~75% — max cliff height ramps will bridge
+const RAMP_HALF_WIDTH = 2;                             // 5 cells wide (center ± 2)
+const RAMP_SLOPE_FRAC = 0.12 / REF_MAX_HEIGHT;         // ~3% — max height rise per ramp cell (very gentle)
+const MAX_RAMP_HEIGHT_FRAC = 3.6 / REF_MAX_HEIGHT;    // ~90% — max cliff height ramps will bridge
 const MIN_RAMP_HEIGHT_FRAC = 0.2 / REF_MAX_HEIGHT;    // ~5% — min cliff height to place a ramp
-const ROLLING_AMP_FRAC = 0.2 / REF_MAX_HEIGHT;        // ~5% — subtle rolling noise on ramps
+const ROLLING_AMP_FRAC = 0.1 / REF_MAX_HEIGHT;        // ~2.5% — very subtle rolling noise on ramps
 
 /** BFS flood-fill that labels connected regions.
  *  Two vertices connect if |h1-h2| <= slopeHeight and both are below ceiling.
@@ -876,12 +876,12 @@ function ensureConnectivity(
     const heightDiff = bestHighH - bestLowH;
     const perpX = -bestDirZ;
     const perpZ = bestDirX;
-    const PAD = 1; // small flat padding at entry/exit
+    const PAD = 3; // flat padding at entry/exit for smooth transitions
 
     // Ramp extends from cliff edge back into the low terrace.
     // Random extra length 1-3 cells for variety + gentler slope.
     const extraLen = 1 + (iter % 3);
-    const slopeLen = Math.max(4, Math.ceil(heightDiff / RAMP_SLOPE) + extraLen);
+    const slopeLen = Math.max(5, Math.ceil(heightDiff / RAMP_SLOPE) + extraLen);
     const totalLen = PAD + slopeLen + PAD;
 
     const startX = bestLowX - bestDirX * (slopeLen + PAD);
@@ -947,6 +947,52 @@ function ensureConnectivity(
         const cellIdx = nz * verts + nx;
         grid[cellIdx] = rowH;
         allRampCells.add(cellIdx);
+      }
+    }
+
+    // Smooth apron: entry/exit + sides so no sharp edges anywhere
+    const APRON = 3;
+    const SIDE_BLEND = 2;
+
+    // Entry/exit aprons
+    for (let a = 1; a <= APRON; a++) {
+      const apronW = RAMP_HALF_WIDTH + a;
+      const blend = a / (APRON + 1);
+      for (let w = -apronW; w <= apronW; w++) {
+        const bx = startX - bestDirX * a + perpX * w;
+        const bz = startZ - bestDirZ * a + perpZ * w;
+        if (bx >= 0 && bx < verts && bz >= 0 && bz < verts) {
+          const ci = bz * verts + bx;
+          grid[ci] = grid[ci] * blend + rampLowH * (1 - blend);
+          allRampCells.add(ci);
+        }
+        const tx = endX + bestDirX * a + perpX * w;
+        const tz = endZ + bestDirZ * a + perpZ * w;
+        if (tx >= 0 && tx < verts && tz >= 0 && tz < verts) {
+          const ci = tz * verts + tx;
+          grid[ci] = grid[ci] * blend + bestHighH * (1 - blend);
+          allRampCells.add(ci);
+        }
+      }
+    }
+
+    // Side aprons: blend cells just outside ramp width into the ramp surface
+    for (let i = 0; i <= totalLen; i++) {
+      const t = Math.max(0, Math.min(1, (i - PAD) / Math.max(1, slopeLen - 1)));
+      const rampH = rampLowH + (bestHighH - rampLowH) * t;
+      const rx2 = startX + bestDirX * i;
+      const rz2 = startZ + bestDirZ * i;
+      for (let s = 1; s <= SIDE_BLEND; s++) {
+        const blend = s / (SIDE_BLEND + 1);
+        for (const sign of [-1, 1]) {
+          const sx = rx2 + perpX * sign * (RAMP_HALF_WIDTH + s);
+          const sz = rz2 + perpZ * sign * (RAMP_HALF_WIDTH + s);
+          if (sx >= 0 && sx < verts && sz >= 0 && sz < verts) {
+            const ci = sz * verts + sx;
+            grid[ci] = grid[ci] * blend + rampH * (1 - blend);
+            allRampCells.add(ci);
+          }
+        }
       }
     }
 

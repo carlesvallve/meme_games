@@ -9,6 +9,25 @@ export interface TerrainPalette {
   waterDeep: number;
 }
 
+export type BiomeType =
+  | 'temperate' | 'autumn' | 'tropical' | 'winter'
+  | 'desert' | 'volcanic' | 'barren' | 'swamp' | 'enchanted';
+
+export const paletteBiome: Record<string, BiomeType> = {
+  meadow: 'temperate',
+  autumn: 'autumn',
+  mars: 'barren',
+  obsidian: 'volcanic',
+  sands: 'desert',
+  snowland: 'winter',
+  highlands: 'temperate',
+  tropical: 'tropical',
+  enchanted: 'enchanted',
+  swamp: 'swamp',
+  coral: 'tropical',
+  ash: 'volcanic',
+};
+
 export const palettes: Record<string, TerrainPalette> = {
 
   // Classic green meadow

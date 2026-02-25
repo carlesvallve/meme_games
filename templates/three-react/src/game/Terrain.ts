@@ -9,6 +9,8 @@ export type { HeightmapStyle } from './TerrainNoise';
 import { generateDungeon } from './DungeonGenerator';
 import type { WalkMask } from './DungeonGenerator';
 import { DoorSystem } from './Door';
+import { generateNature, type NatureGeneratorResult } from './NatureGenerator';
+import { paletteBiome } from './ColorPalettes';
 import { buildVoxelDungeonCollision, loadVoxelDungeonVisuals } from './VoxelDungeon';
 import { DungeonPropSystem, clearPropCache } from './DungeonProps';
 import { useGameStore } from '../store';
@@ -115,7 +117,7 @@ export class Terrain {
   private debris: DebrisBox[] = [];
   private debrisEntities: Entity[] = [];
   private boxGroup = new THREE.Group(); // visible box meshes for click raycast
-  private readonly groundSize = 30;
+  private readonly groundSize = 40;
   readonly preset: TerrainPreset;
   private readonly heightmapStyle: HeightmapStyle;
   private palette: TerrainPalette;
@@ -142,6 +144,7 @@ export class Terrain {
   // Ladder data
   private ladderDefs: LadderDef[] = [];
   private ladderMeshes: THREE.Group[] = [];
+  private rampCells: Set<number> = new Set();
 
   // NavGrid reference (set after buildNavGrid, used by getRandomPosition)
   private navGrid: NavGrid | null = null;
@@ -157,6 +160,7 @@ export class Terrain {
   // Door system (only for rooms preset)
   private doorSystem: DoorSystem | null = null;
   private propSystem: DungeonPropSystem | null = null;
+  private natureResult: NatureGeneratorResult | null = null;
   /** Called when voxel dungeon props are ready; used to register prop chests with ChestSystem */
   private propChestRegistrar: ((list: { position: THREE.Vector3; mesh: THREE.Mesh; entity: Entity; openGeo?: THREE.BufferGeometry }[]) => void) | null = null;
 
@@ -739,6 +743,7 @@ export class Terrain {
     this.heightmapSeed = result.seed;
     const heights = result.heights;
     const rampCells = result.rampCells;
+    this.rampCells = rampCells;
     this.heightmapData = heights;
     // During remesh, keep original ladder defs (world positions don't change)
     if (!this.isRemeshing) {
@@ -1103,6 +1108,137 @@ export class Terrain {
 
     // Create ladder meshes at detected cliff edges
     this.createLadderMeshes();
+
+    // Generate nature (trees, rocks, grass, flowers)
+    if (useGameStore.getState().natureEnabled) {
+      this.generateNatureElements();
+    }
+  }
+
+  private generateNatureElements(): void {
+    if (!this.heightmapData) return;
+    // Dispose previous nature
+    if (this.natureResult) {
+      this.group.remove(this.natureResult.group);
+      this.natureResult.dispose();
+      this.natureResult = null;
+    }
+
+    // Build exclusion zones from ramps and ladders
+    const exclusions: { x: number; z: number; r: number }[] = [];
+    const gs = this.heightmapGroundSize;
+    const res = this.heightmapRes;
+    const cellSize = gs / res;
+    const halfG = gs / 2;
+    for (const idx of this.rampCells) {
+      const gz = Math.floor(idx / (res + 1));
+      const gx = idx - gz * (res + 1);
+      exclusions.push({ x: gx * cellSize - halfG, z: gz * cellSize - halfG, r: cellSize * 1.2 });
+    }
+    for (const ld of this.ladderDefs) {
+      exclusions.push({ x: ld.bottomX, z: ld.bottomZ, r: 1.5 });
+      exclusions.push({ x: ld.highWorldX ?? ld.bottomX, z: ld.highWorldZ ?? ld.bottomZ, r: 1.5 });
+      exclusions.push({ x: ld.lowWorldX, z: ld.lowWorldZ, r: 1.5 });
+    }
+
+    const biome = paletteBiome[this.paletteName] ?? 'temperate';
+    const result = generateNature(
+      this.heightmapData,
+      this.heightmapRes,
+      this.heightmapGroundSize,
+      this.getWaterY(),
+      biome,
+      this.palette,
+      this.heightmapSeed ?? 0,
+      exclusions,
+      useGameStore.getState().useBiomes,
+    );
+    this.natureResult = result;
+    this.group.add(result.group);
+
+    if (useGameStore.getState().debugBiomes && useGameStore.getState().useBiomes) {
+      this.tintTerrainByPatches(result);
+    }
+
+    // Register tree trunks as small debris so characters walk around them
+    for (const t of result.treePositions) {
+      const h = sampleHeightmap(this.heightmapData, this.heightmapRes, this.heightmapGroundSize, t.x, t.z);
+      this.debris.push({
+        x: t.x, z: t.z,
+        halfW: t.radius, halfD: t.radius,
+        height: h + 0.3,
+      });
+    }
+  }
+
+  private tintTerrainByPatches(nature: NatureGeneratorResult): void {
+    if (!this.heightmapMesh || !this.heightmapData) return;
+    const geo = this.heightmapMesh.geometry;
+    const colorAttr = geo.getAttribute('color') as THREE.BufferAttribute;
+    const posAttr = geo.getAttribute('position') as THREE.BufferAttribute;
+    if (!colorAttr || !posAttr) return;
+
+    const th = nature.patchThreshold;
+    const tintStrength = 0.7;
+    const treeColor = new THREE.Color(0.0, 0.9, 0.0);
+    const rockColor = new THREE.Color(1.0, 0.5, 0.0);
+    const flowerColor = new THREE.Color(1.0, 0.0, 1.0);
+    const cliffColor = new THREE.Color(this.palette.cliff);
+
+    const heights = this.heightmapData;
+    const res = this.heightmapRes;
+    const gs = this.heightmapGroundSize;
+    const eps = (gs / res) * 0.5;
+
+    const tmpBase = new THREE.Color();
+    const tmpTint = new THREE.Color();
+    let tinted = 0;
+
+    for (let i = 0; i < posAttr.count; i++) {
+      const wx = posAttr.getX(i);
+      const wz = posAttr.getZ(i);
+
+      // Compute slope at this vertex
+      const hL = sampleHeightmap(heights, res, gs, wx - eps, wz);
+      const hR = sampleHeightmap(heights, res, gs, wx + eps, wz);
+      const hU = sampleHeightmap(heights, res, gs, wx, wz - eps);
+      const hD = sampleHeightmap(heights, res, gs, wx, wz + eps);
+      const gx = (hR - hL) / (2 * eps);
+      const gz = (hD - hU) / (2 * eps);
+      const slope = Math.sqrt(gx * gx + gz * gz);
+
+      // Skip cliff faces -- keep their original cliff coloring
+      if (slope > 0.8) continue;
+
+      const tp = nature.hasTrees ? nature.treePatch(wx, wz) : 0;
+      const rp = nature.hasRocks ? nature.rockPatch(wx, wz) : 0;
+      const fp = nature.hasFlowers ? nature.flowerPatch(wx, wz) : 0;
+
+      let best = 0;
+      let bestVal = 0;
+      if (tp > th && tp - th > bestVal) { bestVal = tp - th; best = 1; }
+      if (rp > th && rp - th > bestVal) { bestVal = rp - th; best = 2; }
+      if (fp > th && fp - th > bestVal) { bestVal = fp - th; best = 3; }
+
+      if (best === 0) continue;
+
+      tinted++;
+      // Fade tint out as slope approaches cliff threshold
+      const slopeFade = slope > 0.5 ? 1 - (slope - 0.5) / 0.3 : 1;
+      const intensity = (0.4 + 0.6 * Math.min(bestVal / (1 - th), 1)) * tintStrength * slopeFade;
+      tmpBase.setRGB(colorAttr.getX(i), colorAttr.getY(i), colorAttr.getZ(i));
+
+      if (best === 1) tmpTint.copy(treeColor);
+      else if (best === 2) tmpTint.copy(rockColor);
+      else tmpTint.copy(flowerColor);
+
+      tmpBase.lerp(tmpTint, intensity);
+      colorAttr.setXYZ(i, tmpBase.r, tmpBase.g, tmpBase.b);
+    }
+
+    console.log(`[Terrain] Patch tint: ${tinted}/${posAttr.count} vertices tinted`);
+
+    colorAttr.needsUpdate = true;
   }
 
   /** Create procedural ladder meshes at each detected ladder site. */
@@ -2305,6 +2441,11 @@ export class Terrain {
       this.group.remove(ladderGroup);
     }
     this.ladderMeshes = [];
+    if (this.natureResult) {
+      this.group.remove(this.natureResult.group);
+      this.natureResult.dispose();
+      this.natureResult = null;
+    }
 
     // Rebuild with same seed (stored from previous generation)
     this.isRemeshing = true;
@@ -2348,6 +2489,13 @@ export class Terrain {
     }
     this.ladderMeshes = [];
     this.ladderDefs = [];
+
+    // Dispose nature
+    if (this.natureResult) {
+      this.group.remove(this.natureResult.group);
+      this.natureResult.dispose();
+      this.natureResult = null;
+    }
 
     // Dispose door system
     if (this.doorSystem) {
