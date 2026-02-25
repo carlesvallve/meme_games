@@ -649,7 +649,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       return;
     }
     cachedInputState = input.update();
-    const { phase, cameraParams } = useGameStore.getState();
+    const { phase, cameraParams, settingsPanelOpen } = useGameStore.getState();
     cam.setParams(cameraParams);
 
     // Check for character selection
@@ -659,7 +659,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       spawnCharacters(selected);
     }
 
-    if ((phase === 'playing' || phase === 'player_dead') && activeCharacter) {
+    if ((phase === 'playing' || phase === 'player_dead') && activeCharacter && !settingsPanelOpen) {
       const playerChar = activeCharacter;
       // Sync active character's movement params from settings sliders
       syncAllCharacterParams();
