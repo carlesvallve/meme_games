@@ -113,7 +113,7 @@ export class Character implements BehaviorAgent {
   /** Frame rates per animation type */
   private static readonly VOX_FPS: Record<string, number> = { 
     idle: 2.5, 
-    walk: 9, 
+    walk: 16, 
     action: 9 
   };
 
