@@ -30,6 +30,44 @@ function navCellForPreset(_preset: string): number {
   return 0.25;
 }
 
+// ── HMR terrain cache ─────────────────────────────────────────────
+// Survives Vite hot reloads so the scene doesn't regenerate on every code edit.
+interface TerrainCache {
+  terrain: Terrain;
+  navGrid: ReturnType<Terrain['buildNavGrid']>;
+  paramsKey: string;
+}
+// Stored on window so it survives Vite HMR module re-evaluation
+interface HmrCache {
+  __terrainCache?: TerrainCache | null;
+  __hmrCharPos?: { x: number; y: number; z: number };
+  __hmrCharFacing?: number;
+  __hmrCharType?: string;
+  __hmrCamAngleX?: number;
+  __hmrCamAngleY?: number;
+  __hmrCamDistance?: number;
+}
+const _hc = window as unknown as HmrCache;
+function getTerrainCache(): TerrainCache | null { return _hc.__terrainCache ?? null; }
+function setTerrainCache(v: TerrainCache | null): void { _hc.__terrainCache = v; }
+
+/** Build a stable key from the store params that drive terrain generation. */
+function terrainParamsKey(): string {
+  const s = useGameStore.getState();
+  return JSON.stringify({
+    terrainPreset: s.terrainPreset,
+    heightmapStyle: s.heightmapStyle,
+    paletteName: s.paletteName,
+    wallGap: s.wallGap,
+    roomSpacing: s.roomSpacing,
+    tileSize: s.tileSize,
+    doorChance: s.doorChance,
+    resolutionScale: s.resolutionScale,
+    natureEnabled: s.natureEnabled,
+    useBiomes: s.useBiomes,
+  });
+}
+
 /** Melee auto-aim: find nearest enemy within reach+margin and a wide cone, return snap facing or null. */
 function findMeleeAimTarget(
   px: number, pz: number, currentFacing: number,
@@ -93,14 +131,47 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   const input = new Input();
 
   // Terrain + dependent systems (mutable for regeneration)
+  // Check HMR cache: reuse terrain if params haven't changed
   const { terrainPreset: initPreset, heightmapStyle: initStyle, paletteName: initPalette } = useGameStore.getState();
-  let terrain = new Terrain(scene, initPreset, initStyle, initPalette);
+  const currentParamsKey = terrainParamsKey();
+  let terrain: Terrain;
+  let navGrid: ReturnType<Terrain['buildNavGrid']>;
+  let hmrReused = false;
+
+  const hmrCacheEnabled = useGameStore.getState().hmrCacheEnabled;
+  const cached = hmrCacheEnabled ? getTerrainCache() : null;
+  if (cached && cached.paramsKey === currentParamsKey) {
+    // Reuse cached terrain — just re-add its group to the new scene
+    terrain = cached.terrain;
+    navGrid = cached.navGrid;
+    scene.add(terrain.group);
+    // Re-register entities that were cleared on previous destroy
+    terrain.reregisterEntities();
+    hmrReused = true;
+    // Restore camera orbit + snap target to cached char position
+    if (_hc.__hmrCamAngleX != null) {
+      cam.setOrbit(_hc.__hmrCamAngleX, _hc.__hmrCamAngleY!, _hc.__hmrCamDistance!);
+    }
+    if (_hc.__hmrCharPos) {
+      const cp = _hc.__hmrCharPos;
+      cam.setTarget(cp.x, cp.y, cp.z);
+      cam.updatePosition(1000); // snap camera to position immediately
+    }
+  } else {
+    // Dispose old cache if params changed
+    if (cached) {
+      cached.terrain.dispose();
+      setTerrainCache(null);
+    }
+    terrain = new Terrain(scene, initPreset, initStyle, initPalette);
+    const { playerParams: initParams } = useGameStore.getState();
+    navGrid = terrain.buildNavGrid(initParams.stepHeight, initParams.capsuleRadius, navCellForPreset(initPreset), initParams.slopeHeight);
+  }
+
   cam.terrainHeightAt = (x, z) => terrain.getFloorY(x, z);
   cam.terrainMesh = terrain.getTerrainMesh();
   useGameStore.getState().setPaletteActive(terrain.getPaletteName());
   sceneSky.setPalette(terrain.getPaletteName());
-  const { playerParams: initParams } = useGameStore.getState();
-  let navGrid = terrain.buildNavGrid(initParams.stepHeight, initParams.capsuleRadius, navCellForPreset(initPreset), initParams.slopeHeight);
   terrain.setGridOpacity(useGameStore.getState().gridOpacity);
   let collectibles = new CollectibleSystem(scene, terrain);
   let lootSystem = new LootSystem(scene, terrain);
@@ -115,6 +186,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   );
   if (usePropChestsOnly) {
     terrain.setPropChestRegistrar((list) => list.forEach(({ position, mesh, entity, openGeo }) => chestSystem.registerPropChest(position, mesh, entity, openGeo)));
+    if (hmrReused) terrain.reregisterPropChests();
   }
 
   // Speech bubbles
@@ -154,6 +226,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     collectibles.dispose();
     terrain.dispose();
     scene.remove(terrain.group);
+    setTerrainCache(null); // invalidate HMR cache on explicit regeneration
 
     // Read current settings from store
     const { terrainPreset, heightmapStyle, playerParams: pp, paletteName: palPick } = useGameStore.getState();
@@ -332,6 +405,9 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     // Set new one to player-controlled
     if (char) {
       char.setPlayerControlled(makePlayerControlDeps());
+      // Sync store so HMR restores the right character
+      lastSelectedCharacter = char.characterType;
+      useGameStore.getState().selectCharacter(char.characterType);
     }
 
     // Load new character's inventory
@@ -535,13 +611,24 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
 
     // Spawn only the controlled hero
     {
-      const spawnY = terrain.getTerrainY(0, 0);
-      const pos = navGrid.isWalkable(0, 0)
-        ? new THREE.Vector3(0, spawnY, 0)
-        : terrain.getRandomPosition();
+      let pos: THREE.Vector3;
+      if (hmrReused && _hc.__hmrCharPos) {
+        const cp = _hc.__hmrCharPos;
+        pos = new THREE.Vector3(cp.x, cp.y, cp.z);
+        _hc.__hmrCharPos = undefined; // consume so next spawn is fresh
+      } else {
+        const spawnY = terrain.getTerrainY(0, 0);
+        pos = navGrid.isWalkable(0, 0)
+          ? new THREE.Vector3(0, spawnY, 0)
+          : terrain.getRandomPosition();
+      }
 
       const char = new Character(scene, terrain, navGrid, controlledType, pos, ladderDefs);
       char.setPlayerControlled(makePlayerControlDeps());
+      if (hmrReused && _hc.__hmrCharFacing != null) {
+        char.setFacing(_hc.__hmrCharFacing);
+        _hc.__hmrCharFacing = undefined;
+      }
       characters.push(char);
       activeCharacter = char;
     }
@@ -637,6 +724,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       store.setGridOpacity(d.gridOpacity);
       store.setResolutionScale(d.resolutionScale);
       store.setRoomLabels(d.roomLabels);
+      store.setHmrCacheEnabled(d.hmrCacheEnabled);
       const dp = DEFAULT_PARTICLE_TOGGLES;
       for (const key of Object.keys(dp) as (keyof typeof dp)[]) {
         if (store.particleToggles[key] !== dp[key]) store.toggleParticle(key);
@@ -673,6 +761,13 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     cachedInputState = input.update();
     const { phase, cameraParams } = useGameStore.getState();
     cam.setParams(cameraParams);
+
+    // TAB: snap camera behind active character
+    if (cachedInputState.cameraSnap && activeCharacter) {
+      // Character facing is the direction the mesh looks; camera should orbit to behind
+      const behindAngle = activeCharacter.facing + Math.PI;
+      cam.snapBehind(behindAngle);
+    }
 
     if (cachedInputState.pause && (phase === 'playing' || phase === 'paused')) {
       useGameStore.getState().onPauseToggle?.();
@@ -983,8 +1078,24 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       if (enemySystem) enemySystem.dispose();
       if (projectileSystem) projectileSystem.dispose();
       goreSystem.dispose();
-      terrain.dispose();
+      // Cache terrain + player state for HMR reuse (when enabled)
+      scene.remove(terrain.group);
       entityRegistry.clear();
+      if (useGameStore.getState().hmrCacheEnabled) {
+        setTerrainCache({ terrain, navGrid, paramsKey: terrainParamsKey() });
+        if (activeCharacter) {
+          const p = activeCharacter.getPosition();
+          _hc.__hmrCharPos = { x: p.x, y: p.y, z: p.z };
+          _hc.__hmrCharFacing = activeCharacter.facing;
+          _hc.__hmrCharType = lastSelectedCharacter ?? undefined;
+        }
+        _hc.__hmrCamAngleX = cam.getAngleX();
+        _hc.__hmrCamAngleY = cam.getAngleY();
+        _hc.__hmrCamDistance = cam.getDistance();
+      } else {
+        setTerrainCache(null);
+        terrain.dispose();
+      }
       collectibles.dispose();
       chestSystem.dispose();
       lootSystem.dispose();

@@ -998,6 +998,11 @@ export class DungeonPropSystem {
     return candidates[Math.floor(Math.random() * candidates.length)];
   }
 
+  /** Return all prop entities (for HMR re-registration). */
+  getEntities(): Entity[] {
+    return this.props.map(p => p.entity);
+  }
+
   dispose(): void {
     for (const prop of this.props) {
       prop.entity.destroy();

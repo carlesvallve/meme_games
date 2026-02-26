@@ -65,7 +65,7 @@ interface BiomePreset {
   flowerColors: number[];
 }
 
-type TreeType = 'deciduous' | 'pine' | 'palm' | 'dead' | 'simple_tall' | 'simple_cube' | 'cactus';
+type TreeType = 'deciduous' | 'pine' | 'palm' | 'simple_tall' | 'simple_cube' | 'cactus';
 
 const BIOME_PRESETS: Record<BiomeType, BiomePreset> = {
   temperate: {
@@ -81,7 +81,7 @@ const BIOME_PRESETS: Record<BiomeType, BiomePreset> = {
     flowerColors: [0xe04040, 0xe0e040, 0x8040e0, 0xe080a0, 0x40a0e0],
   },
   autumn: {
-    treeTypes: ['deciduous', 'dead', 'simple_tall', 'simple_cube'],
+    treeTypes: ['deciduous', 'deciduous', 'simple_tall', 'simple_cube'],
     treeDensity: 0.20,
     rockDensity: 0.06,
     grassDensity: 0,
@@ -117,7 +117,7 @@ const BIOME_PRESETS: Record<BiomeType, BiomePreset> = {
     flowerColors: [],
   },
   desert: {
-    treeTypes: ['cactus', 'cactus', 'dead', 'simple_tall'],
+    treeTypes: ['cactus', 'cactus', 'simple_tall', 'simple_tall'],
     treeDensity: 0.06,
     scatterTreeChance: 0.04,
     rockDensity: 0.10,
@@ -130,7 +130,7 @@ const BIOME_PRESETS: Record<BiomeType, BiomePreset> = {
     flowerColors: [],
   },
   volcanic: {
-    treeTypes: ['dead', 'dead', 'simple_tall', 'simple_cube'],
+    treeTypes: ['simple_tall', 'simple_cube', 'simple_tall', 'simple_cube'],
     treeDensity: 0.04,
     rockDensity: 0.14,
     grassDensity: 0,
@@ -142,7 +142,7 @@ const BIOME_PRESETS: Record<BiomeType, BiomePreset> = {
     flowerColors: [],
   },
   barren: {
-    treeTypes: ['dead', 'simple_tall', 'simple_cube'],
+    treeTypes: ['simple_tall', 'simple_cube', 'simple_tall'],
     treeDensity: 0.03,
     rockDensity: 0.12,
     grassDensity: 0,
@@ -154,7 +154,7 @@ const BIOME_PRESETS: Record<BiomeType, BiomePreset> = {
     flowerColors: [],
   },
   swamp: {
-    treeTypes: ['deciduous', 'dead', 'simple_tall'],
+    treeTypes: ['deciduous', 'deciduous', 'simple_tall'],
     treeDensity: 0.14,
     rockDensity: 0.06,
     grassDensity: 0,
@@ -237,17 +237,18 @@ function buildDeciduousTree(leafColor: number, trunkColor: number, rng: () => nu
   tPos.needsUpdate = true;
   parts.push(trunk);
 
-  // 2-3 canopy blocks — simple and clean
+  // 2-3 canopy blocks — simple and clean; foliage starts at trunk top. Each block sits on the previous so none float.
   const canopyBlocks = 2 + Math.floor(rng() * 2);
-  const canopyBase = trunkH * 0.5;
+  let topY = trunkH;
   for (let i = 0; i < canopyBlocks; i++) {
     const bw = V * (3 + Math.floor(rng() * 3));
     const bh = V * (2 + Math.floor(rng() * 3));
     const bd = V * (3 + Math.floor(rng() * 3));
-    const ox = lean * 0.6 + (rng() - 0.5) * V * 1.5;
-    const oy = canopyBase + i * bh * 0.6;
-    const oz = (rng() - 0.5) * V * 1.5;
+    const ox = lean * 0.6 + (rng() - 0.5) * V * 0.8;
+    const oy = topY; // block bottom = top of previous (or trunk)
+    const oz = (rng() - 0.5) * V * 0.8;
     parts.push(voxBox(bw, bh, bd, ox, oy, oz, hueShift(leafColor, rng)));
+    topY = oy + bh;
   }
 
   return mergeGeometries(parts);
@@ -260,14 +261,16 @@ function buildPineTree(leafColor: number, trunkColor: number, rng: () => number)
 
   parts.push(voxBox(trunkW, trunkH, trunkW, 0, 0, 0, trunkColor));
 
-  // 2-3 tapering layers
+  // 2-3 tapering layers; first layer sits on trunk top. Each layer sits on the previous so none float.
   const layerCount = 2 + Math.floor(rng() * 2);
+  let topY = trunkH;
   for (let i = 0; i < layerCount; i++) {
     const t = i / layerCount;
     const layerW = V * (4 - Math.floor(t * 2.5));
     const layerH = V * (2 + Math.floor(rng() * 1.5));
-    const oy = trunkH * 0.25 + i * layerH * 0.85;
+    const oy = topY;
     parts.push(voxBox(layerW, layerH, layerW, 0, oy, 0, hueShift(leafColor, rng)));
+    topY = oy + layerH;
   }
 
   return mergeGeometries(parts);
@@ -302,36 +305,6 @@ function buildPalmTree(leafColor: number, trunkColor: number, rng: () => number)
   return mergeGeometries(parts);
 }
 
-function buildDeadTree(trunkColor: number, rng: () => number): THREE.BufferGeometry {
-  const trunkW = V * 1;
-  const trunkH = V * (6 + Math.floor(rng() * 5));
-  const parts: THREE.BufferGeometry[] = [];
-
-  const lean = (rng() - 0.5) * V * 1.5;
-  const trunk = voxBox(trunkW, trunkH, trunkW, 0, 0, 0, trunkColor);
-  const tPos = trunk.getAttribute('position');
-  for (let i = 0; i < tPos.count; i++) {
-    const yFrac = tPos.getY(i) / trunkH;
-    tPos.setX(i, tPos.getX(i) + lean * yFrac);
-  }
-  tPos.needsUpdate = true;
-  parts.push(trunk);
-
-  // 1-2 short branches
-  const branchCount = 1 + Math.floor(rng() * 2);
-  for (let i = 0; i < branchCount; i++) {
-    const bLen = V * (2 + Math.floor(rng() * 2));
-    const angle = rng() * Math.PI * 2;
-    const yOff = trunkH * (0.5 + rng() * 0.4);
-    const br = voxBox(bLen, V, V, 0, 0, 0, tintHex(trunkColor, (rng() - 0.5) * 0.04));
-    br.rotateY(angle);
-    br.translate(Math.cos(angle) * bLen * 0.4, yOff, Math.sin(angle) * bLen * 0.4);
-    parts.push(br);
-  }
-
-  return mergeGeometries(parts);
-}
-
 function buildSimpleTallTree(leafColor: number, trunkColor: number, rng: () => number): THREE.BufferGeometry {
   const trunkW = V * (0.8 + rng() * 0.5);
   const trunkH = V * (4 + Math.floor(rng() * 5));
@@ -351,7 +324,8 @@ function buildSimpleTallTree(leafColor: number, trunkColor: number, rng: () => n
   const canopyH = V * (4 + Math.floor(rng() * 6));
   const canopyD = V * (1.5 + Math.floor(rng() * 2));
   const shade = hueShift(leafColor, rng);
-  parts.push(voxBox(canopyW, canopyH, canopyD, lean * 0.7, trunkH * 0.5, 0, shade));
+  // Canopy sits on trunk top so trunk never sticks above foliage
+  parts.push(voxBox(canopyW, canopyH, canopyD, lean * 0.7, trunkH, 0, shade));
 
   return mergeGeometries(parts);
 }
@@ -373,7 +347,8 @@ function buildSimpleCubeTree(leafColor: number, trunkColor: number, rng: () => n
 
   const cubeSize = V * (3 + Math.floor(rng() * 4));
   const shade = hueShift(leafColor, rng);
-  parts.push(voxBox(cubeSize, cubeSize, cubeSize, lean * 0.6, trunkH * 0.45, 0, shade));
+  // Cube sits on trunk top so trunk never sticks above foliage
+  parts.push(voxBox(cubeSize, cubeSize, cubeSize, lean * 0.6, trunkH, 0, shade));
 
   return mergeGeometries(parts);
 }
@@ -402,7 +377,9 @@ function buildCactus(leafColor: number, _trunkColor: number, rng: () => number):
     parts.push(voxBox(armW, armH, armW, side * (bodyW / 2 + horizLen - armW / 2), yOff + armW, 0, shade2));
   }
 
-  return mergeGeometries(parts);
+  const geo = mergeGeometries(parts);
+  geo.scale(0.5, 0.5, 0.5); // cactuses ~half the size of trees
+  return geo;
 }
 
 function buildRock(color: number, rng: () => number): THREE.BufferGeometry {
@@ -546,30 +523,6 @@ function buildOrganicPalmTree(leafColor: number, trunkColor: number, rng: () => 
   return mergeGeometries(fronds);
 }
 
-function buildOrganicDeadTree(trunkColor: number, rng: () => number): THREE.BufferGeometry {
-  const trunkH = 0.35 + rng() * 0.3;
-  const trunkR = 0.025 + rng() * 0.02;
-  const trunk = new THREE.CylinderGeometry(trunkR * 0.4, trunkR, trunkH, 5);
-  trunk.translate(0, trunkH / 2, 0);
-  colorGeometry(trunk, trunkColor);
-
-  const branches: THREE.BufferGeometry[] = [trunk];
-  const branchCount = 2 + Math.floor(rng() * 3);
-  for (let i = 0; i < branchCount; i++) {
-    const angle = rng() * Math.PI * 2;
-    const pitch = 0.3 + rng() * 0.8;
-    const len = 0.1 + rng() * 0.15;
-    const br = new THREE.CylinderGeometry(0.005, 0.01, len, 3);
-    br.rotateZ(pitch);
-    br.rotateY(angle);
-    const yOff = trunkH * (0.5 + rng() * 0.4);
-    br.translate(Math.cos(angle) * len * 0.3, yOff, Math.sin(angle) * len * 0.3);
-    colorGeometry(br, trunkColor);
-    branches.push(br);
-  }
-  return mergeGeometries(branches);
-}
-
 function buildOrganicRock(color: number, rng: () => number): THREE.BufferGeometry {
   const size = 0.08 + rng() * 0.15;
   const geo = new THREE.DodecahedronGeometry(size, 0);
@@ -615,7 +568,6 @@ function buildOrganicFlower(petalColor: number, stemColor: number, rng: () => nu
 void buildOrganicDeciduousTree;
 void buildOrganicPineTree;
 void buildOrganicPalmTree;
-void buildOrganicDeadTree;
 void buildOrganicRock;
 void buildOrganicGrassTuft;
 void buildOrganicFlower;
@@ -839,7 +791,6 @@ export function generateNature(
       case 'deciduous': geo = buildDeciduousTree(leafColor, preset.trunkColor, treeRng); break;
       case 'pine': geo = buildPineTree(leafColor, preset.trunkColor, treeRng); break;
       case 'palm': geo = buildPalmTree(leafColor, preset.trunkColor, treeRng); break;
-      case 'dead': geo = buildDeadTree(preset.trunkColor, treeRng); break;
       case 'simple_tall': geo = buildSimpleTallTree(leafColor, preset.trunkColor, treeRng); break;
       case 'simple_cube': geo = buildSimpleCubeTree(leafColor, preset.trunkColor, treeRng); break;
       case 'cactus': geo = buildCactus(leafColor, preset.trunkColor, treeRng); break;
@@ -957,7 +908,7 @@ export function generateNature(
             const sh = sampleHeightmap(heights, resolution, groundSize, sx, sz);
             if (sh < waterY + 0.05) continue;
             const batchIdx = Math.floor(rng() * flowerBatches.length);
-            addInstance(flowerBatches[batchIdx], sx, sh, sz, rng() * Math.PI * 2, 0.6 + rng() * 0.6);
+            addInstance(flowerBatches[batchIdx], sx, sh, sz, rng() * Math.PI * 2, (0.6 + rng() * 0.6) * 0.7);
           }
         }
       }

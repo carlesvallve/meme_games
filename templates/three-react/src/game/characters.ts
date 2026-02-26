@@ -23,10 +23,14 @@ function pickRoster(): Record<CharacterType, VoxCharEntry> {
   ) as Record<CharacterType, VoxCharEntry>;
 }
 
-export let voxRoster: Record<CharacterType, VoxCharEntry> = pickRoster();
+// Persist roster across Vite HMR so character skins don't reshuffle on code edits
+const _wr = window as unknown as { __voxRoster?: Record<CharacterType, VoxCharEntry> };
+if (!_wr.__voxRoster) _wr.__voxRoster = pickRoster();
+export let voxRoster: Record<CharacterType, VoxCharEntry> = _wr.__voxRoster;
 
 export function rerollRoster(): void {
   voxRoster = pickRoster();
+  _wr.__voxRoster = voxRoster;
 }
 
 export function getSlots(): CharacterType[] {

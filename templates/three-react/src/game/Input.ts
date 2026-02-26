@@ -6,6 +6,7 @@ export interface InputState {
   action: boolean;
   cancel: boolean;
   pause: boolean;
+  cameraSnap: boolean;
 }
 
 export class Input {
@@ -16,10 +17,12 @@ export class Input {
    */
   private actionQueued = false;
   private pauseQueued = false;
+  private cameraSnapQueued = false;
   private state: InputState = {
     forward: false, backward: false,
     left: false, right: false,
     action: false, cancel: false, pause: false,
+    cameraSnap: false,
   };
 
   private touchStartX = 0;
@@ -41,6 +44,10 @@ export class Input {
       }
       if (e.code === 'KeyP' || e.code === 'Escape') {
         this.pauseQueued = true;
+      }
+      if (e.code === 'Tab') {
+        this.cameraSnapQueued = true;
+        e.preventDefault();
       }
     };
     this.onKeyUp = (e: KeyboardEvent) => {
@@ -92,8 +99,10 @@ export class Input {
     this.state.action = this.actionQueued;
     this.state.cancel = !!this.keys['Escape'];
     this.state.pause = this.pauseQueued;
+    this.state.cameraSnap = this.cameraSnapQueued;
     this.actionQueued = false;
     this.pauseQueued = false;
+    this.cameraSnapQueued = false;
     return { ...this.state };
   }
 
