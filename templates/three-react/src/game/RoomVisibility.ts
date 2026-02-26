@@ -17,7 +17,6 @@ export class RoomVisibility {
   // Door cell lookup: cellIndex → door index in DoorSystem
   private doorCellMap = new Map<number, number>();
 
-
   // State
   readonly visitedRooms = new Set<number>();
   readonly activeRooms = new Set<number>();
@@ -60,17 +59,12 @@ export class RoomVisibility {
     }
   }
 
-  private getOwnership(gx: number, gz: number): number | undefined {
-    if (gx < 0 || gx >= this.gridW || gz < 0 || gz >= this.gridD) return undefined;
-    return this.roomOwnership[gz * this.gridW + gx];
-  }
-
   /** Register a mesh (or group) under one or more room IDs */
   registerMesh(obj: THREE.Object3D, roomIds: number[]): void {
     this.allRegistered.add(obj);
     this.prevActiveKey = ''; // force re-apply on next update
     for (const id of roomIds) {
-      if (id === -1) continue; // skip unowned
+      if (id === -1) continue;
       let list = this.roomObjects.get(id);
       if (!list) {
         list = [];
@@ -193,7 +187,6 @@ export class RoomVisibility {
     for (const r of newActive) this.visitedRooms.add(r);
 
     // Compute best visibility state per object (active > visited > hidden).
-    // Objects in multiple rooms use the best state across all their rooms.
     const objState = new Map<THREE.Object3D, 'active' | 'visited' | 'hidden'>();
 
     for (const [roomId, objects] of this.roomObjects) {
@@ -222,7 +215,6 @@ export class RoomVisibility {
     }
 
     // Hide any registered object not processed by objState
-    // (e.g. doors whose connected rooms are all unowned/-1)
     for (const obj of this.allRegistered) {
       if (!objState.has(obj)) {
         obj.visible = false;
