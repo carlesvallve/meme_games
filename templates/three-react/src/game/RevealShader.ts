@@ -1,13 +1,17 @@
 import * as THREE from 'three';
 import { entityRegistry, Layer } from './Entity';
 
-export const revealUniforms = {
+// Persist across Vite HMR so patched materials keep referencing the same uniform objects
+const _w = window as unknown as { __revealUniforms?: typeof _defaultUniforms };
+const _defaultUniforms = {
   u_revealCenter: { value: new THREE.Vector3() },
   u_cameraPos: { value: new THREE.Vector3() },
   u_revealActive: { value: 0.0 },
   u_revealRadius: { value: 3.0 },
   u_revealFalloff: { value: 2.0 },
 };
+if (!_w.__revealUniforms) _w.__revealUniforms = _defaultUniforms;
+export const revealUniforms = _w.__revealUniforms;
 
 /**
  * Patch any MeshStandardMaterial with a directional reveal cone.
@@ -82,7 +86,10 @@ gl_FragColor.a *= revealAlpha;`,
   };
 }
 
-const patchedMats = new WeakSet<THREE.Material>();
+// Persist across HMR so materials aren't double-patched
+const _wp = window as unknown as { __revealPatchedMats?: WeakSet<THREE.Material> };
+if (!_wp.__revealPatchedMats) _wp.__revealPatchedMats = new WeakSet();
+const patchedMats = _wp.__revealPatchedMats;
 
 /**
  * Auto-patch every MeshStandardMaterial found on Architecture-layer entities.

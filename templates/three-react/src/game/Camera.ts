@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { smoothLerpVec3 } from '../utils/cameraUtils';
 import type { CameraParams } from '../store';
 import { entityRegistry, Layer } from './Entity';
+import { lerpAngle } from './Character';
 
 export interface CameraOptions {
   fov?: number;
@@ -66,6 +67,10 @@ export class Camera {
   terrainHeightAt: ((x: number, z: number) => number) | null = null;
   /** Optional: heightmap mesh for cliff collision (separate from Architecture raycast) */
   terrainMesh: THREE.Object3D | null = null;
+
+  // Snap-behind
+  private snapAngleY: number | null = null;
+  private readonly snapSpeed = 12; // exponential lerp speed
 
   // Screen shake
   private shakeX = 0;
@@ -142,6 +147,7 @@ export class Camera {
       this.lastPointerX = e.clientX;
       this.lastPointerY = e.clientY;
 
+      this.snapAngleY = null; // cancel snap on manual drag
       this.angleY -= dx * this.rotationSpeed;
       this.angleX = Math.max(
         this.pitchMin,
@@ -223,8 +229,19 @@ export class Camera {
     this.updatePosition(1000); // snap to initial position
   }
 
-  getAngleY(): number {
-    return this.angleY;
+  getAngleX(): number { return this.angleX; }
+  getAngleY(): number { return this.angleY; }
+  getDistance(): number { return this.distance; }
+
+  setOrbit(angleX: number, angleY: number, distance: number): void {
+    this.angleX = angleX;
+    this.angleY = angleY;
+    this.distance = distance;
+  }
+
+  /** Smoothly rotate the camera orbit to the given yaw angle. */
+  snapBehind(targetAngleY: number): void {
+    this.snapAngleY = targetAngleY;
   }
 
   /** Returns true if the most recent pointer interaction was a confirmed drag (not a click). */
@@ -247,6 +264,20 @@ export class Camera {
 
   updatePosition(dt: number): void {
     if (!this.hasInitialTarget) return;
+
+    // Snap-behind lerp
+    if (this.snapAngleY !== null) {
+      const t = 1 - Math.exp(-this.snapSpeed * dt);
+      this.angleY = lerpAngle(this.angleY, this.snapAngleY, t);
+      // Finish when close enough
+      let diff = this.snapAngleY - this.angleY;
+      while (diff > Math.PI) diff -= Math.PI * 2;
+      while (diff < -Math.PI) diff += Math.PI * 2;
+      if (Math.abs(diff) < 0.01) {
+        this.angleY = this.snapAngleY;
+        this.snapAngleY = null;
+      }
+    }
 
     // Smooth the orbit center (follow target), not the camera — so we can lookAt it without tilt
     smoothLerpVec3(this.smoothedTarget, this.target, this.followSpeed, dt);

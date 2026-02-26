@@ -24,6 +24,7 @@ const RANGED_CONFIG: Record<string, ProjectileConfig> = {
   necromancer: { kind: 'fireball', color: 0xaa44ff, speed: 10, damage: 2, lifetime: 1.0, cooldown: 0.45 },
 };
 
+
 /** Half a voxel in world units (height step); used to nudge muzzle up. */
 const HALF_VOXEL = 0.5 / 15;
 

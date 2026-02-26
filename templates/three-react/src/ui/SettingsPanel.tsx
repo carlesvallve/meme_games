@@ -240,12 +240,22 @@ function ScenePanel() {
   const debugBiomes = useGameStore((s) => s.debugBiomes);
   const setDebugBiomes = useGameStore((s) => s.setDebugBiomes);
   const propCategories = PROP_CATEGORIES;
+  const hmrCacheEnabled = useGameStore((s) => s.hmrCacheEnabled);
+  const setHmrCacheEnabled = useGameStore((s) => s.setHmrCacheEnabled);
   const remesh = useGameStore((s) => s.onRemesh);
   const randomizePalette = useGameStore((s) => s.onRandomizePalette);
 
+  const sectionTitle = { color: '#6af', fontSize: 10, fontWeight: 700, letterSpacing: 1.5, marginBottom: 2 } as const;
+  const separator = { borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: 6, marginTop: 4 } as const;
+
+  const hasPresetSettings = terrainPreset === 'heightmap'
+    || terrainPreset === 'rooms'
+    || terrainPreset === 'voxelDungeon';
+
   return (
     <div style={{ ...panelStyle, marginBottom: 4 }}>
-      {/* Heightmap thumbnail + label row */}
+
+      {/* ── TERRAIN ── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
         {heightmapThumb && (
           <img
@@ -261,296 +271,306 @@ function ScenePanel() {
             }}
           />
         )}
-        <div style={{ color: '#6af', fontSize: 10, fontWeight: 700, letterSpacing: 1.5 }}>TERRAIN</div>
+        <div style={sectionTitle}>TERRAIN</div>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
         <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Preset</span>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, flex: 1 }}>
-          {TERRAIN_PRESETS.map((p) => (
-            <button
-              key={p}
-              onClick={() => setTerrainPreset(p)}
-              style={{
-                ...btnStyle(terrainPreset === p),
-                textTransform: 'capitalize',
-              }}
-            >
-              {p}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Heightmap style — only when heightmap preset */}
-      {terrainPreset === 'heightmap' && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-          <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Style</span>
-          <div style={{ display: 'flex', gap: 3, flex: 1 }}>
-            {HEIGHTMAP_STYLES.map((s) => (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 3, flex: 1 }}>
+          <div style={{ display: 'flex', gap: 3 }}>
+            {(['scattered', 'terraced', 'heightmap'] as TerrainPreset[]).map((p) => (
               <button
-                key={s}
-                onClick={() => setHeightmapStyle(s)}
-                style={{
-                  ...btnStyle(heightmapStyle === s),
-                  flex: 1,
-                  textTransform: 'capitalize',
-                }}
+                key={p}
+                onClick={() => setTerrainPreset(p)}
+                style={{ ...btnStyle(terrainPreset === p), flex: 1, textTransform: 'capitalize' }}
               >
-                {s}
+                {p}
+              </button>
+            ))}
+          </div>
+          <div style={{ display: 'flex', gap: 3 }}>
+            {(['dungeon', 'rooms', 'voxelDungeon'] as TerrainPreset[]).map((p) => (
+              <button
+                key={p}
+                onClick={() => setTerrainPreset(p)}
+                style={{ ...btnStyle(terrainPreset === p), flex: 1, textTransform: 'capitalize' }}
+              >
+                {p}
               </button>
             ))}
           </div>
         </div>
-      )}
+      </div>
 
-      {/* Wall gap slider — only when rooms preset */}
-      {terrainPreset === 'rooms' && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-          <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Wall Gap</span>
-          <input
-            type="range"
-            min={0} max={4} step={1}
-            value={wallGap}
-            onChange={(e) => setWallGap(parseInt(e.target.value, 10))}
-            style={{ flex: 1, height: 14, accentColor: '#6af' }}
-          />
-          <span style={{ color: '#fff', width: 36, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-            {wallGap}
-          </span>
-        </div>
-      )}
-
-      {/* Room spacing slider — only for voxelDungeon */}
-      {terrainPreset === 'voxelDungeon' && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-          <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Room Gap</span>
-          <input
-            type="range"
-            min={1} max={8} step={1}
-            value={roomSpacing}
-            onChange={(e) => setRoomSpacing(parseInt(e.target.value, 10))}
-            style={{ flex: 1, height: 14, accentColor: '#6af' }}
-          />
-          <span style={{ color: '#fff', width: 36, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-            {roomSpacing}
-          </span>
-        </div>
-      )}
-
-      {/* Tile size slider — only for voxelDungeon */}
-      {terrainPreset === 'voxelDungeon' && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-          <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Tile Size</span>
-          <input
-            type="range"
-            min={0.5} max={2} step={0.25}
-            value={tileSize}
-            onChange={(e) => setTileSize(parseFloat(e.target.value))}
-            style={{ flex: 1, height: 14, accentColor: '#6af' }}
-          />
-          <span style={{ color: '#fff', width: 36, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-            {tileSize}m
-          </span>
-        </div>
-      )}
-
-      {/* Test Prop dropdown — only for voxelDungeon */}
-      {terrainPreset === 'voxelDungeon' && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-          <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Test Prop</span>
-          <select
-            value={testProp}
-            onChange={(e) => setTestProp(e.target.value)}
-            style={{
-              flex: 1,
-              padding: '3px 6px',
-              background: 'rgba(255,255,255,0.08)',
-              color: '#ccc',
-              border: '1px solid rgba(255,255,255,0.2)',
-              borderRadius: 3,
-            }}
-          >
-            <option value="">All (templates)</option>
-            {propCategories.map((cat) => (
-              <option key={cat} value={cat}>{cat}</option>
-            ))}
-          </select>
-        </div>
-      )}
-
-      {/* Test Floor dropdown — only for voxelDungeon */}
-      {terrainPreset === 'voxelDungeon' && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-          <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Test Floor</span>
-          <select
-            value={testFloor}
-            onChange={(e) => { setTestFloor(e.target.value); swapGroundTiles(e.target.value); }}
-            style={{
-              flex: 1,
-              padding: '3px 6px',
-              background: 'rgba(255,255,255,0.08)',
-              color: '#ccc',
-              border: '1px solid rgba(255,255,255,0.2)',
-              borderRadius: 3,
-            }}
-          >
-            <option value="">Random</option>
-            {GROUND_TILE_IDS.map((id) => (
-              <option key={id} value={id}>{id}</option>
-            ))}
-          </select>
-        </div>
-      )}
-
-      {/* Door chance slider — only for voxelDungeon */}
-      {terrainPreset === 'voxelDungeon' && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-          <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Door Chance</span>
-          <input
-            type="range"
-            min={0} max={1} step={0.1}
-            value={doorChance}
-            onChange={(e) => setDoorChance(parseFloat(e.target.value))}
-            style={{ flex: 1, height: 14, accentColor: '#6af' }}
-          />
-          <span style={{ color: '#fff', width: 36, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-            {doorChance.toFixed(1)}
-          </span>
-        </div>
-      )}
-
-      {/* Room labels on/off — only for voxelDungeon */}
-      {terrainPreset === 'voxelDungeon' && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-          <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Room Labels</span>
-          <button
-            type="button"
-            onClick={() => setRoomLabels(!roomLabels)}
-            style={{ ...btnStyle(roomLabels), flex: 1 }}
-          >
-            {roomLabels ? 'On' : 'Off'}
-          </button>
-        </div>
-      )}
-
-      {/* Nature toggle — only for heightmap-based terrains */}
-      {(terrainPreset === 'heightmap' || terrainPreset === 'terraced') && (
-        <>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-            <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Nature</span>
-            <button
-              type="button"
-              onClick={() => setNatureEnabled(!natureEnabled)}
-              style={{ ...btnStyle(natureEnabled), flex: 1 }}
-            >
-              {natureEnabled ? 'On' : 'Off'}
-            </button>
+      {/* ── PRESET-SPECIFIC ── */}
+      {hasPresetSettings && (
+        <div style={separator}>
+          <div style={sectionTitle}>
+            {terrainPreset === 'voxelDungeon' ? 'VOXEL DUNGEON'
+              : terrainPreset === 'rooms' ? 'ROOMS'
+              : 'HEIGHTMAP'}
           </div>
-          {natureEnabled && (
+
+          {/* heightmap: style buttons */}
+          {terrainPreset === 'heightmap' && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+              <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Style</span>
+              <div style={{ display: 'flex', gap: 3, flex: 1 }}>
+                {HEIGHTMAP_STYLES.map((s) => (
+                  <button
+                    key={s}
+                    onClick={() => setHeightmapStyle(s)}
+                    style={{ ...btnStyle(heightmapStyle === s), flex: 1, textTransform: 'capitalize' }}
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* heightmap: nature + biomes */}
+          {terrainPreset === 'heightmap' && (
             <>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Biomes</span>
-                <button
-                  type="button"
-                  onClick={() => setUseBiomes(!useBiomes)}
-                  style={{ ...btnStyle(useBiomes), flex: 1 }}
-                >
-                  {useBiomes ? 'On' : 'Off'}
-                </button>
+                <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Nature</span>
+                {(['on', 'off'] as const).map((val) => (
+                  <button
+                    key={val}
+                    onClick={() => setNatureEnabled(val === 'on')}
+                    style={{
+                      ...resetBtnStyle, flex: 1, margin: 0,
+                      background: (natureEnabled ? 'on' : 'off') === val ? '#6af' : '#333',
+                      color: (natureEnabled ? 'on' : 'off') === val ? '#000' : '#aaa',
+                    }}
+                  >
+                    {val}
+                  </button>
+                ))}
+              </div>
+              {natureEnabled && (
+                <>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                    <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Biomes</span>
+                    {(['on', 'off'] as const).map((val) => (
+                      <button
+                        key={val}
+                        onClick={() => setUseBiomes(val === 'on')}
+                        style={{
+                          ...resetBtnStyle, flex: 1, margin: 0,
+                          background: (useBiomes ? 'on' : 'off') === val ? '#6af' : '#333',
+                          color: (useBiomes ? 'on' : 'off') === val ? '#000' : '#aaa',
+                        }}
+                      >
+                        {val}
+                      </button>
+                    ))}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                    <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Debug</span>
+                    {(['on', 'off'] as const).map((val) => (
+                      <button
+                        key={val}
+                        onClick={() => setDebugBiomes(val === 'on')}
+                        style={{
+                          ...resetBtnStyle, flex: 1, margin: 0,
+                          background: (debugBiomes ? 'on' : 'off') === val ? '#6af' : '#333',
+                          color: (debugBiomes ? 'on' : 'off') === val ? '#000' : '#aaa',
+                        }}
+                      >
+                        {val}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </>
+          )}
+
+          {/* rooms: wall gap */}
+          {terrainPreset === 'rooms' && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+              <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Wall Gap</span>
+              <input
+                type="range" min={0} max={4} step={1} value={wallGap}
+                onChange={(e) => setWallGap(parseInt(e.target.value, 10))}
+                style={{ flex: 1, height: 14, accentColor: '#6af' }}
+              />
+              <span style={{ color: '#fff', width: 36, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                {wallGap}
+              </span>
+            </div>
+          )}
+
+          {/* voxelDungeon: all dungeon-specific settings */}
+          {terrainPreset === 'voxelDungeon' && (
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Room Gap</span>
+                <input
+                  type="range" min={1} max={8} step={1} value={roomSpacing}
+                  onChange={(e) => setRoomSpacing(parseInt(e.target.value, 10))}
+                  style={{ flex: 1, height: 14, accentColor: '#6af' }}
+                />
+                <span style={{ color: '#fff', width: 36, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                  {roomSpacing}
+                </span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Debug</span>
-                <button
-                  type="button"
-                  onClick={() => setDebugBiomes(!debugBiomes)}
-                  style={{ ...btnStyle(debugBiomes), flex: 1 }}
+                <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Tile Size</span>
+                <input
+                  type="range" min={0.5} max={2} step={0.25} value={tileSize}
+                  onChange={(e) => setTileSize(parseFloat(e.target.value))}
+                  style={{ flex: 1, height: 14, accentColor: '#6af' }}
+                />
+                <span style={{ color: '#fff', width: 36, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                  {tileSize}m
+                </span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Door Chance</span>
+                <input
+                  type="range" min={0} max={1} step={0.1} value={doorChance}
+                  onChange={(e) => setDoorChance(parseFloat(e.target.value))}
+                  style={{ flex: 1, height: 14, accentColor: '#6af' }}
+                />
+                <span style={{ color: '#fff', width: 36, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                  {doorChance.toFixed(1)}
+                </span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Room Labels</span>
+                {(['on', 'off'] as const).map((val) => (
+                  <button
+                    key={val}
+                    onClick={() => setRoomLabels(val === 'on')}
+                    style={{
+                      ...resetBtnStyle, flex: 1, margin: 0,
+                      background: (roomLabels ? 'on' : 'off') === val ? '#6af' : '#333',
+                      color: (roomLabels ? 'on' : 'off') === val ? '#000' : '#aaa',
+                    }}
+                  >
+                    {val}
+                  </button>
+                ))}
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Test Prop</span>
+                <select
+                  value={testProp}
+                  onChange={(e) => setTestProp(e.target.value)}
+                  style={{
+                    flex: 1, padding: '3px 6px',
+                    background: 'rgba(255,255,255,0.08)', color: '#ccc',
+                    border: '1px solid rgba(255,255,255,0.2)', borderRadius: 3,
+                  }}
                 >
-                  {debugBiomes ? 'On' : 'Off'}
-                </button>
+                  <option value="">All (templates)</option>
+                  {propCategories.map((cat) => (
+                    <option key={cat} value={cat}>{cat}</option>
+                  ))}
+                </select>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Test Floor</span>
+                <select
+                  value={testFloor}
+                  onChange={(e) => { setTestFloor(e.target.value); swapGroundTiles(e.target.value); }}
+                  style={{
+                    flex: 1, padding: '3px 6px',
+                    background: 'rgba(255,255,255,0.08)', color: '#ccc',
+                    border: '1px solid rgba(255,255,255,0.2)', borderRadius: 3,
+                  }}
+                >
+                  <option value="">Random</option>
+                  {GROUND_TILE_IDS.map((id) => (
+                    <option key={id} value={id}>{id}</option>
+                  ))}
+                </select>
               </div>
             </>
           )}
-        </>
+        </div>
       )}
 
-      {/* Palette dropdown */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-        <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Palette</span>
-        <select
-          value={paletteName}
-          onChange={(e) => setPaletteName(e.target.value)}
-          style={{
-            flex: 1,
-            padding: '3px 6px',
-            background: 'rgba(255,255,255,0.08)',
-            color: '#ccc',
-            border: '1px solid rgba(255,255,255,0.2)',
-            borderRadius: 3,
-            fontSize: 11,
-            cursor: 'pointer',
-            textTransform: 'capitalize',
-          }}
-        >
-          {PALETTE_NAMES.map((name) => (
-            <option key={name} value={name} style={{ background: '#1a1a2a', color: '#ccc' }}>
-              {name}
-            </option>
-          ))}
-        </select>
-        {paletteActive && (
-          <span
-            onClick={() => randomizePalette?.()}
+      {/* ── DISPLAY ── */}
+      <div style={separator}>
+        <div style={sectionTitle}>DISPLAY</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+          <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Palette</span>
+          <select
+            value={paletteName}
+            onChange={(e) => setPaletteName(e.target.value)}
             style={{
-              color: '#6af',
-              fontSize: 10,
-              flexShrink: 0,
-              textTransform: 'capitalize',
-              cursor: 'pointer',
-              padding: '2px 4px',
-              borderRadius: 3,
-              background: 'rgba(100,170,255,0.1)',
+              flex: 1, padding: '3px 6px',
+              background: 'rgba(255,255,255,0.08)', color: '#ccc',
+              border: '1px solid rgba(255,255,255,0.2)', borderRadius: 3,
+              fontSize: 11, cursor: 'pointer', textTransform: 'capitalize',
             }}
-            title="Click to randomize palette"
           >
-            {paletteActive}
+            {PALETTE_NAMES.map((name) => (
+              <option key={name} value={name} style={{ background: '#1a1a2a', color: '#ccc' }}>
+                {name}
+              </option>
+            ))}
+          </select>
+          {paletteActive && (
+            <span
+              onClick={() => randomizePalette?.()}
+              style={{
+                color: '#6af', fontSize: 10, flexShrink: 0,
+                textTransform: 'capitalize', cursor: 'pointer',
+                padding: '2px 4px', borderRadius: 3,
+                background: 'rgba(100,170,255,0.1)',
+              }}
+              title="Click to randomize palette"
+            >
+              {paletteActive}
+            </span>
+          )}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+          <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Grid</span>
+          <input
+            type="range" min={0} max={1} step={0.05} value={gridOpacity}
+            onChange={(e) => setGridOpacity(parseFloat(e.target.value))}
+            style={{ flex: 1, height: 14, accentColor: '#6af' }}
+          />
+          <span style={{ color: '#fff', width: 36, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+            {gridOpacity.toFixed(2)}
           </span>
-        )}
-      </div>
-
-      {/* Grid opacity slider */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-        <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Grid</span>
-        <input
-          type="range"
-          min={0} max={1} step={0.05}
-          value={gridOpacity}
-          onChange={(e) => setGridOpacity(parseFloat(e.target.value))}
-          style={{ flex: 1, height: 14, accentColor: '#6af' }}
-        />
-        <span style={{ color: '#fff', width: 36, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-          {gridOpacity.toFixed(2)}
-        </span>
-      </div>
-
-      {/* Resolution scale slider */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-        <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Resolution</span>
-        <input
-          type="range"
-          min={0.5} max={3} step={0.5}
-          value={resolutionScale}
-          onChange={(e) => {
-            const v = parseFloat(e.target.value);
-            setResolutionScale(v);
-            // Debounce remesh: wait until user stops dragging
-            clearTimeout((window as any).__remeshTimer);
-            (window as any).__remeshTimer = setTimeout(() => remesh?.(), 300);
-          }}
-          style={{ flex: 1, height: 14, accentColor: '#6af' }}
-        />
-        <span style={{ color: '#fff', width: 36, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-          {resolutionScale.toFixed(1)}×
-        </span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+          <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Resolution</span>
+          <input
+            type="range" min={0.5} max={3} step={0.5} value={resolutionScale}
+            onChange={(e) => {
+              const v = parseFloat(e.target.value);
+              setResolutionScale(v);
+              clearTimeout((window as any).__remeshTimer);
+              (window as any).__remeshTimer = setTimeout(() => remesh?.(), 300);
+            }}
+            style={{ flex: 1, height: 14, accentColor: '#6af' }}
+          />
+          <span style={{ color: '#fff', width: 36, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+            {resolutionScale.toFixed(1)}×
+          </span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+          <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>HMR Cache</span>
+          {(['on', 'off'] as const).map((val) => (
+            <button
+              key={val}
+              onClick={() => setHmrCacheEnabled(val === 'on')}
+              style={{
+                ...resetBtnStyle, flex: 1, margin: 0,
+                background: (hmrCacheEnabled ? 'on' : 'off') === val ? '#6af' : '#333',
+                color: (hmrCacheEnabled ? 'on' : 'off') === val ? '#000' : '#aaa',
+              }}
+            >
+              {val}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Buttons */}
@@ -561,15 +581,10 @@ function ScenePanel() {
         <button
           onClick={() => regenerate?.()}
           style={{
-            flex: 1,
-            padding: '4px 12px',
-            background: 'rgba(100,220,120,0.2)',
-            color: '#8f8',
-            border: '1px solid rgba(100,220,120,0.4)',
-            borderRadius: 4,
-            cursor: 'pointer',
-            fontSize: 11,
-            fontWeight: 600,
+            flex: 1, padding: '4px 12px',
+            background: 'rgba(100,220,120,0.2)', color: '#8f8',
+            border: '1px solid rgba(100,220,120,0.4)', borderRadius: 4,
+            cursor: 'pointer', fontSize: 11, fontWeight: 600,
           }}
         >
           Regenerate
@@ -815,21 +830,23 @@ export function SettingsPanel() {
 
           {/* ── Torch ── */}
           <div style={{ borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: 6, marginTop: 2 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-              <span style={{ color: '#fa4', fontSize: 10, fontWeight: 700, letterSpacing: 1.5 }}>TORCH</span>
-              <button
-                onClick={toggleTorch}
-                style={{
-                  ...btnStyle(torchEnabled),
-                  fontSize: 10,
-                  padding: '2px 8px',
-                  background: torchEnabled ? 'rgba(255,170,68,0.25)' : 'rgba(0,0,0,0.4)',
-                  borderColor: torchEnabled ? 'rgba(255,170,68,0.5)' : 'rgba(255,255,255,0.15)',
-                  color: torchEnabled ? '#fa4' : '#666',
-                }}
-              >
-                {torchEnabled ? 'ON' : 'OFF'}
-              </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+              <span style={{ color: '#fa4', fontSize: 10, fontWeight: 700, letterSpacing: 1.5, width: 90, flexShrink: 0 }}>TORCH</span>
+              {(['on', 'off'] as const).map((val) => (
+                <button
+                  key={val}
+                  onClick={() => { if ((torchEnabled ? 'on' : 'off') !== val) toggleTorch(); }}
+                  style={{
+                    ...resetBtnStyle,
+                    flex: 1,
+                    background: (torchEnabled ? 'on' : 'off') === val ? '#fa4' : '#333',
+                    color: (torchEnabled ? 'on' : 'off') === val ? '#000' : '#aaa',
+                    margin: 0,
+                  }}
+                >
+                  {val}
+                </button>
+              ))}
             </div>
             {torchEnabled && (<>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>

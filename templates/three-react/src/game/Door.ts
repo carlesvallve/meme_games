@@ -474,6 +474,11 @@ export class DoorSystem {
     return out;
   }
 
+  /** Return all door entities (for HMR re-registration). */
+  getEntities(): Entity[] {
+    return this.doors.map(d => d.entity);
+  }
+
   dispose(): void {
     for (const door of this.doors) {
       door.entity.destroy();

@@ -31,6 +31,12 @@ export class EntityRegistry {
     this.entities.clear();
   }
 
+  /** Re-register an existing entity (restores registry entry + userData link after clear). */
+  reregister(e: Entity): void {
+    this.entities.add(e);
+    e.object3D.userData.entity = e;
+  }
+
   getByLayer(mask: number): Entity[] {
     const result: Entity[] = [];
     for (const e of this.entities) {

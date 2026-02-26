@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { Entity, Layer } from './Entity';
+import { Entity, Layer, entityRegistry } from './Entity';
 import { NavGrid, getBoxHeightAt } from './NavGrid';
 import type { SlopeDir } from './NavGrid';
 import { generateHeightmap, sampleHeightmap, getHeightmapConfig } from './TerrainNoise';
@@ -1587,6 +1587,14 @@ export class Terrain {
     this.propChestRegistrar = cb;
   }
 
+  /** Re-fire the prop chest registrar with existing prop chests (for HMR reuse). */
+  reregisterPropChests(): void {
+    if (this.propChestRegistrar && this.propSystem) {
+      const chests = this.propSystem.getInteractiveChests();
+      if (chests.length > 0) this.propChestRegistrar(chests);
+    }
+  }
+
   /** Show or hide voxel dungeon room name labels (e.g. from settings toggle). */
   setRoomLabelsVisible(visible: boolean): void {
     this.propSystem?.setRoomLabelsVisible(visible);
@@ -2246,6 +2254,10 @@ export class Terrain {
     return this.group;
   }
 
+  getDebrisCount(): number {
+    return this.debris.length;
+  }
+
 
 
   /** Get the ground/debris height at a point, optionally expanded by a radius */
@@ -2589,6 +2601,23 @@ export class Terrain {
     this.createHeightmapMesh();
     this.isRemeshing = false;
     this.setGridOpacity(useGameStore.getState().gridOpacity);
+  }
+
+  /** Re-register all terrain entities into the entity registry after an HMR clear. */
+  reregisterEntities(): void {
+    for (const entity of this.debrisEntities) {
+      entityRegistry.reregister(entity);
+    }
+    if (this.doorSystem) {
+      for (const entity of this.doorSystem.getEntities()) {
+        entityRegistry.reregister(entity);
+      }
+    }
+    if (this.propSystem) {
+      for (const entity of this.propSystem.getEntities()) {
+        entityRegistry.reregister(entity);
+      }
+    }
   }
 
   dispose(): void {
