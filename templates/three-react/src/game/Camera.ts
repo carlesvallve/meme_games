@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { smoothLerpVec3 } from '../utils/cameraUtils';
 import type { CameraParams } from '../store';
 import { entityRegistry, Layer } from './Entity';
-import { lerpAngle } from './Character';
+import { lerpAngle } from '../utils/math';
 
 export interface CameraOptions {
   fov?: number;

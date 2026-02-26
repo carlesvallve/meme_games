@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { useGameStore, type PlayerParams } from '../store';
+import { useGameStore, type MovementParams } from '../store';
 
 interface ParamDef {
-  key: keyof PlayerParams;
+  key: keyof MovementParams;
   label: string;
   min: number;
   max: number;
@@ -22,8 +22,8 @@ const PARAMS: ParamDef[] = [
 
 export function DebugPanel() {
   const [open, setOpen] = useState(false);
-  const params = useGameStore((s) => s.playerParams);
-  const setParam = useGameStore((s) => s.setPlayerParam);
+  const params = useGameStore((s) => s.characterParams);
+  const setParam = useGameStore((s) => s.setCharacterParam);
 
   return (
     <div

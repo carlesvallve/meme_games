@@ -1,5 +1,5 @@
 import { useGameStore } from '../store';
-import { CHARACTER_TEAM_COLORS } from '../game/characters';
+import { CHARACTER_TEAM_COLORS } from '../game/character';
 
 export function SpeechBubbles() {
   const bubbles = useGameStore((s) => s.speechBubbles);

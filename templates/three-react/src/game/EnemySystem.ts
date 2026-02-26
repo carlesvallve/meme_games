@@ -3,10 +3,10 @@ import type { Terrain } from './Terrain';
 import type { NavGrid } from './NavGrid';
 import type { LootSystem } from './Loot';
 import type { LadderDef } from './Ladder';
-import { Character } from './Character';
-import { Enemy } from './Enemy';
+import { Character } from './character';
+import { Enemy } from './character';
 import { audioSystem } from '../utils/AudioSystem';
-import { isRangedHeroId } from './CombatConfig';
+import { isRangedHeroId } from './character';
 import type { GoreSystem } from './GoreSystem';
 import { useGameStore } from '../store';
 

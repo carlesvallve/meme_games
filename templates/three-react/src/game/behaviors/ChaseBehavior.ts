@@ -1,6 +1,6 @@
 import { Behavior, type BehaviorAgent, type BehaviorContext, type BehaviorStatus } from './Behavior';
 import type { WaypointMeta } from '../AStar';
-import type { MovementParams } from '../Character';
+import type { MovementParams } from '../character';
 
 type ChaseState = 'idle' | 'chase' | 'attack';
 

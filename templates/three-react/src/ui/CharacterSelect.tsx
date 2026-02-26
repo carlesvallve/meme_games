@@ -1,5 +1,5 @@
 import { useGameStore } from '../store';
-import { CHARACTER_TEAM_COLORS, getSlots, voxRoster } from '../game/characters';
+import { CHARACTER_TEAM_COLORS, getSlots, voxRoster } from '../game/character';
 
 /** Per-hero emoji for the character select grid */
 const HERO_ICONS: Record<string, string> = {

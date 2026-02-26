@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { Character } from './Character';
+import type { Character } from './character';
 
 // ── Gore chunk (flying body parts + blood droplets) ─────────────────
 

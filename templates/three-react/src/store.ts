@@ -3,7 +3,10 @@ import type { CharacterType, SpeechBubbleData } from './types';
 import { Layer } from './game/Entity';
 import type { TerrainPreset } from './game/Terrain';
 import type { HeightmapStyle } from './game/TerrainNoise';
-import { DEFAULT_CHARACTER_PARAMS } from './game/CharacterParams';
+import { DEFAULT_CHARACTER_PARAMS } from './game/character';
+import type { MovementParams } from './game/character';
+
+export type { MovementParams } from './game/character';
 
 export interface ParticleToggles {
   dust: boolean;
@@ -13,34 +16,6 @@ export interface ParticleToggles {
 }
 
 export type MovementMode = 'free' | 'grid';
-
-export interface PlayerParams {
-  speed: number;
-  stepHeight: number;
-  slopeHeight: number;
-  capsuleRadius: number;
-  arrivalReach: number;
-  hopHeight: number;
-  magnetRadius: number;
-  magnetSpeed: number;
-  movementMode: MovementMode;
-  showPathDebug: boolean;
-  exhaustionEnabled: boolean;
-  attackReach: number;
-  attackArcHalf: number;
-  attackDamage: number;
-  attackCooldown: number;
-  chaseRange: number;
-  knockbackSpeed: number;
-  knockbackDecay: number;
-  invulnDuration: number;
-  flashDuration: number;
-  stunDuration: number;
-  attackDuration: number;
-  exhaustDuration: number;
-  showSlashEffect: boolean;
-  footIKEnabled: boolean;
-}
 
 export type LightPreset = 'default' | 'bright' | 'dark' | 'none';
 
@@ -70,15 +45,6 @@ export interface CameraParams {
 }
 
 // ── Defaults ──────────────────────────────────────────────────────────
-
-/** Player params: character defaults + player-only overrides (magnet, exhaustion, slash effect). */
-export const DEFAULT_PLAYER_PARAMS: PlayerParams = {
-  ...DEFAULT_CHARACTER_PARAMS,
-  magnetRadius: 1,
-  magnetSpeed: 16,
-  exhaustionEnabled: false,
-  showSlashEffect: true,
-};
 
 export const DEFAULT_CAMERA_PARAMS: CameraParams = {
   fov: 60,
@@ -122,7 +88,7 @@ export const DEFAULT_SCENE_SETTINGS = {
 const SETTINGS_KEY = 'dcrawler:settings';
 
 interface SavedSettings {
-  playerParams?: PlayerParams;
+  characterParams?: MovementParams;
   cameraParams?: CameraParams;
   lightPreset?: LightPreset;
   torchEnabled?: boolean;
@@ -146,6 +112,8 @@ interface SavedSettings {
   hmrCacheEnabled?: boolean;
   characterPushEnabled?: boolean;
   particleToggles?: ParticleToggles;
+  /** @deprecated Renamed to characterParams; kept for migration. */
+  playerParams?: MovementParams;
 }
 
 function loadSettings(): SavedSettings {
@@ -159,7 +127,7 @@ function loadSettings(): SavedSettings {
 function saveSettings(): void {
   const s = useGameStore.getState();
   const data: SavedSettings = {
-    playerParams: s.playerParams,
+    characterParams: s.characterParams,
     cameraParams: s.cameraParams,
     lightPreset: s.lightPreset,
     torchEnabled: s.torchEnabled,
@@ -208,7 +176,7 @@ interface GameStore {
   potions: number;
   speechBubbles: SpeechBubbleData[];
   particleToggles: ParticleToggles;
-  playerParams: PlayerParams;
+  characterParams: MovementParams;
   cameraParams: CameraParams;
   lightPreset: LightPreset;
   torchEnabled: boolean;
@@ -259,7 +227,7 @@ interface GameStore {
   addPotions: (n: number) => void;
   setSpeechBubbles: (bubbles: SpeechBubbleData[]) => void;
   toggleParticle: (key: keyof ParticleToggles) => void;
-  setPlayerParam: <K extends keyof PlayerParams>(key: K, value: PlayerParams[K]) => void;
+  setCharacterParam: <K extends keyof MovementParams>(key: K, value: MovementParams[K]) => void;
   setCameraParam: <K extends keyof CameraParams>(key: K, value: CameraParams[K]) => void;
   setLightPreset: (preset: LightPreset) => void;
   toggleTorch: () => void;
@@ -291,7 +259,7 @@ interface GameStore {
   onRegenerateScene: (() => void) | null;
   onRemesh: (() => void) | null;
   onRandomizePalette: (() => void) | null;
-  onResetPlayerParams: (() => void) | null;
+  onResetCharacterParams: (() => void) | null;
   onResetCameraParams: (() => void) | null;
   onResetLightParams: (() => void) | null;
   onResetSceneParams: (() => void) | null;
@@ -315,7 +283,7 @@ export const useGameStore = create<GameStore>((set) => ({
   potions: 0,
   speechBubbles: [],
   particleToggles: saved.particleToggles ?? { ...DEFAULT_PARTICLE_TOGGLES },
-  playerParams: { ...DEFAULT_PLAYER_PARAMS, ...saved.playerParams },
+  characterParams: { ...DEFAULT_CHARACTER_PARAMS, ...(saved.characterParams ?? saved.playerParams) },
   cameraParams: (() => {
     const def = { ...DEFAULT_CAMERA_PARAMS };
     const savedCam = saved.cameraParams;
@@ -381,9 +349,9 @@ export const useGameStore = create<GameStore>((set) => ({
     set((s) => ({
       particleToggles: { ...s.particleToggles, [key]: !s.particleToggles[key] },
     })),
-  setPlayerParam: (key, value) =>
+  setCharacterParam: (key, value) =>
     set((s) => ({
-      playerParams: { ...s.playerParams, [key]: value },
+      characterParams: { ...s.characterParams, [key]: value },
     })),
   setCameraParam: (key, value) =>
     set((s) => ({
@@ -422,7 +390,7 @@ export const useGameStore = create<GameStore>((set) => ({
   onRegenerateScene: null,
   onRemesh: null,
   onRandomizePalette: null,
-  onResetPlayerParams: null,
+  onResetCharacterParams: null,
   onResetCameraParams: null,
   onResetLightParams: null,
   onResetSceneParams: null,

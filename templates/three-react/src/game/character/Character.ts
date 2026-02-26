@@ -1,0 +1,489 @@
+import * as THREE from 'three';
+import { useGameStore } from '../../store';
+import { createCharacterMesh, voxRoster } from './characters';
+import type { CharacterType } from './characters';
+import type { VoxCharEntry, StepMode } from './VoxCharacterDB';
+import { Entity, Layer } from '../Entity';
+import type { Terrain } from '../Terrain';
+import type { NavGrid } from '../NavGrid';
+import { Behavior, type BehaviorAgent } from '../behaviors/Behavior';
+import { Roaming } from '../behaviors/Roaming';
+import { GoToPoint } from '../behaviors/GoToPoint';
+import { PlayerControl, type PlayerControlDeps } from '../behaviors/PlayerControl';
+import { audioSystem } from '../../utils/AudioSystem';
+import type { LadderDef } from '../Ladder';
+import {
+  DEFAULT_CHARACTER_PARAMS, GRAVITY, MAX_FALL_SPEED, STEP_UP_RATE, FOOT_SFX_COOLDOWN,
+  type MovementParams,
+} from './CharacterSettings';
+import { FootIK } from './FootIK';
+import { lerpAngle } from '../../utils/math';
+import { CharacterClimbing } from './CharacterClimbing';
+import { CharacterCombat, type CombatOwner } from './CharacterCombat';
+import { VoxAnimator } from './VoxAnimator';
+import { HpBar } from './HpBar';
+import { DebugPathVis } from './DebugPathVis';
+
+export class Character implements BehaviorAgent {
+  readonly mesh: THREE.Mesh;
+  readonly characterType: CharacterType;
+  entity: Entity;
+  facing = 0;
+  groundY = 0;
+  visualGroundY = 0;
+  velocityY = 0;
+  moveTime = 0;
+  lastHopHalf = 0;
+  hopFrequency = 4;
+  footSfxTimer = 0;
+
+  // ── Composed modules ──────────────────────────────────────────────
+  private climbing = new CharacterClimbing();
+  private combat = new CharacterCombat();
+  private animator = new VoxAnimator();
+  private hpBar: HpBar;
+  private debugVis: DebugPathVis;
+  private footIK: FootIK;
+
+  /** Per-character movement parameters (mutable, shared by reference with behaviors) */
+  params: MovementParams;
+
+  torchLight: THREE.PointLight;
+  torchLightEntity: Entity;
+  fillLight: THREE.PointLight;
+  torchTime = 0;
+
+  protected scene: THREE.Scene;
+  terrain: Terrain;
+  private navGrid: NavGrid;
+  private ladderDefs: ReadonlyArray<LadderDef>;
+
+  // ── Combat forwarding (keeps external API identical) ──────────────
+  get hp(): number { return this.combat.hp; }
+  set hp(v: number) { this.combat.hp = v; }
+  get maxHp(): number { return this.combat.maxHp; }
+  set maxHp(v: number) { this.combat.maxHp = v; }
+  get isAlive(): boolean { return this.combat.isAlive; }
+  set isAlive(v: boolean) { this.combat.isAlive = v; }
+  isEnemy = false;
+  get knockbackVX(): number { return this.combat.knockbackVX; }
+  set knockbackVX(v: number) { this.combat.knockbackVX = v; }
+  get knockbackVZ(): number { return this.combat.knockbackVZ; }
+  set knockbackVZ(v: number) { this.combat.knockbackVZ = v; }
+  get invulnTimer(): number { return this.combat.invulnTimer; }
+  set invulnTimer(v: number) { this.combat.invulnTimer = v; }
+  get flashTimer(): number { return this.combat.flashTimer; }
+  set flashTimer(v: number) { this.combat.flashTimer = v; }
+  get attackTimer(): number { return this.combat.attackTimer; }
+  set attackTimer(v: number) { this.combat.attackTimer = v; }
+  get isAttacking(): boolean { return this.combat.isAttacking; }
+  set isAttacking(v: boolean) { this.combat.isAttacking = v; }
+  get attackJustStarted(): boolean { return this.combat.attackJustStarted; }
+  set attackJustStarted(v: boolean) { this.combat.attackJustStarted = v; }
+  get attackCount(): number { return this.combat.attackCount; }
+  set attackCount(v: number) { this.combat.attackCount = v; }
+  get exhaustTimer(): number { return this.combat.exhaustTimer; }
+  set exhaustTimer(v: number) { this.combat.exhaustTimer = v; }
+  get stunTimer(): number { return this.combat.stunTimer; }
+  set stunTimer(v: number) { this.combat.stunTimer = v; }
+  get lastHitDirX(): number { return this.combat.lastHitDirX; }
+  set lastHitDirX(v: number) { this.combat.lastHitDirX = v; }
+  get lastHitDirZ(): number { return this.combat.lastHitDirZ; }
+  set lastHitDirZ(v: number) { this.combat.lastHitDirZ = v; }
+  get showingHpBar(): boolean { return this.hpBar.showing; }
+  set showingHpBar(v: boolean) { this.hpBar.showing = v; }
+
+  // ── VOX forwarding ───────────────────────────────────────────────
+  get voxEntry(): VoxCharEntry | null { return this.animator.voxEntry; }
+  set voxEntry(v: VoxCharEntry | null) { this.animator.voxEntry = v; }
+
+  getStepMode(): StepMode {
+    return this.animator.getStepMode();
+  }
+
+  // ── Behavior system ─────────────────────────────────────────────
+  protected behavior: Behavior;
+  private defaultBehavior: Roaming;
+  private playerControl: PlayerControl | null = null;
+  private _selected = false;
+
+  constructor(scene: THREE.Scene, terrain: Terrain, navGrid: NavGrid, type: CharacterType, position: THREE.Vector3, ladderDefs: ReadonlyArray<LadderDef> = [], skipAutoSkin = false) {
+    this.scene = scene;
+    this.terrain = terrain;
+    this.footIK = new FootIK(terrain);
+    this.navGrid = navGrid;
+    this.characterType = type;
+    this.ladderDefs = ladderDefs;
+
+    // Mesh (placeholder — replaced by VOX skin below)
+    this.mesh = createCharacterMesh();
+    this.mesh.position.copy(position);
+    this.groundY = position.y;
+    this.visualGroundY = position.y;
+    scene.add(this.mesh);
+    this.entity = new Entity(this.mesh, { layer: Layer.Character, radius: 0.25 });
+
+    // HP bar (billboard)
+    this.hpBar = new HpBar(scene);
+
+    // Debug path visualization
+    this.debugVis = new DebugPathVis(scene, terrain);
+
+    // Torch light
+    const torch = useGameStore.getState().torchParams;
+    this.torchLight = new THREE.PointLight(
+      new THREE.Color(torch.color),
+      torch.intensity,
+      torch.distance,
+    );
+    this.torchLight.position.set(position.x, position.y + torch.offsetUp, position.z);
+    this.torchLight.castShadow = false;
+    scene.add(this.torchLight);
+    this.torchLightEntity = new Entity(this.torchLight, { layer: Layer.Light, radius: torch.distance });
+
+    // Fill light
+    this.fillLight = new THREE.PointLight(new THREE.Color(torch.color), torch.intensity * 0.4, 3);
+    this.fillLight.castShadow = false;
+    scene.add(this.fillLight);
+
+    // Params: Character defaults first, then overlay store
+    const pp = useGameStore.getState().characterParams;
+    this.params = { ...DEFAULT_CHARACTER_PARAMS, ...pp };
+
+    // Default behavior: roaming
+    this.defaultBehavior = new Roaming({ navGrid, ladderDefs }, this.params);
+    this.behavior = this.defaultBehavior;
+
+    // Auto-apply VOX skin from the roster (skip for enemies — they apply their own)
+    if (!skipAutoSkin) {
+      const rosterEntry = voxRoster[type];
+      if (rosterEntry) {
+        this.applyVoxSkin(rosterEntry);
+      }
+    }
+  }
+
+  // ── CombatOwner adapter ─────────────────────────────────────────
+  private get combatOwner(): CombatOwner {
+    return {
+      mesh: this.mesh,
+      groundY: this.groundY,
+      isEnemy: this.isEnemy,
+      params: this.params,
+      terrain: this.terrain,
+      playActionAnim: () => this.playActionAnim(),
+      getActionFrameCount: () => this.animator.getActionFrameCount(),
+      getVoxAnimState: () => this.animator.getVoxAnimState(),
+      getVoxFrameIndex: () => this.animator.getVoxFrameIndex(),
+    };
+  }
+
+  // ── BehaviorAgent interface ──────────────────────────────────────
+
+  getX(): number { return this.mesh.position.x; }
+  getZ(): number { return this.mesh.position.z; }
+  getFacing(): number { return this.facing; }
+  setFacing(angle: number): void { this.facing = angle; this.mesh.rotation.y = angle; }
+
+  /** Apply vertical hop offset. */
+  applyHop(hopHeight: number): number {
+    const hopSin = Math.sin(this.moveTime * Math.PI);
+    const hop = Math.abs(hopSin) * hopHeight;
+    this.mesh.position.y = this.visualGroundY + hop;
+    const currentHopHalf = Math.floor(this.moveTime) % 2;
+    const stepMode = this.getStepMode();
+
+    if (stepMode === 'flyer') {
+      if (currentHopHalf !== this.lastHopHalf) this.lastHopHalf = currentHopHalf;
+      return currentHopHalf;
+    }
+    if (stepMode === 'walker' && currentHopHalf !== this.lastHopHalf && this.footSfxTimer >= FOOT_SFX_COOLDOWN) {
+      this.lastHopHalf = currentHopHalf;
+      this.footSfxTimer = 0;
+      const stepVol = this.isEnemy ? 0.35 : 0.7;
+      audioSystem.sfxAt('step', this.mesh.position.x, this.mesh.position.z, stepVol);
+    } else if (currentHopHalf !== this.lastHopHalf) {
+      this.lastHopHalf = currentHopHalf;
+    }
+
+    return currentHopHalf;
+  }
+
+  // ── VOX skin loading ─────────────────────────────────────────────
+
+  async applyVoxSkin(entry: VoxCharEntry): Promise<void> {
+    await this.animator.applySkin(this, entry, this.footIK);
+  }
+
+  private updateVoxAnimation(dt: number, isMoving: boolean): void {
+    this.animator.update(this, dt, isMoving, this.footIK);
+  }
+
+  private playActionAnim(): void {
+    this.animator.playAction(this);
+  }
+
+  // ── Selection & control switching ────────────────────────────────
+
+  get selected(): boolean { return this._selected; }
+
+  setPlayerControlled(deps: PlayerControlDeps): void {
+    this._selected = true;
+    this.playerControl = new PlayerControl({ navGrid: this.navGrid, ladderDefs: this.ladderDefs }, deps);
+    this.behavior = this.playerControl;
+  }
+
+  setAIControlled(): void {
+    this._selected = false;
+    this.playerControl = null;
+    this.behavior = this.defaultBehavior;
+  }
+
+  goTo(worldX: number, worldZ: number): void {
+    this.debugVis.clear();
+    this.behavior = new GoToPoint({ navGrid: this.navGrid, ladderDefs: this.ladderDefs }, this.params, worldX, worldZ);
+  }
+
+  getCameraTarget(): { x: number; y: number; z: number } {
+    return {
+      x: this.mesh.position.x,
+      y: this.visualGroundY + 0.5,
+      z: this.mesh.position.z,
+    };
+  }
+
+  // ── Update ───────────────────────────────────────────────────────
+
+  update(dt: number): void {
+    if (!this.isAlive) return;
+
+    this.updateCombat(dt);
+
+    if (this.stunTimer > 0) {
+      this.updateVisualY(dt);
+      this.mesh.position.y = this.visualGroundY;
+      this.updateVoxAnimation(dt, false);
+      this.updateTorch(dt);
+      return;
+    }
+
+    if (this._selected && this.playerControl && this.behavior instanceof GoToPoint) {
+      if (this.playerControl.hasInput()) {
+        this.behavior = this.playerControl;
+      }
+    }
+
+    const status = this.behavior.update(this, dt);
+
+    if (status === 'done') {
+      if (this._selected && this.playerControl) {
+        this.behavior = this.playerControl;
+      } else {
+        this.behavior = this.defaultBehavior;
+      }
+    }
+
+    if (this.params.showPathDebug) {
+      this.debugVis.sync(this.behavior, this.mesh.position);
+    } else {
+      this.debugVis.clear();
+    }
+    this.updateTorch(dt);
+  }
+
+  // ── Movement (BehaviorAgent) ─────────────────────────────────────
+
+  move(dx: number, dz: number, speed: number, stepHeight: number, capsuleRadius: number, dt: number, slopeHeight?: number, skipFacing?: boolean): boolean {
+    if (Math.abs(dx) < 0.001 && Math.abs(dz) < 0.001) return false;
+    this.footSfxTimer += dt;
+
+    const oldX = this.mesh.position.x;
+    const oldZ = this.mesh.position.z;
+    const newX = oldX + dx * speed * dt;
+    const newZ = oldZ + dz * speed * dt;
+
+    const resolved = this.terrain.resolveMovement(newX, newZ, this.groundY, stepHeight, capsuleRadius, oldX, oldZ, slopeHeight);
+    this.mesh.position.x = resolved.x;
+    this.mesh.position.z = resolved.z;
+    this.groundY = resolved.y;
+
+    this.updateVisualY(dt);
+
+    if (!skipFacing) {
+      const targetAngle = Math.atan2(dx, dz) + Math.PI;
+      this.facing = lerpAngle(this.facing, targetAngle, 1 - Math.exp(-24 * dt));
+      this.mesh.rotation.y = this.facing;
+    }
+
+    this.moveTime += dt * this.hopFrequency;
+    this.updateVoxAnimation(dt, true);
+
+    return true;
+  }
+
+  private updateVisualY(dt: number): void {
+    if (this.groundY > this.visualGroundY) {
+      this.visualGroundY = THREE.MathUtils.lerp(
+        this.visualGroundY,
+        this.groundY,
+        1 - Math.exp(-STEP_UP_RATE * dt),
+      );
+      this.velocityY = 0;
+    } else if (this.groundY < this.visualGroundY) {
+      this.velocityY = Math.min(this.velocityY + GRAVITY * dt, MAX_FALL_SPEED);
+      this.visualGroundY -= this.velocityY * dt;
+      if (this.visualGroundY <= this.groundY) {
+        const impactSpeed = this.velocityY;
+        this.visualGroundY = this.groundY;
+        this.velocityY = 0;
+        const stepMode = this.getStepMode();
+        if (stepMode === 'flyer') {
+          // no step/land sounds for flyers
+        } else if (impactSpeed > 1 && this.footSfxTimer >= FOOT_SFX_COOLDOWN) {
+          const vol = this.isEnemy ? 0.35 : 0.7;
+          if (stepMode === 'jumper') {
+            if (Math.random() < 0.5) audioSystem.sfxAt('step', this.mesh.position.x, this.mesh.position.z, vol);
+          } else {
+            audioSystem.sfxAt('land', this.mesh.position.x, this.mesh.position.z, vol);
+          }
+          this.footSfxTimer = 0;
+        }
+      }
+    } else {
+      this.velocityY = 0;
+    }
+  }
+
+  updateIdle(dt: number): void {
+    this.footSfxTimer += dt;
+    if (this.moveTime > 0) {
+      if (this.footSfxTimer >= FOOT_SFX_COOLDOWN && this.getStepMode() !== 'flyer') {
+        this.footSfxTimer = 0;
+        const stepVol = this.isEnemy ? 0.35 : 0.7;
+        audioSystem.sfxAt('step', this.mesh.position.x, this.mesh.position.z, stepVol);
+      }
+      this.moveTime = 0;
+      this.lastHopHalf = 0;
+    }
+    this.updateVisualY(dt);
+    this.mesh.position.y = THREE.MathUtils.lerp(
+      this.mesh.position.y,
+      this.visualGroundY,
+      1 - Math.exp(-15 * dt),
+    );
+    this.updateVoxAnimation(dt, false);
+  }
+
+  // ── HP bar ──────────────────────────────────────────────────────
+
+  updateHpBar(camera: THREE.Camera): void {
+    this.hpBar.update(this.mesh.position, this.hp, this.maxHp, this.isAlive, camera);
+  }
+
+  // ── Combat methods ───────────────────────────────────────────────
+
+  hideBody(): void {
+    this.mesh.visible = false;
+    this.hpBar.hide();
+  }
+
+  consumeJustTookDamage(): boolean {
+    return this.combat.consumeJustTookDamage();
+  }
+
+  takeDamage(amount: number, fromX: number, fromZ: number): boolean {
+    return this.combat.takeDamage(this.combatOwner, amount, fromX, fromZ);
+  }
+
+  startAttack(): boolean {
+    return this.combat.startAttack(this.combatOwner);
+  }
+
+  isInAttackHitWindow(): boolean {
+    return this.combat.isInAttackHitWindow(this.combatOwner);
+  }
+
+  markAttackHitApplied(): void {
+    this.combat.markAttackHitApplied();
+  }
+
+  canApplyAttackHit(): boolean {
+    return this.combat.canApplyAttackHit(this.combatOwner);
+  }
+
+  updateCombat(dt: number): void {
+    this.combat.update(this.combatOwner, dt);
+  }
+
+  updateTorch(dt: number): void {
+    const torchOn = useGameStore.getState().torchEnabled;
+    const torch = useGameStore.getState().torchParams;
+
+    if (!torchOn) {
+      this.torchLight.intensity = 0;
+      this.fillLight.intensity = 0;
+      return;
+    }
+
+    this.torchLight.color.set(torch.color);
+    this.torchLight.distance = torch.distance;
+
+    this.torchTime += dt * 12;
+    const flickerAmount = torch.flicker;
+    const flicker = 1 + (
+      Math.sin(this.torchTime) * 0.5 +
+      Math.sin(this.torchTime * 2.3) * 0.3 +
+      Math.sin(this.torchTime * 5.7) * 0.2
+    ) * flickerAmount;
+    this.torchLight.intensity = torch.intensity * flicker;
+
+    this.torchLight.position.set(
+      this.mesh.position.x,
+      this.mesh.position.y + torch.offsetUp,
+      this.mesh.position.z,
+    );
+
+    const fwdX = -Math.sin(this.facing);
+    const fwdZ = -Math.cos(this.facing);
+    const rightX = -fwdZ;
+    const rightZ = fwdX;
+    this.fillLight.color.set(torch.color);
+    this.fillLight.intensity = torch.intensity * 0.4 * flicker;
+    this.fillLight.position.set(
+      this.mesh.position.x + fwdX * torch.offsetForward + rightX * torch.offsetRight,
+      this.mesh.position.y + torch.offsetUp * 0.6,
+      this.mesh.position.z + fwdZ * torch.offsetForward + rightZ * torch.offsetRight,
+    );
+  }
+
+  // ── Climbing ─────────────────────────────────────────────────────
+
+  startClimb(ladder: LadderDef, direction: 'up' | 'down'): void {
+    this.climbing.start(this, ladder, direction);
+  }
+
+  updateClimb(dt: number): boolean {
+    return this.climbing.update(this, dt);
+  }
+
+  isClimbing(): boolean {
+    return this.climbing.active;
+  }
+
+  getPosition(): THREE.Vector3 {
+    return this.mesh.position;
+  }
+
+  // ── Dispose ──────────────────────────────────────────────────────
+
+  dispose(): void {
+    this.debugVis.dispose();
+    this.entity.destroy();
+    this.torchLightEntity.destroy();
+    this.scene.remove(this.mesh);
+    (this.mesh.material as THREE.Material).dispose();
+    this.scene.remove(this.torchLight);
+    this.scene.remove(this.fillLight);
+    this.hpBar.dispose(this.scene);
+  }
+}

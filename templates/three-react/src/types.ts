@@ -1,5 +1,5 @@
 import type * as THREE from 'three';
-import type { CharacterType } from './game/characters';
+import type { CharacterType } from './game/character';
 
 export interface VoxelModel {
   size: { x: number; y: number; z: number };

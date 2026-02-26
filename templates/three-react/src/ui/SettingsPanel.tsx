@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { useGameStore, type PlayerParams, type CameraParams, type TorchParams, type LightPreset, type MovementMode } from '../store';
+import { useGameStore, type MovementParams, type CameraParams, type TorchParams, type LightPreset, type MovementMode } from '../store';
 import { Layer } from '../game/Entity';
 import type { TerrainPreset } from '../game/Terrain';
 import type { HeightmapStyle } from '../game/TerrainNoise';
@@ -35,7 +35,7 @@ interface SliderDef<K> {
   step: number;
 }
 
-const PLAYER_MOVE_PARAMS: SliderDef<keyof PlayerParams>[] = [
+const CHARACTER_MOVE_PARAMS: SliderDef<keyof MovementParams>[] = [
   { key: 'speed', label: 'Speed', min: 1, max: 16, step: 0.5 },
   { key: 'stepHeight', label: 'Step Height', min: 0, max: 2, step: 0.1 },
   { key: 'slopeHeight', label: 'Slope Height', min: 0, max: 4, step: 0.1 },
@@ -603,12 +603,12 @@ export function SettingsPanel() {
     setSettingsPanelOpen(active !== null);
     return () => setSettingsPanelOpen(false);
   }, [active, setSettingsPanelOpen]);
-  const playerParams = useGameStore((s) => s.playerParams);
+  const characterParams = useGameStore((s) => s.characterParams);
   const cameraParams = useGameStore((s) => s.cameraParams);
   const torchParams = useGameStore((s) => s.torchParams);
   const torchEnabled = useGameStore((s) => s.torchEnabled);
   const lightPreset = useGameStore((s) => s.lightPreset);
-  const setPlayerParam = useGameStore((s) => s.setPlayerParam);
+  const setCharacterParam = useGameStore((s) => s.setCharacterParam);
   const setCameraParam = useGameStore((s) => s.setCameraParam);
   const setTorchParam = useGameStore((s) => s.setTorchParam);
   const toggleTorch = useGameStore((s) => s.toggleTorch);
@@ -649,12 +649,12 @@ export function SettingsPanel() {
             {(['free', 'grid'] as MovementMode[]).map((mode) => (
               <button
                 key={mode}
-                onClick={() => setPlayerParam('movementMode', mode)}
+                onClick={() => setCharacterParam('movementMode', mode)}
                 style={{
                   ...resetBtnStyle,
                   flex: 1,
-                  background: playerParams.movementMode === mode ? '#6af' : '#333',
-                  color: playerParams.movementMode === mode ? '#000' : '#aaa',
+                  background: characterParams.movementMode === mode ? '#6af' : '#333',
+                  color: characterParams.movementMode === mode ? '#000' : '#aaa',
                   margin: 0,
                 }}
               >
@@ -667,12 +667,12 @@ export function SettingsPanel() {
             {(['on', 'off'] as const).map((val) => (
               <button
                 key={val}
-                onClick={() => setPlayerParam('showPathDebug', val === 'on')}
+                onClick={() => setCharacterParam('showPathDebug', val === 'on')}
                 style={{
                   ...resetBtnStyle,
                   flex: 1,
-                  background: (playerParams.showPathDebug ? 'on' : 'off') === val ? '#6af' : '#333',
-                  color: (playerParams.showPathDebug ? 'on' : 'off') === val ? '#000' : '#aaa',
+                  background: (characterParams.showPathDebug ? 'on' : 'off') === val ? '#6af' : '#333',
+                  color: (characterParams.showPathDebug ? 'on' : 'off') === val ? '#000' : '#aaa',
                   margin: 0,
                 }}
               >
@@ -703,12 +703,12 @@ export function SettingsPanel() {
             {(['on', 'off'] as const).map((val) => (
               <button
                 key={val}
-                onClick={() => setPlayerParam('footIKEnabled', val === 'on')}
+                onClick={() => setCharacterParam('footIKEnabled', val === 'on')}
                 style={{
                   ...resetBtnStyle,
                   flex: 1,
-                  background: (playerParams.footIKEnabled ? 'on' : 'off') === val ? '#6af' : '#333',
-                  color: (playerParams.footIKEnabled ? 'on' : 'off') === val ? '#000' : '#aaa',
+                  background: (characterParams.footIKEnabled ? 'on' : 'off') === val ? '#6af' : '#333',
+                  color: (characterParams.footIKEnabled ? 'on' : 'off') === val ? '#000' : '#aaa',
                   margin: 0,
                 }}
               >
@@ -716,18 +716,18 @@ export function SettingsPanel() {
               </button>
             ))}
           </div>
-          {PLAYER_MOVE_PARAMS.map(({ key, label, min, max, step }) => (
+          {CHARACTER_MOVE_PARAMS.map(({ key, label, min, max, step }) => (
             <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>{label}</span>
               <input
                 type="range"
                 min={min} max={max} step={step}
-                value={playerParams[key] as number}
-                onChange={(e) => setPlayerParam(key, parseFloat(e.target.value) as any)}
+                value={characterParams[key] as number}
+                onChange={(e) => setCharacterParam(key, parseFloat(e.target.value) as any)}
                 style={{ flex: 1, height: 14, accentColor: '#6af' }}
               />
               <span style={{ color: '#fff', width: 36, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-                {(playerParams[key] as number).toFixed(decimals(step))}
+                {(characterParams[key] as number).toFixed(decimals(step))}
               </span>
             </div>
           ))}
@@ -739,12 +739,12 @@ export function SettingsPanel() {
             {(['on', 'off'] as const).map((val) => (
               <button
                 key={val}
-                onClick={() => setPlayerParam('exhaustionEnabled', val === 'on')}
+                onClick={() => setCharacterParam('exhaustionEnabled', val === 'on')}
                 style={{
                   ...resetBtnStyle,
                   flex: 1,
-                  background: (playerParams.exhaustionEnabled ? 'on' : 'off') === val ? '#6af' : '#333',
-                  color: (playerParams.exhaustionEnabled ? 'on' : 'off') === val ? '#000' : '#aaa',
+                  background: (characterParams.exhaustionEnabled ? 'on' : 'off') === val ? '#6af' : '#333',
+                  color: (characterParams.exhaustionEnabled ? 'on' : 'off') === val ? '#000' : '#aaa',
                   margin: 0,
                 }}
               >
@@ -757,12 +757,12 @@ export function SettingsPanel() {
             {(['on', 'off'] as const).map((val) => (
               <button
                 key={val}
-                onClick={() => setPlayerParam('showSlashEffect', val === 'on')}
+                onClick={() => setCharacterParam('showSlashEffect', val === 'on')}
                 style={{
                   ...resetBtnStyle,
                   flex: 1,
-                  background: (playerParams.showSlashEffect ? 'on' : 'off') === val ? '#6af' : '#333',
-                  color: (playerParams.showSlashEffect ? 'on' : 'off') === val ? '#000' : '#aaa',
+                  background: (characterParams.showSlashEffect ? 'on' : 'off') === val ? '#6af' : '#333',
+                  color: (characterParams.showSlashEffect ? 'on' : 'off') === val ? '#000' : '#aaa',
                   margin: 0,
                 }}
               >
@@ -789,7 +789,7 @@ export function SettingsPanel() {
             ))}
           </div>
 
-          <button onClick={() => useGameStore.getState().onResetPlayerParams?.()} style={resetBtnStyle}>
+          <button onClick={() => useGameStore.getState().onResetCharacterParams?.()} style={resetBtnStyle}>
             Reset Defaults
           </button>
         </div>
