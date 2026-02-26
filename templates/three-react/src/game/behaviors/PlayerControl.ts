@@ -162,6 +162,9 @@ export class PlayerControl extends Behavior {
     if (dist < 0.01) {
       this.settleTarget = null;
       this.currentSpeed = 0;
+      // Snap facing to nearest 45°
+      const snappedAngle = Math.round(agent.getFacing() / (Math.PI / 4)) * (Math.PI / 4);
+      agent.setFacing(snappedAngle);
       agent.updateIdle(dt);
       return false;
     }

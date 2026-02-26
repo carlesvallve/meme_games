@@ -113,6 +113,7 @@ export function buildVoxelDungeonCollision(
       const mat = new THREE.MeshBasicMaterial({ visible: false });
       const mesh = new THREE.Mesh(geo, mat);
       mesh.position.set(wx, wallHeight / 2, wz);
+      mesh.userData.collisionOnly = true;
       group.add(mesh);
 
       entities.push(new Entity(mesh, {
@@ -175,6 +176,7 @@ export async function loadVoxelDungeonVisuals(
   // All visual wall meshes go into this group, which is registered as
   // an Architecture entity so the reveal shader auto-patches its materials.
   const wallVisualGroup = new THREE.Group();
+  wallVisualGroup.name = 'wallVisuals';
   group.add(wallVisualGroup);
   new Entity(wallVisualGroup, { layer: Layer.Architecture, radius: groundSize, weight: 0 });
 
@@ -360,6 +362,7 @@ function placeVoxReturn(
   if (!geo) return null;
 
   const mesh = new THREE.Mesh(geo, material);
+  mesh.name = role;
   mesh.position.set(wx, 0, wz);
   const normRot = ((rotation % 360) + 360) % 360;
   if (normRot !== 0) {

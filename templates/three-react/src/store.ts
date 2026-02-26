@@ -112,6 +112,7 @@ export const DEFAULT_SCENE_SETTINGS = {
   natureEnabled: true,
   useBiomes: true,
   debugBiomes: false,
+  debugProjectileStick: false,
 };
 
 // ── localStorage persistence ──────────────────────────────────────────
@@ -139,6 +140,7 @@ interface SavedSettings {
   natureEnabled?: boolean;
   useBiomes?: boolean;
   debugBiomes?: boolean;
+  debugProjectileStick?: boolean;
   characterPushEnabled?: boolean;
   particleToggles?: ParticleToggles;
 }
@@ -174,6 +176,7 @@ function saveSettings(): void {
     natureEnabled: s.natureEnabled,
     useBiomes: s.useBiomes,
     debugBiomes: s.debugBiomes,
+    debugProjectileStick: s.debugProjectileStick,
     characterPushEnabled: s.characterPushEnabled,
     particleToggles: s.particleToggles,
   };
@@ -225,6 +228,8 @@ interface GameStore {
   setUseBiomes: (on: boolean) => void;
   debugBiomes: boolean;
   setDebugBiomes: (on: boolean) => void;
+  debugProjectileStick: boolean;
+  setDebugProjectileStick: (on: boolean) => void;
 
   /** If true, characters push each other apart when overlapping; if false, only the non-player is pushed (player stays put). */
   characterPushEnabled: boolean;
@@ -337,6 +342,8 @@ export const useGameStore = create<GameStore>((set) => ({
   setUseBiomes: (useBiomes) => set({ useBiomes }),
   debugBiomes: saved.debugBiomes ?? DEFAULT_SCENE_SETTINGS.debugBiomes,
   setDebugBiomes: (debugBiomes) => set({ debugBiomes }),
+  debugProjectileStick: saved.debugProjectileStick ?? DEFAULT_SCENE_SETTINGS.debugProjectileStick,
+  setDebugProjectileStick: (debugProjectileStick) => set({ debugProjectileStick }),
 
   characterPushEnabled: saved.characterPushEnabled ?? true,
   setCharacterPushEnabled: (characterPushEnabled) => set({ characterPushEnabled }),

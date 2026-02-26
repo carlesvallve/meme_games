@@ -135,6 +135,7 @@ export class Terrain {
   private heightmapMaxHeight = 8;
   private heightmapPosterize = 4;
   private heightmapMesh: THREE.Mesh | null = null;
+  private heightmapSkirtMesh: THREE.Mesh | null = null;
   private heightmapGrid: THREE.LineSegments | null = null;
 
   // Heightmap seed (stored so remesh can reproduce identical terrain)
@@ -932,7 +933,7 @@ export class Terrain {
       }
     }
 
-    // Indices: 2 triangles per cell
+    // Indices: 2 triangles per cell (surface only — no skirt here so projectiles/camera don't hit perimeter)
     for (let z = 0; z < res; z++) {
       for (let x = 0; x < res; x++) {
         const tl = z * verts + x;
@@ -944,106 +945,11 @@ export class Terrain {
       }
     }
 
-    // Perimeter skirt: vertical quads from edge vertices down to lowest mesh Y so the floor isn't floating
-    let baseY = heights[0];
-    for (let i = 1; i < heights.length; i++) {
-      if (heights[i] < baseY) baseY = heights[i];
-    }
-    const skirtColor = new THREE.Color(pal.cliff);
-    const numMain = verts * verts;
-    const numSkirt = 4 * verts - 4;
-    const totalVerts = numMain + numSkirt;
-    const allPositions = new Float32Array(totalVerts * 3);
-    const allColors = new Float32Array(totalVerts * 3);
-    allPositions.set(positions);
-    allColors.set(colors);
-
-    const baseIdx = numMain;
-    const leftBottom = (z: number) => baseIdx + z;
-    const rightBottom = (z: number) => baseIdx + verts + z;
-    const bottomBottom = (x: number) => (x === 0 ? baseIdx : x === res ? baseIdx + verts : baseIdx + 2 * verts + (x - 1));
-    const topBottom = (x: number) => (x === 0 ? baseIdx + res : x === res ? baseIdx + verts + res : baseIdx + 2 * verts + res - 1 + (x - 1));
-
-    for (let z = 0; z <= res; z++) {
-      const i = baseIdx + z;
-      const wx = -halfGround;
-      const wz = z * cellSize - halfGround;
-      allPositions[i * 3] = wx;
-      allPositions[i * 3 + 1] = baseY;
-      allPositions[i * 3 + 2] = wz;
-      allColors[i * 3] = skirtColor.r;
-      allColors[i * 3 + 1] = skirtColor.g;
-      allColors[i * 3 + 2] = skirtColor.b;
-    }
-    for (let z = 0; z <= res; z++) {
-      const i = baseIdx + verts + z;
-      const wx = halfGround;
-      const wz = z * cellSize - halfGround;
-      allPositions[i * 3] = wx;
-      allPositions[i * 3 + 1] = baseY;
-      allPositions[i * 3 + 2] = wz;
-      allColors[i * 3] = skirtColor.r;
-      allColors[i * 3 + 1] = skirtColor.g;
-      allColors[i * 3 + 2] = skirtColor.b;
-    }
-    for (let x = 1; x < res; x++) {
-      const i = baseIdx + 2 * verts + (x - 1);
-      const wx = x * cellSize - halfGround;
-      const wz = -halfGround;
-      allPositions[i * 3] = wx;
-      allPositions[i * 3 + 1] = baseY;
-      allPositions[i * 3 + 2] = wz;
-      allColors[i * 3] = skirtColor.r;
-      allColors[i * 3 + 1] = skirtColor.g;
-      allColors[i * 3 + 2] = skirtColor.b;
-    }
-    for (let x = 1; x < res; x++) {
-      const i = baseIdx + 2 * verts + res - 1 + (x - 1);
-      const wx = x * cellSize - halfGround;
-      const wz = halfGround;
-      allPositions[i * 3] = wx;
-      allPositions[i * 3 + 1] = baseY;
-      allPositions[i * 3 + 2] = wz;
-      allColors[i * 3] = skirtColor.r;
-      allColors[i * 3 + 1] = skirtColor.g;
-      allColors[i * 3 + 2] = skirtColor.b;
-    }
-
-    // Skirt quads: left, right, bottom, top — CCW when viewed from outside so normals point out (no culling)
-    // Left edge (outside = -X): bottom-left → bottom-right → top-right → top-left
-    for (let z = 0; z < res; z++) {
-      const tl = z * verts;
-      const tr = (z + 1) * verts;
-      indices.push(leftBottom(z), leftBottom(z + 1), tr);
-      indices.push(leftBottom(z), tr, tl);
-    }
-    // Right edge (outside = +X): bottom-right → bottom-left → top-left → top-right
-    for (let z = 0; z < res; z++) {
-      const tl = z * verts + res;
-      const tr = (z + 1) * verts + res;
-      indices.push(rightBottom(z + 1), rightBottom(z), tl);
-      indices.push(rightBottom(z + 1), tl, tr);
-    }
-    // Bottom edge (outside = -Z): bottom-left → bottom-right → top-right → top-left
-    for (let x = 0; x < res; x++) {
-      const tl = x;
-      const tr = x + 1;
-      indices.push(bottomBottom(x), bottomBottom(x + 1), tr);
-      indices.push(bottomBottom(x), tr, tl);
-    }
-    // Top edge (outside = +Z): bottom-left → bottom-right → top-right → top-left
-    for (let x = 0; x < res; x++) {
-      const tl = res * verts + x;
-      const tr = res * verts + x + 1;
-      indices.push(topBottom(x), topBottom(x + 1), tr);
-      indices.push(topBottom(x), tr, tl);
-    }
-
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(allPositions, 3));
-    geo.setAttribute('color', new THREE.BufferAttribute(allColors, 3));
-    geo.setIndex(indices);
-    geo.computeVertexNormals();
+    const surfaceGeo = new THREE.BufferGeometry();
+    surfaceGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    surfaceGeo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    surfaceGeo.setIndex(indices);
+    surfaceGeo.computeVertexNormals();
 
     const mat = new THREE.MeshStandardMaterial({
       vertexColors: true,
@@ -1055,17 +961,116 @@ export class Terrain {
       side: THREE.DoubleSide,
     });
 
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    this.group.add(mesh);
-    this.heightmapMesh = mesh;
+    const surfaceMesh = new THREE.Mesh(surfaceGeo, mat);
+    surfaceMesh.castShadow = true;
+    surfaceMesh.receiveShadow = true;
+    this.group.add(surfaceMesh);
+    this.heightmapMesh = surfaceMesh;
+
+    // Perimeter skirt: separate mesh (visual only) so projectiles and camera don't raycast it
+    let baseY = heights[0];
+    for (let i = 1; i < heights.length; i++) {
+      if (heights[i] < baseY) baseY = heights[i];
+    }
+    const skirtColor = new THREE.Color(pal.cliff);
+    const skirtPositions: number[] = [];
+    const skirtColors: number[] = [];
+    const skirtIndices: number[] = [];
+    let skirtIdx = 0;
+
+    const pushQuad = (
+      ax: number, ay: number, az: number, ar: number, ag: number, ab: number,
+      bx: number, by: number, bz: number, br: number, bg: number, bb: number,
+      cx: number, cy: number, cz: number, cr: number, cg: number, cb: number,
+      dx: number, dy: number, dz: number, dr: number, dg: number, db: number,
+    ) => {
+      skirtPositions.push(ax, ay, az, bx, by, bz, cx, cy, cz, dx, dy, dz);
+      skirtColors.push(ar, ag, ab, br, bg, bb, cr, cg, cb, dr, dg, db);
+      skirtIndices.push(skirtIdx, skirtIdx + 1, skirtIdx + 2, skirtIdx, skirtIdx + 2, skirtIdx + 3);
+      skirtIdx += 4;
+    };
+
+    for (let z = 0; z < res; z++) {
+      const tl = z * verts;
+      const tr = (z + 1) * verts;
+      const blX = -halfGround;
+      const brX = -halfGround;
+      const bZ0 = z * cellSize - halfGround;
+      const bZ1 = (z + 1) * cellSize - halfGround;
+      pushQuad(
+        blX, baseY, bZ0, skirtColor.r, skirtColor.g, skirtColor.b,
+        brX, baseY, bZ1, skirtColor.r, skirtColor.g, skirtColor.b,
+        positions[tr * 3 + 0], positions[tr * 3 + 1], positions[tr * 3 + 2],
+        colors[tr * 3], colors[tr * 3 + 1], colors[tr * 3 + 2],
+        positions[tl * 3 + 0], positions[tl * 3 + 1], positions[tl * 3 + 2],
+        colors[tl * 3], colors[tl * 3 + 1], colors[tl * 3 + 2],
+      );
+    }
+    for (let z = 0; z < res; z++) {
+      const tl = z * verts + res;
+      const tr = (z + 1) * verts + res;
+      const blX = halfGround;
+      const brX = halfGround;
+      const bZ0 = z * cellSize - halfGround;
+      const bZ1 = (z + 1) * cellSize - halfGround;
+      pushQuad(
+        brX, baseY, bZ1, skirtColor.r, skirtColor.g, skirtColor.b,
+        blX, baseY, bZ0, skirtColor.r, skirtColor.g, skirtColor.b,
+        positions[tl * 3 + 0], positions[tl * 3 + 1], positions[tl * 3 + 2],
+        colors[tl * 3], colors[tl * 3 + 1], colors[tl * 3 + 2],
+        positions[tr * 3 + 0], positions[tr * 3 + 1], positions[tr * 3 + 2],
+        colors[tr * 3], colors[tr * 3 + 1], colors[tr * 3 + 2],
+      );
+    }
+    for (let x = 0; x < res; x++) {
+      const tl = x;
+      const tr = x + 1;
+      const bX0 = x * cellSize - halfGround;
+      const bX1 = (x + 1) * cellSize - halfGround;
+      const bZ = -halfGround;
+      pushQuad(
+        bX0, baseY, bZ, skirtColor.r, skirtColor.g, skirtColor.b,
+        bX1, baseY, bZ, skirtColor.r, skirtColor.g, skirtColor.b,
+        positions[tr * 3 + 0], positions[tr * 3 + 1], positions[tr * 3 + 2],
+        colors[tr * 3], colors[tr * 3 + 1], colors[tr * 3 + 2],
+        positions[tl * 3 + 0], positions[tl * 3 + 1], positions[tl * 3 + 2],
+        colors[tl * 3], colors[tl * 3 + 1], colors[tl * 3 + 2],
+      );
+    }
+    for (let x = 0; x < res; x++) {
+      const tl = res * verts + x;
+      const tr = res * verts + x + 1;
+      const bX0 = x * cellSize - halfGround;
+      const bX1 = (x + 1) * cellSize - halfGround;
+      const bZ = halfGround;
+      pushQuad(
+        bX0, baseY, bZ, skirtColor.r, skirtColor.g, skirtColor.b,
+        bX1, baseY, bZ, skirtColor.r, skirtColor.g, skirtColor.b,
+        positions[tr * 3 + 0], positions[tr * 3 + 1], positions[tr * 3 + 2],
+        colors[tr * 3], colors[tr * 3 + 1], colors[tr * 3 + 2],
+        positions[tl * 3 + 0], positions[tl * 3 + 1], positions[tl * 3 + 2],
+        colors[tl * 3], colors[tl * 3 + 1], colors[tl * 3 + 2],
+      );
+    }
+
+    const skirtGeo = new THREE.BufferGeometry();
+    skirtGeo.setAttribute('position', new THREE.Float32BufferAttribute(skirtPositions, 3));
+    skirtGeo.setAttribute('color', new THREE.Float32BufferAttribute(skirtColors, 3));
+    skirtGeo.setIndex(skirtIndices);
+    skirtGeo.computeVertexNormals();
+
+    const skirtMesh = new THREE.Mesh(skirtGeo, mat.clone());
+    skirtMesh.castShadow = true;
+    skirtMesh.receiveShadow = true;
+    this.group.add(skirtMesh);
+    this.heightmapSkirtMesh = skirtMesh;
 
     // ── Build grid line overlay ──
     // Wireframe grid + contour rungs. Per-vertex color: black on bright terrain, light gray on dark (cave) so grid is visible.
     const linePoints: number[] = [];
     const lineColors: number[] = [];
     const bias = 0.02; // slight offset to prevent z-fighting
+    const geo = surfaceMesh.geometry;
     const normals = geo.getAttribute('normal') as THREE.BufferAttribute;
 
     /** Get biased position for vertex index (offset along normal) */
@@ -1516,7 +1521,7 @@ export class Terrain {
       roomOwnership: output.roomOwnership,
     };
 
-    const vdResult = buildVoxelDungeonCollision(voxConfig, this.group);
+    const vdResult = buildVoxelDungeonCollision(voxConfig, this.boxGroup);
     this.debris.push(...vdResult.debris);
     this.debrisEntities.push(...vdResult.entities);
 
@@ -2218,6 +2223,11 @@ export class Terrain {
     return this.doorSystem;
   }
 
+  /** Objects to exclude from projectile raycasts (e.g. open doors). */
+  getOpenDoorObjects(): THREE.Object3D[] {
+    return this.doorSystem?.getOpenDoorObjects() ?? [];
+  }
+
   /** The raycastable terrain surface mesh (heightmap, floor plane, or water). */
   getTerrainMesh(): THREE.Mesh | null {
     return this.heightmapMesh ?? this.waterMesh;
@@ -2227,6 +2237,12 @@ export class Terrain {
   getBoxGroup(): THREE.Group {
     return this.boxGroup;
   }
+
+  /** The root terrain group (all terrain children including walls, floors, props). */
+  getGroup(): THREE.Group {
+    return this.group;
+  }
+
 
 
   /** Get the ground/debris height at a point, optionally expanded by a radius */
@@ -2521,6 +2537,12 @@ export class Terrain {
       (this.heightmapMesh.material as THREE.Material).dispose();
       this.heightmapMesh = null;
     }
+    if (this.heightmapSkirtMesh) {
+      this.group.remove(this.heightmapSkirtMesh);
+      this.heightmapSkirtMesh.geometry.dispose();
+      (this.heightmapSkirtMesh.material as THREE.Material).dispose();
+      this.heightmapSkirtMesh = null;
+    }
     if (this.heightmapGrid) {
       this.group.remove(this.heightmapGrid);
       this.heightmapGrid.geometry.dispose();
@@ -2564,6 +2586,11 @@ export class Terrain {
       this.heightmapMesh.geometry.dispose();
       (this.heightmapMesh.material as THREE.Material).dispose();
       this.heightmapMesh = null;
+    }
+    if (this.heightmapSkirtMesh) {
+      this.heightmapSkirtMesh.geometry.dispose();
+      (this.heightmapSkirtMesh.material as THREE.Material).dispose();
+      this.heightmapSkirtMesh = null;
     }
     if (this.heightmapGrid) {
       this.heightmapGrid.geometry.dispose();

@@ -12,7 +12,7 @@ import { LootSystem } from './Loot';
 import { SpeechBubbleSystem } from './SpeechBubble';
 import { Character } from './Character';
 import { EnemySystem, type HitImpactCallbacks } from './EnemySystem';
-import { ProjectileSystem } from './ProjectileSystem';
+import { ProjectileSystem, setDebugProjectileStick } from './ProjectileSystem';
 import { GoreSystem } from './GoreSystem';
 import { getProjectileConfig, getMuzzleOffset, isRangedHeroId } from './CombatConfig';
 import { createDustMotes, createRainEffect, createDebrisEffect } from '../utils/particles';
@@ -20,8 +20,9 @@ import type { ParticleToggles } from '../store';
 import type { ParticleSystem } from '../types';
 import { audioSystem } from '../utils/AudioSystem';
 import { updateReveal, patchSceneArchitecture } from './RevealShader';
+import { entityRegistry } from './Entity';
 import type { GameInstance } from '../types';
-import { CHARACTER_TEAM_COLORS, getSlots, getCharacterName, rerollRoster, type CharacterType } from './characters';
+import { CHARACTER_TEAM_COLORS, getSlots, getCharacterName, rerollRoster, voxRoster, type CharacterType } from './characters';
 import { VOX_HEROES, VOX_ENEMIES } from './VoxCharacterDB';
 
 /** Nav cell size: 0.25m for all presets. */
@@ -350,9 +351,9 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     const boxGroup = terrain.getBoxGroup();
     if (boxGroup.children.length > 0) {
       const boxHits = raycaster.intersectObject(boxGroup, true);
-      // Skip LineSegments (grid overlays), only accept Mesh hits
+      // Skip LineSegments (grid overlays) and invisible collision boxes, only accept visible Mesh hits
       for (const h of boxHits) {
-        if ((h.object as THREE.Mesh).isMesh && h.object.type === 'Mesh') {
+        if ((h.object as THREE.Mesh).isMesh && h.object.type === 'Mesh' && !h.object.userData.collisionOnly) {
           hitPoint = h.point;
           break;
         }
@@ -439,6 +440,19 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
         console.log(`[Game] Random ${e.shiftKey ? 'enemy' : 'hero'} skin: ${entry.name}`);
         speechSystem.onSkinChanged(activeCharacter);
         activeCharacter.applyVoxSkin(entry);
+      }
+      e.preventDefault();
+    }
+    else if (e.code === 'KeyM') {
+      if (activeCharacter) {
+        const archer = VOX_HEROES.find((entry) => entry.id === 'archer');
+        if (archer) {
+          voxRoster[activeCharacter.characterType] = archer;
+          console.log('[Game] Archer (M):', archer.name);
+          speechSystem.onSkinChanged(activeCharacter);
+          activeCharacter.applyVoxSkin(archer);
+          useGameStore.getState().setActiveCharacter(getCharacterName(activeCharacter.characterType), CHARACTER_TEAM_COLORS[activeCharacter.characterType]);
+        }
       }
       e.preventDefault();
     }
@@ -682,27 +696,53 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
         const heroId = playerChar.voxEntry?.id ?? '';
         const projConfig = getProjectileConfig(heroId);
         if (projConfig && projectileSystem) {
-          // Ranged: play attack anim + fire from muzzle (spawn point)
-          playerChar.startAttack();
+          // Ranged: check if architecture is blocking the muzzle
           const pos = playerChar.getPosition();
           const facing = playerChar.facing;
           const muzzle = getMuzzleOffset(heroId);
           const faceDirX = -Math.sin(facing);
           const faceDirZ = -Math.cos(facing);
-          const spawnX = pos.x + faceDirX * muzzle.forward;
-          const spawnY = playerChar.groundY + muzzle.up;
-          const spawnZ = pos.z + faceDirZ * muzzle.forward;
-          projectileSystem.fireProjectile(
-            heroId,
-            projConfig,
-            spawnX, spawnY, spawnZ,
-            facing,
-            enemySystem ? enemySystem.getEnemies() : [],
-            [
-              terrain.getBoxGroup(),
-              ...(terrain.getTerrainMesh() ? [terrain.getTerrainMesh()!] : []),
-            ],
-          );
+          const muzzleCheckOrigin = new THREE.Vector3(pos.x, playerChar.groundY + muzzle.up, pos.z);
+          const muzzleCheckDir = new THREE.Vector3(faceDirX, 0, faceDirZ);
+          raycaster.set(muzzleCheckOrigin, muzzleCheckDir);
+          raycaster.far = muzzle.forward;
+          raycaster.near = 0;
+          raycaster.camera = cam.camera; // needed for Sprite children in terrain group
+          const muzzleHits = raycaster.intersectObject(terrain.getGroup(), true);
+          let archBlocked = false;
+          for (const h of muzzleHits) {
+            if (!(h.object as THREE.Mesh).isMesh) continue;
+            if (h.object.userData.collisionOnly) continue;
+            const mesh = h.object as THREE.Mesh;
+            if (!mesh.geometry) continue;
+            mesh.geometry.computeBoundingBox();
+            const bb = mesh.geometry.boundingBox;
+            if (bb && (bb.max.y - bb.min.y) > 0.3) { archBlocked = true; break; }
+          }
+          // Reset raycaster far for other uses
+          raycaster.far = Infinity;
+
+          if (archBlocked) {
+            // Too close to architecture — block the shot
+          } else {
+            // Ranged: play attack anim + fire from muzzle (spawn point)
+            playerChar.startAttack();
+            const spawnX = pos.x + faceDirX * muzzle.forward;
+            const spawnY = playerChar.groundY + muzzle.up;
+            const spawnZ = pos.z + faceDirZ * muzzle.forward;
+            projectileSystem.fireProjectile(
+              heroId,
+              projConfig,
+              spawnX, spawnY, spawnZ,
+              facing,
+              enemySystem ? enemySystem.getEnemies() : [],
+              [
+                terrain.getBoxGroup(),
+                ...(terrain.getTerrainMesh() ? [terrain.getTerrainMesh()!] : []),
+              ],
+              terrain.getOpenDoorObjects(),
+            );
+          }
         } else {
           // Melee: auto-aim snap toward nearest enemy, then attack
           if (enemySystem) {
@@ -720,6 +760,17 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       // Update all characters uniformly
       for (const char of characters) {
         char.update(dt);
+      }
+
+      // Doors — update before projectiles so open doors are excluded from raycasts this frame
+      const doorSystem = terrain.getDoorSystem();
+      if (doorSystem) {
+        const charPositions = characters.map(c => c.getPosition());
+        if (enemySystem) {
+          charPositions.push(...enemySystem.getEnemyPositions());
+        }
+        const stepHeight = useGameStore.getState().playerParams.stepHeight;
+        doorSystem.update(dt, charPositions, stepHeight);
       }
 
       // Gore system (body chunks + blood decals)
@@ -779,6 +830,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
             terrain.getBoxGroup(),
             ...(terrain.getTerrainMesh() ? [terrain.getTerrainMesh()!] : []),
           ],
+          excludeObjects: terrain.getOpenDoorObjects(),
         });
       }
 
@@ -807,6 +859,9 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
         currentGridOpacity = gridOp;
         terrain.setGridOpacity(gridOp);
       }
+
+      // Sync projectile stick debug
+      setDebugProjectileStick(useGameStore.getState().debugProjectileStick);
 
       // Sync room labels (voxel dungeon)
       const roomLabels = useGameStore.getState().roomLabels;
@@ -844,16 +899,6 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       // Chests
       const chestsOpened = chestSystem.update(dt, activePos, params.stepHeight);
       if (chestsOpened > 0) audioSystem.sfx('chest');
-
-      // Doors — all characters + enemies can interact
-      const doorSystem = terrain.getDoorSystem();
-      if (doorSystem) {
-        const charPositions = characters.map(c => c.getPosition());
-        if (enemySystem) {
-          charPositions.push(...enemySystem.getEnemyPositions());
-        }
-        doorSystem.update(dt, charPositions, params.stepHeight);
-      }
 
       // Loot
       const loot = lootSystem.update(dt, activePos);
@@ -938,6 +983,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       if (projectileSystem) projectileSystem.dispose();
       goreSystem.dispose();
       terrain.dispose();
+      entityRegistry.clear();
       collectibles.dispose();
       chestSystem.dispose();
       lootSystem.dispose();

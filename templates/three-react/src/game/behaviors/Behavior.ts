@@ -11,6 +11,10 @@ export interface BehaviorAgent {
   move(dx: number, dz: number, speed: number, stepHeight: number, capsuleRadius: number, dt: number, slopeHeight?: number, skipFacing?: boolean): boolean;
   applyHop(hopHeight: number): number;
   updateIdle(dt: number): void;
+  /** Current facing angle (radians) */
+  getFacing(): number;
+  /** Set facing angle (radians) and sync mesh rotation */
+  setFacing(angle: number): void;
   /** If implemented, called once after agent took damage (so behavior can clear settle/speed and avoid walk-after-hit). */
   consumeJustTookDamage?(): boolean;
   /** Start climbing a ladder */

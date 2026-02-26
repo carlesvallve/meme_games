@@ -62,8 +62,7 @@ export class Input {
       const absDy = Math.abs(dy);
 
       if (Math.max(absDx, absDy) < this.minSwipeDistance) {
-        // Tap — queue action
-        this.actionQueued = true;
+        // Tap on mobile — no action (tap is used for click-to-move pathfinding)
         return;
       }
       if (absDx > absDy) {

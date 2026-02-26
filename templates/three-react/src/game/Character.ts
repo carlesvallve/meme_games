@@ -113,7 +113,7 @@ export class Character implements BehaviorAgent {
   /** Frame rates per animation type */
   private static readonly VOX_FPS: Record<string, number> = { 
     idle: 2.5, 
-    walk: 16, 
+    walk: 9, 
     action: 9 
   };
 
@@ -244,6 +244,8 @@ export class Character implements BehaviorAgent {
 
   getX(): number { return this.mesh.position.x; }
   getZ(): number { return this.mesh.position.z; }
+  getFacing(): number { return this.facing; }
+  setFacing(angle: number): void { this.facing = angle; this.mesh.rotation.y = angle; }
 
   /** Apply vertical hop offset. Step SFX: only walkers play step here; jumpers use VOX walk frame; flyers never. */
   applyHop(hopHeight: number): number {
@@ -513,6 +515,12 @@ export class Character implements BehaviorAgent {
   updateIdle(dt: number): void {
     this.footSfxTimer += dt;
     if (this.moveTime > 0) {
+      // Play a final step SFX when stopping (unless too recent)
+      if (this.footSfxTimer >= FOOT_SFX_COOLDOWN && this.getStepMode() !== 'flyer') {
+        this.footSfxTimer = 0;
+        const stepVol = this.isEnemy ? 0.35 : 0.7;
+        audioSystem.sfxAt('step', this.mesh.position.x, this.mesh.position.z, stepVol);
+      }
       this.moveTime = 0;
       this.lastHopHalf = 0;
     }

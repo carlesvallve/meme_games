@@ -9,6 +9,18 @@ import { swapGroundTiles } from '../game/VoxelDungeon';
 
 type ActivePanel = 'player' | 'camera' | 'light' | 'scene' | null;
 
+const MOBILE_BREAKPOINT = 640;
+
+function useIsMobile() {
+  const [mobile, setMobile] = useState(() => window.innerWidth < MOBILE_BREAKPOINT);
+  useEffect(() => {
+    const onResize = () => setMobile(window.innerWidth < MOBILE_BREAKPOINT);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+  return mobile;
+}
+
 const TERRAIN_PRESETS: TerrainPreset[] = ['scattered', 'terraced', 'heightmap', 'dungeon', 'rooms', 'voxelDungeon'];
 const PROP_CATEGORIES = getPropCategories().sort();
 const GROUND_TILE_IDS = getGroundTileIds().sort();
@@ -76,6 +88,8 @@ const panelStyle = {
   flexDirection: 'column' as const,
   gap: 4,
   minWidth: 220,
+  maxWidth: '100%',
+  boxSizing: 'border-box' as const,
 };
 
 const resetBtnStyle = {
@@ -251,14 +265,13 @@ function ScenePanel() {
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
         <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Preset</span>
-        <div style={{ display: 'flex', gap: 3, flex: 1 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, flex: 1 }}>
           {TERRAIN_PRESETS.map((p) => (
             <button
               key={p}
               onClick={() => setTerrainPreset(p)}
               style={{
                 ...btnStyle(terrainPreset === p),
-                flex: 1,
                 textTransform: 'capitalize',
               }}
             >
@@ -568,6 +581,7 @@ function ScenePanel() {
 
 export function SettingsPanel() {
   const [active, setActive] = useState<ActivePanel>(null);
+  const isMobile = useIsMobile();
   const setSettingsPanelOpen = useGameStore((s) => s.setSettingsPanelOpen);
 
   useEffect(() => {
@@ -586,6 +600,8 @@ export function SettingsPanel() {
   const setLightPreset = useGameStore((s) => s.setLightPreset);
   const characterPushEnabled = useGameStore((s) => s.characterPushEnabled);
   const setCharacterPushEnabled = useGameStore((s) => s.setCharacterPushEnabled);
+  const debugProjectileStick = useGameStore((s) => s.debugProjectileStick);
+  const setDebugProjectileStick = useGameStore((s) => s.setDebugProjectileStick);
 
   const toggle = (panel: ActivePanel) =>
     setActive((cur) => (cur === panel ? null : panel));
@@ -598,10 +614,14 @@ export function SettingsPanel() {
         position: 'absolute',
         bottom: 12,
         right: 12,
+        ...(isMobile ? { left: 12 } : {}),
         pointerEvents: 'auto',
         fontFamily: "'Segoe UI', system-ui, sans-serif",
         fontSize: 12,
         userSelect: 'none',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: isMobile ? 'stretch' : 'flex-end',
       }}
     >
       {/* Slider panel */}
@@ -710,6 +730,24 @@ export function SettingsPanel() {
                   flex: 1,
                   background: (playerParams.showSlashEffect ? 'on' : 'off') === val ? '#6af' : '#333',
                   color: (playerParams.showSlashEffect ? 'on' : 'off') === val ? '#000' : '#aaa',
+                  margin: 0,
+                }}
+              >
+                {val}
+              </button>
+            ))}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+            <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Projectile debug</span>
+            {(['on', 'off'] as const).map((val) => (
+              <button
+                key={val}
+                onClick={() => setDebugProjectileStick(val === 'on')}
+                style={{
+                  ...resetBtnStyle,
+                  flex: 1,
+                  background: (debugProjectileStick ? 'on' : 'off') === val ? '#6af' : '#333',
+                  color: (debugProjectileStick ? 'on' : 'off') === val ? '#000' : '#aaa',
                   margin: 0,
                 }}
               >
@@ -830,7 +868,7 @@ export function SettingsPanel() {
       {active === 'scene' && <ScenePanel />}
 
       {/* Buttons */}
-      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 4 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 4 }}>
         <button onClick={() => toggle('scene')} style={btnStyle(active === 'scene')}>
           Scene
         </button>

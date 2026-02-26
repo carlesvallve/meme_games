@@ -33,11 +33,91 @@ const AUTO_TARGET_RANGE = 10;          // max distance to auto-target an enemy
 const AUTO_TARGET_MIN_DOT = 0.5;       // cos(60°) — forward cone for target selection
 const AUTO_TARGET_SPREAD = 0.1;        // ±~3° random deviation
 
+/** When sticking on architecture/props, ignore hits closer than this (meters) so we don't stick on geometry right at the muzzle. Kept small now that terrain no longer overrides — 0.5 was rejecting valid cube hits. */
+const MIN_STICK_DISTANCE = 0.1;
+/** Minimum distance from spawn before a projectile can stick to architecture (prevents wall-clip on spawn) */
+const MIN_TRAVEL_FROM_SPAWN = 0.25;
+
+/** Max distance from stick point to hit object's AABB — if further, the hit point is bogus (wrong space / wrong object), skip this hit. */
+const MAX_STICK_TO_OBJECT_DISTANCE = 2;
+
+/** If point is inside the box, push it to the nearest face so the arrow sticks on the surface instead of floating inside. */
+function clampPointToBoxSurface(point: THREE.Vector3, box: THREE.Box3, out: THREE.Vector3): void {
+  out.copy(point);
+  const eps = 0.001;
+  const inside =
+    point.x > box.min.x + eps && point.x < box.max.x - eps &&
+    point.y > box.min.y + eps && point.y < box.max.y - eps &&
+    point.z > box.min.z + eps && point.z < box.max.z - eps;
+  if (!inside) return;
+  const dxMin = point.x - box.min.x;
+  const dxMax = box.max.x - point.x;
+  const dyMin = point.y - box.min.y;
+  const dyMax = box.max.y - point.y;
+  const dzMin = point.z - box.min.z;
+  const dzMax = box.max.z - point.z;
+  const dMin = Math.min(dxMin, dxMax, dyMin, dyMax, dzMin, dzMax);
+  if (dMin === dxMin) out.x = box.min.x;
+  else if (dMin === dxMax) out.x = box.max.x;
+  else if (dMin === dyMin) out.y = box.min.y;
+  else if (dMin === dyMax) out.y = box.max.y;
+  else if (dMin === dzMin) out.z = box.min.z;
+  else out.z = box.max.z;
+}
+
 const TRAIL_MAX_POINTS = 18;
 const TRAIL_MAX_POINTS_ARROW = 10;
 const TRAIL_HEAD_WIDTH_ARROW = 0.06;
 const TRAIL_HEAD_WIDTH_FIREBALL = 0.18;
 const TRAIL_TAIL_WIDTH = 0.008;
+
+/** Toggle to enable console logs AND visual debug markers (red sphere at stick point, green wireframe AABB of hit object) for projectile stick events. */
+let DEBUG_PROJECTILE_STICK = false;
+
+/** Enable/disable projectile stick debug (logs + visual markers). */
+export function setDebugProjectileStick(on: boolean): void { DEBUG_PROJECTILE_STICK = on; }
+/** Current state of projectile stick debug. */
+export function getDebugProjectileStick(): boolean { return DEBUG_PROJECTILE_STICK; }
+
+function isDescendantOf(node: THREE.Object3D, ancestor: THREE.Object3D): boolean {
+  let p: THREE.Object3D | null = node.parent;
+  while (p) {
+    if (p === ancestor) return true;
+    p = p.parent;
+  }
+  return false;
+}
+
+function isExcludedFromRaycast(obj: THREE.Object3D, excludeList: THREE.Object3D[]): boolean {
+  return excludeList.some(ex => ex === obj || isDescendantOf(obj, ex));
+}
+
+/** Voxel dungeon invisible collision boxes (userData.collisionOnly); projectiles should only hit visible geometry. */
+function isCollisionOnly(obj: THREE.Object3D): boolean {
+  return (obj as THREE.Object3D & { userData?: { collisionOnly?: boolean } }).userData?.collisionOnly === true;
+}
+
+/** Wall visual groups marked noProjectileStick — arrows pass through, only collision boxes handle blocking. */
+function isNoProjectileStick(obj: THREE.Object3D): boolean {
+  let p: THREE.Object3D | null = obj;
+  while (p) {
+    if (p.userData.noProjectileStick) return true;
+    p = p.parent;
+  }
+  return false;
+}
+
+/** Only raycast for stick against objects that are visible and have renderable geometry. Excludes invisible collision boxes (heightmap has none; non-heightmap had invisible hits). */
+function isVisibleForStick(obj: THREE.Object3D): boolean {
+  if (!obj.visible) return false;
+  if (obj instanceof THREE.Mesh) return !!obj.geometry;
+  let found = false;
+  obj.traverse((c) => {
+    if (found) return;
+    if (c instanceof THREE.Mesh && c.visible && c.geometry) found = true;
+  });
+  return found;
+}
 
 // ── Energy impact (mini explosion when non-arrow projectiles hit) ─────
 const IMPACT_DURATION = 0.18;
@@ -238,6 +318,8 @@ export interface ProjectileUpdateOptions {
   getGroundY?: (x: number, z: number) => number;
   /** Terrain geometry (box group, heightmap mesh) for arrow stick on cliffs/walls */
   terrainColliders?: THREE.Object3D[];
+  /** Exclude from raycast (e.g. open doors) — object or any descendant is skipped */
+  excludeObjects?: THREE.Object3D[];
 }
 
 // ── ProjectileSystem ─────────────────────────────────────────────────
@@ -328,7 +410,7 @@ export class ProjectileSystem {
     }
   }
 
-  /** Fire a projectile from the given muzzle (spawn) position, auto-targeting the nearest enemy in a forward cone. Only auto-targets if raycast to enemy reaches the enemy cleanly (no wall/door in the way). Pass terrainColliders when you have them so obstacles = architecture + props + terrain. */
+  /** Fire a projectile from the given muzzle (spawn) position, auto-targeting the nearest enemy in a forward cone. Only auto-targets if raycast to enemy reaches the enemy cleanly (no wall/door in the way). Pass terrainColliders when you have them so obstacles = architecture + props + terrain. Pass excludeObjects (e.g. open doors) to skip them in raycasts. */
   fireProjectile(
     ownerKey: string,
     config: ProjectileConfig,
@@ -338,6 +420,7 @@ export class ProjectileSystem {
     facing: number,
     enemies: ReadonlyArray<Enemy>,
     terrainColliders?: THREE.Object3D[],
+    excludeObjects?: THREE.Object3D[],
   ): boolean {
     // Cooldown check
     const cd = this.cooldowns.get(ownerKey) ?? 0;
@@ -363,7 +446,10 @@ export class ProjectileSystem {
     const rayOrigin = new THREE.Vector3(spawnX, spawnY, spawnZ);
     const rayDir = new THREE.Vector3();
     const archAndProps = entityRegistry ? entityRegistry.getByLayer(Layer.Architecture | Layer.Prop).map(e => e.object3D) : [];
-    const obstacles = [...archAndProps, ...(terrainColliders ?? [])];
+    const allObstacles = [...archAndProps, ...(terrainColliders ?? [])];
+    const obstacles = excludeObjects?.length
+      ? allObstacles.filter(o => !isExcludedFromRaycast(o, excludeObjects) && !isCollisionOnly(o))
+      : allObstacles.filter(o => !isCollisionOnly(o));
 
     let bestDist = AUTO_TARGET_RANGE;
     for (const enemy of enemies) {
@@ -610,9 +696,13 @@ export class ProjectileSystem {
       p.light = null;
     }
     removeArrowTip(p.mesh);
-    const worldForward = new THREE.Vector3();
-    p.mesh.getWorldDirection(worldForward);
-    const desiredWorldPos = hitPoint.clone().addScaledVector(worldForward, ARROW_PENETRATION_OFFSET - ARROW_TIP_OFFSET);
+    // Flight direction = local +X in world space (arrow tip is along +X).
+    // NOTE: getWorldDirection() returns local -Z (camera forward convention),
+    // which is PERPENDICULAR to the arrow shaft — that was the old bug causing
+    // arrows to float ~10cm beside the hit surface instead of embedding in it.
+    const flightDir = new THREE.Vector3(1, 0, 0)
+      .applyQuaternion(p.mesh.getWorldQuaternion(new THREE.Quaternion()));
+    const desiredWorldPos = hitPoint.clone().addScaledVector(flightDir, ARROW_PENETRATION_OFFSET - ARROW_TIP_OFFSET);
 
     const parent = parentOrAttachMesh;
     if (parent) {
@@ -650,7 +740,11 @@ export class ProjectileSystem {
     const archAndProps =
       entityRegistry ? entityRegistry.getByLayer(Layer.Architecture | Layer.Prop).map(e => e.object3D) : [];
     const terrainColliders = options?.terrainColliders ?? [];
-    const staticColliders = [...archAndProps, ...terrainColliders];
+    const excludeObjects = options?.excludeObjects ?? [];
+    // Stick raycast: only architecture + props that are visible (no invisible colliders). Terrain (ground) causes arrows to stick immediately in front of the player; ground hits are already handled by getGroundY/slope above.
+    const stickColliders = excludeObjects.length
+      ? archAndProps.filter(o => !isExcludedFromRaycast(o, excludeObjects) && !isCollisionOnly(o) && isVisibleForStick(o))
+      : archAndProps.filter(o => !isCollisionOnly(o) && isVisibleForStick(o));
     const raycaster = new THREE.Raycaster();
     const rayOrigin = new THREE.Vector3();
     const rayDir = new THREE.Vector3();
@@ -797,7 +891,152 @@ export class ProjectileSystem {
       let hit = false;
       let staticHitPoint: THREE.Vector3 | null = null; // for energy impact on doors/walls/props
 
-      // Terrain following: glide over gentle slopes, impact on steep ones (cliffs/walls)
+      // Raycast vs architecture/props FIRST — use actual hit point on walls/cubes. If we did terrain first, getGroundY would return top-of-cube and we'd stick there instead of on the hit face.
+      if (!hit && stickColliders.length > 0) {
+        this.scene.updateMatrixWorld(true);
+        rayOrigin.set(lastX, lastY, lastZ);
+        rayDir.set(p.mesh.position.x - lastX, p.mesh.position.y - lastY, p.mesh.position.z - lastZ);
+        const rayLen = rayDir.length();
+        if (rayLen > 0.001) {
+          rayDir.normalize();
+          raycaster.set(rayOrigin, rayDir);
+          raycaster.far = rayLen + 0.2;
+          raycaster.near = 0.08;
+          const hits = raycaster.intersectObjects(stickColliders, true);
+          for (const h of hits) {
+            if (!h.face) continue;
+            if (h.distance < MIN_STICK_DISTANCE) continue; // avoid sticking on geometry right in front of muzzle
+            // // Don't stick if projectile hasn't traveled far enough from spawn (prevents clipping nearby walls)
+            // const dsx = h.point.x - p.startX;
+            // const dsy = h.point.y - p.startY;
+            // const dsz = h.point.z - p.startZ;
+            // if (dsx * dsx + dsy * dsy + dsz * dsz < MIN_TRAVEL_FROM_SPAWN * MIN_TRAVEL_FROM_SPAWN) continue;
+            h.object.updateMatrixWorld(true);
+            // Three.js Raycaster returns intersection point in WORLD space. Do not apply matrixWorld — that would double-transform and place the arrow far away (e.g. 10m in the air).
+            const stickPoint = h.point.clone();
+            const box = new THREE.Box3().setFromObject(h.object);
+            // If point ended up inside the box (raycast can return slightly inside), push to nearest face so arrow sticks on surface
+            clampPointToBoxSurface(stickPoint, box, stickPoint);
+            // Sanity: stick point must lie on the arrow's path (ray segment). Reject if it's off the segment (catches any bogus point).
+            const toStick = stickPoint.x - rayOrigin.x;
+            const toStickY = stickPoint.y - rayOrigin.y;
+            const toStickZ = stickPoint.z - rayOrigin.z;
+            const projectedDist = toStick * rayDir.x + toStickY * rayDir.y + toStickZ * rayDir.z;
+            const offSegmentSq = toStick * toStick + toStickY * toStickY + toStickZ * toStickZ - projectedDist * projectedDist;
+            if (projectedDist < -0.1 || projectedDist > rayLen + 0.2 || offSegmentSq > 0.25) {
+              if (DEBUG_PROJECTILE_STICK) {
+                console.log('[Projectile stick RAYCAST] SKIP hit — stick point off ray segment', { projectedDist: projectedDist.toFixed(2), rayLen: rayLen.toFixed(2), offSegmentM: Math.sqrt(offSegmentSq).toFixed(2) });
+              }
+              continue;
+            }
+            // Reject if stick point is far from hit object's AABB (safety net)
+            const closestOnBox = new THREE.Vector3(
+              Math.max(box.min.x, Math.min(box.max.x, stickPoint.x)),
+              Math.max(box.min.y, Math.min(box.max.y, stickPoint.y)),
+              Math.max(box.min.z, Math.min(box.max.z, stickPoint.z))
+            );
+            if (stickPoint.distanceTo(closestOnBox) > MAX_STICK_TO_OBJECT_DISTANCE) {
+              if (DEBUG_PROJECTILE_STICK) {
+                console.log('[Projectile stick RAYCAST] SKIP hit — stick point too far from object AABB', stickPoint.distanceTo(closestOnBox).toFixed(2), 'm');
+              }
+              continue; // try next hit
+            }
+            if (DEBUG_PROJECTILE_STICK) {
+              const objPos = new THREE.Vector3();
+              h.object.getWorldPosition(objPos);
+              const parentChain: string[] = [];
+              let parent: THREE.Object3D | null = h.object.parent;
+              while (parent) {
+                parentChain.push(`${parent.type}:${(parent as THREE.Object3D & { name?: string }).name ?? '?'}`);
+                parent = parent.parent;
+              }
+              // Detailed info: geometry class, vertex count, material type, AABB size
+              const hitMesh = h.object as THREE.Mesh;
+              const geoInfo = hitMesh.geometry
+                ? `${hitMesh.geometry.type}(${hitMesh.geometry.getAttribute?.('position')?.count ?? '?'} verts)`
+                : 'NO_GEO';
+              const matInfo = hitMesh.material
+                ? `${(hitMesh.material as THREE.Material).type} visible=${(hitMesh.material as THREE.Material).visible}`
+                : 'NO_MAT';
+              const boxSize = box.getSize(new THREE.Vector3());
+              console.log('[Projectile stick RAYCAST]', {
+                objectType: h.object.type,
+                objectName: (h.object as THREE.Object3D & { name?: string }).name,
+                objectWorldPos: `${objPos.x.toFixed(2)},${objPos.y.toFixed(2)},${objPos.z.toFixed(2)}`,
+                parentChain: parentChain.slice(0, 5),
+                geo: geoInfo,
+                mat: matInfo,
+                aabb: `${boxSize.x.toFixed(2)}x${boxSize.y.toFixed(2)}x${boxSize.z.toFixed(2)}`,
+                aabbMin: `${box.min.x.toFixed(2)},${box.min.y.toFixed(2)},${box.min.z.toFixed(2)}`,
+                aabbMax: `${box.max.x.toFixed(2)},${box.max.y.toFixed(2)},${box.max.z.toFixed(2)}`,
+                h_point: `${h.point.x.toFixed(3)},${h.point.y.toFixed(3)},${h.point.z.toFixed(3)}`,
+                h_distance: h.distance.toFixed(3),
+                stickPoint: `${stickPoint.x.toFixed(3)},${stickPoint.y.toFixed(3)},${stickPoint.z.toFixed(3)}`,
+                collisionOnly: !!(h.object as any).userData?.collisionOnly,
+                projectileY: p.mesh.position.y.toFixed(3),
+                distFromSpawn: Math.sqrt((h.point.x - p.startX) ** 2 + (h.point.y - p.startY) ** 2 + (h.point.z - p.startZ) ** 2).toFixed(3),
+                spawn: `${p.startX.toFixed(3)},${p.startY.toFixed(3)},${p.startZ.toFixed(3)}`,
+              });
+            }
+            if (DEBUG_PROJECTILE_STICK) {
+              // Visual debug: red sphere at stick point, green wireframe box showing hit object AABB
+              const dbgSphere = new THREE.Mesh(
+                new THREE.SphereGeometry(0.06, 8, 8),
+                new THREE.MeshBasicMaterial({ color: 0xff0000, depthTest: false }),
+              );
+              dbgSphere.position.copy(stickPoint);
+              dbgSphere.renderOrder = 999;
+              this.scene.add(dbgSphere);
+              const dbgBox = new THREE.Box3Helper(box, new THREE.Color(0x00ff00));
+              dbgBox.renderOrder = 999;
+              this.scene.add(dbgBox);
+              // Label: show what was hit (parent chain + geometry info)
+              const hitMeshDbg = h.object as THREE.Mesh;
+              const parentNames: string[] = [];
+              let pp: THREE.Object3D | null = h.object;
+              while (pp) { parentNames.push(pp.type + (pp.name ? `:${pp.name}` : '')); pp = pp.parent; }
+              const boxSz = box.getSize(new THREE.Vector3());
+              const meshName = (h.object as any).name || parentNames[0];
+              const labelText = `${meshName} [${boxSz.x.toFixed(2)}x${boxSz.y.toFixed(2)}x${boxSz.z.toFixed(2)}]\n${parentNames.slice(1, 3).join(' > ')}`;
+              const canvas = document.createElement('canvas');
+              canvas.width = 256; canvas.height = 64;
+              const ctx2d = canvas.getContext('2d')!;
+              ctx2d.fillStyle = 'rgba(0,0,0,0.7)';
+              ctx2d.fillRect(0, 0, 256, 64);
+              ctx2d.fillStyle = '#0f0';
+              ctx2d.font = '13px monospace';
+              const lines = labelText.split('\n');
+              lines.forEach((line, i) => ctx2d.fillText(line, 4, 16 + i * 18));
+              const tex = new THREE.CanvasTexture(canvas);
+              const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false }));
+              sprite.scale.set(1.2, 0.3, 1);
+              sprite.position.copy(box.getCenter(new THREE.Vector3()));
+              sprite.position.y = box.max.y + 0.25;
+              sprite.renderOrder = 999;
+              this.scene.add(sprite);
+              // Auto-remove after 5s
+              setTimeout(() => {
+                this.scene.remove(dbgSphere); this.scene.remove(dbgBox); this.scene.remove(sprite);
+                dbgSphere.geometry.dispose(); tex.dispose();
+              }, 5000);
+            }
+            audioSystem.sfxAt('fleshHitHigh', h.point.x, h.point.z);
+            if (p.isArrow) {
+              this.stickArrow(p, stickPoint);
+            } else {
+              staticHitPoint = stickPoint;
+            }
+            hit = true;
+            break;
+          }
+        }
+      }
+
+      // Terrain following: glide over gentle slopes, impact on steep ones (cliffs).
+      // Also runs as fallback when stickColliders exist but the raycast missed
+      // (e.g. arrow aimed at the floor in a dungeon corridor where the floor
+      // isn't in stickColliders). The nearSurface guard below already prevents
+      // sticking at the top of walls when getGroundY returns wall height.
       if (!hit && getGroundY) {
         const groundHere = getGroundY(p.mesh.position.x, p.mesh.position.z);
         const minY = groundHere + FLY_Y_OFFSET;
@@ -809,8 +1048,21 @@ export class ProjectileSystem {
           const slope = hDist > 0.001 ? rise / hDist : 0;
 
           if (slope > TERRAIN_HIT_SLOPE) {
-            // Steep slope — projectile impacts terrain (cliff/wall). Arrows stick at ground height; energy impact at projectile position so it doesn't jump up (getGroundY can be top of wall in any dungeon mode).
+            // Only stick if projectile is actually near this surface (within ~0.4m). Otherwise getGroundY returned the top of a wall/cube ahead and we're still in mid-air — let raycast handle the wall.
+            const nearSurface = p.mesh.position.y >= groundHere - 0.4;
+            if (nearSurface) {
+            // Steep slope — projectile impacts terrain (cliff/wall). Arrows stick at ground height.
             const hitPoint = new THREE.Vector3(p.mesh.position.x, groundHere + FLOOR_STICK_Y_OFFSET, p.mesh.position.z);
+            if (DEBUG_PROJECTILE_STICK) {
+              console.log('[Projectile stick TERRAIN]', {
+                path: 'getGroundY steep slope',
+                projectilePos: { x: p.mesh.position.x.toFixed(3), y: p.mesh.position.y.toFixed(3), z: p.mesh.position.z.toFixed(3) },
+                groundHere,
+                groundPrev,
+                slope: slope.toFixed(3),
+                hitPoint: { x: hitPoint.x.toFixed(3), y: hitPoint.y.toFixed(3), z: hitPoint.z.toFixed(3) },
+              });
+            }
             audioSystem.sfxAt('fleshHit', hitPoint.x, hitPoint.z);
             if (p.isArrow) {
               this.stickArrow(p, hitPoint);
@@ -820,6 +1072,7 @@ export class ProjectileSystem {
               this.removeProjectile(i);
               continue;
             }
+            }
           } else {
             // Gentle slope — glide over it
             p.mesh.position.y = minY;
@@ -828,42 +1081,6 @@ export class ProjectileSystem {
               const effDir = new THREE.Vector3(p.vx, Math.max(p.vy, 0), p.vz).normalize();
               p.mesh.quaternion.setFromUnitVectors(new THREE.Vector3(1, 0, 0), effDir);
             }
-          }
-        }
-      }
-
-      // Arrows: stick to floor when gravity has pulled them down (disabled while gravity is off)
-      // if (p.isArrow && p.gravityActive && getGroundY) {
-      //   const groundY = getGroundY(p.mesh.position.x, p.mesh.position.z);
-      //   if (p.mesh.position.y <= groundY + FLOOR_STICK_Y_OFFSET) {
-      //     const stickY = groundY + FLOOR_STICK_Y_OFFSET;
-      //     p.mesh.position.y = stickY;
-      //     this.stickArrow(p, new THREE.Vector3(p.mesh.position.x, stickY, p.mesh.position.z), new THREE.Vector3(0, 1, 0));
-      //     hit = true;
-      //   }
-      // }
-
-      // Raycast vs architecture/props (doors, walls): arrows stick, energy impacts
-      if (!hit && staticColliders.length > 0) {
-        rayOrigin.set(lastX, lastY, lastZ);
-        rayDir.set(p.mesh.position.x - lastX, p.mesh.position.y - lastY, p.mesh.position.z - lastZ);
-        const rayLen = rayDir.length();
-        if (rayLen > 0.001) {
-          rayDir.normalize();
-          raycaster.set(rayOrigin, rayDir);
-          raycaster.far = rayLen + 0.2;
-          raycaster.near = 0;
-          const hits = raycaster.intersectObjects(staticColliders, true);
-          for (const h of hits) {
-            if (!h.face) continue;
-            audioSystem.sfxAt('fleshHitHigh', h.point.x, h.point.z);
-            if (p.isArrow) {
-              this.stickArrow(p, h.point.clone());
-            } else {
-              staticHitPoint = h.point.clone();
-            }
-            hit = true;
-            break;
           }
         }
       }
