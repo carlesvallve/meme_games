@@ -8,7 +8,7 @@ import { audioSystem } from '../utils/AudioSystem';
 
 const MAX_ACTIVE = 6;
 const HIT_RADIUS = 0.5;
-const FLY_Y_OFFSET = 0.3; // height above ground
+const FLY_Y_OFFSET = 0.2; // height above ground (fallback when muzzleUp not provided)
 const TERRAIN_HIT_SLOPE = 0.8; // slope threshold: above this, projectile impacts terrain
 const MAX_RANGE = 12;
 
@@ -163,6 +163,8 @@ interface Projectile {
   stuckPositionOnly?: boolean;
   trailMesh: THREE.Mesh | null;
   trailPositions: THREE.Vector3[];
+  /** Height above ground for terrain-follow (derived from muzzle.up) */
+  flyYOffset: number;
 }
 
 // ── Mesh factories ───────────────────────────────────────────────────
@@ -421,6 +423,7 @@ export class ProjectileSystem {
     enemies: ReadonlyArray<Enemy>,
     terrainColliders?: THREE.Object3D[],
     excludeObjects?: THREE.Object3D[],
+    muzzleUp?: number,
   ): boolean {
     // Cooldown check
     const cd = this.cooldowns.get(ownerKey) ?? 0;
@@ -556,6 +559,7 @@ export class ProjectileSystem {
       stuckAt: 0,
       trailMesh,
       trailPositions,
+      flyYOffset: muzzleUp ?? FLY_Y_OFFSET,
     });
 
     // SFX — spatial, type-specific
@@ -1039,7 +1043,7 @@ export class ProjectileSystem {
       // sticking at the top of walls when getGroundY returns wall height.
       if (!hit && getGroundY) {
         const groundHere = getGroundY(p.mesh.position.x, p.mesh.position.z);
-        const minY = groundHere + FLY_Y_OFFSET;
+        const minY = groundHere + p.flyYOffset;
         if (p.mesh.position.y < minY) {
           // Check slope: how much did the ground rise vs horizontal travel?
           const groundPrev = getGroundY(lastX, lastZ);

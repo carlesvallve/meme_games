@@ -29,7 +29,7 @@ const HALF_VOXEL = 0.5 / 15;
 
 /** Per-hero muzzle offset (where the projectile spawns relative to character). Slightly lower than old default. */
 const MUZZLE_OFFSETS: Record<string, MuzzleOffset> = {
-  archer:      { forward: 0.32, up: 0.18 + HALF_VOXEL },
+  archer:      { forward: 0.32, up: 0.2 + HALF_VOXEL },
   mage:        { forward: 0.28, up: 0.2 + HALF_VOXEL },
   priestess:   { forward: 0.28, up: 0.2 + HALF_VOXEL },
   alchemist:   { forward: 0.28, up: 0.2 + HALF_VOXEL },
