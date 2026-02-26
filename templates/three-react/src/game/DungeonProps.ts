@@ -426,7 +426,8 @@ export class DungeonPropSystem {
     // testProp override: read from store
     const testProp = (await import('../store')).useGameStore.getState().testProp;
 
-    for (const room of rooms) {
+    for (let roomIdx = 0; roomIdx < rooms.length; roomIdx++) {
+      const room = rooms[roomIdx];
       let propList: { category: string; count: number }[];
 
       if (testProp) {
@@ -899,6 +900,16 @@ export class DungeonPropSystem {
     return this.props
       .filter(p => p.entry.placement !== 'wall_mount' && !SMALL_ITEM_CATEGORIES.has(p.entry.category))
       .map(p => p.gridCell);
+  }
+
+  /** All prop meshes with their placement grid cell for room visibility registration. */
+  getAllPropMeshesWithCells(): { mesh: THREE.Mesh; gx: number; gz: number }[] {
+    return this.props.map(p => ({ mesh: p.mesh, gx: p.gridCell.gx, gz: p.gridCell.gz }));
+  }
+
+  /** All room labels for room visibility registration. */
+  getAllLabels(): THREE.Sprite[] {
+    return [...this.labels];
   }
 
   /** Actual world positions of floor props (accounts for wall push offsets).

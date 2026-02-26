@@ -111,6 +111,11 @@ export class CollectibleSystem {
     return collected;
   }
 
+  /** All active collectible meshes (for room visibility). */
+  getMeshes(): THREE.Mesh[] {
+    return this.collectibles.filter(c => !c.collected).map(c => c.mesh);
+  }
+
   getTotalCollected(): number {
     return this.totalCollected;
   }

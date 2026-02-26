@@ -262,6 +262,11 @@ export class ChestSystem {
     return opened;
   }
 
+  /** All active chest groups (for room visibility). */
+  getGroups(): THREE.Group[] {
+    return this.chests.filter(c => !c.removed).map(c => c.group);
+  }
+
   dispose(): void {
     for (const chest of this.chests) {
       if (!chest.removed) {

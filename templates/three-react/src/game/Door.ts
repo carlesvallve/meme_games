@@ -465,6 +465,17 @@ export class DoorSystem {
     }
   }
 
+  /** Check if a door at the given index is open (or opening). */
+  isDoorOpen(index: number): boolean {
+    const door = this.doors[index];
+    return door ? door.openProgress > 0 : false;
+  }
+
+  /** Number of doors in the system. */
+  getDoorCount(): number {
+    return this.doors.length;
+  }
+
   /** Return door groups that are currently open or opening/closing (so projectiles don't raycast them). */
   getOpenDoorObjects(): THREE.Object3D[] {
     const out: THREE.Object3D[] = [];
@@ -477,6 +488,11 @@ export class DoorSystem {
   /** Return all door entities (for HMR re-registration). */
   getEntities(): Entity[] {
     return this.doors.map(d => d.entity);
+  }
+
+  /** Return all door groups (for room visibility registration). */
+  getDoorGroups(): THREE.Group[] {
+    return this.doors.map(d => d.group);
   }
 
   dispose(): void {

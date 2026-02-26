@@ -48,6 +48,13 @@ export interface VoxelDungeonResult {
   wallHeight: number;
 }
 
+export interface VoxelDungeonVisualResult {
+  groundMeshList: THREE.Mesh[];
+  wallMeshList: THREE.Mesh[];
+  groundMaterial: THREE.MeshStandardMaterial;
+  wallMaterial: THREE.MeshStandardMaterial;
+}
+
 // ── Ground mesh tracking (for live floor swaps) ──
 let groundMeshes: THREE.Mesh[] = [];
 let cachedGroundTheme = 'a_a';
@@ -135,7 +142,7 @@ export function buildVoxelDungeonCollision(
 export async function loadVoxelDungeonVisuals(
   config: VoxelDungeonConfig,
   group: THREE.Group,
-): Promise<void> {
+): Promise<VoxelDungeonVisualResult | null> {
   const { openGrid, gridW, gridD, cellSize, groundSize, gridDoors } = config;
   const theme = config.theme ?? 'a_a';
   const halfWorld = groundSize / 2;
@@ -150,7 +157,7 @@ export async function loadVoxelDungeonVisuals(
     await preloadTheme(theme);
   } catch (err) {
     console.warn('[VoxelDungeon] Failed to preload theme, no visuals', err);
-    return;
+    return null;
   }
 
   const toWorldX = (gx: number) => -halfWorld + (gx + 0.5) * cellSize;
@@ -182,6 +189,8 @@ export async function loadVoxelDungeonVisuals(
 
   let groundCount = 0;
   let wallCount = 0;
+  const groundMeshList: THREE.Mesh[] = [];
+  const wallMeshList: THREE.Mesh[] = [];
 
   // Ground tiles: randomized per-room/per-corridor, only normal (_a suffix) variants
   const { useGameStore } = await import('../store');
@@ -258,7 +267,14 @@ export async function loadVoxelDungeonVisuals(
       if (!tile) tile = normalGroundTiles[Math.floor(Math.random() * normalGroundTiles.length)] ?? null;
 
       const mesh = placeVoxReturn(group, wx, wz, 'ground', 0, voxMat, tile, theme);
-      if (mesh) groundMeshes.push(mesh);
+      if (mesh) {
+        groundMeshes.push(mesh);
+        groundMeshList.push(mesh);
+        // Tag with room ownership for visibility system
+        if (ownership) {
+          mesh.userData.roomId = ownership[gz * gridW + gx];
+        }
+      }
       groundCount++;
 
     }
@@ -318,7 +334,20 @@ export async function loadVoxelDungeonVisuals(
         else         rot = BASE_ROT + 270;
       }
 
-      placeVox(wallVisualGroup, wx, wz, role, rot, wallMat, tileOverride, theme);
+      const wallMesh = placeVoxReturn(wallVisualGroup, wx, wz, role, rot, wallMat, tileOverride, theme);
+      if (wallMesh && ownership) {
+        // Walls belong to all adjacent rooms
+        const adjRooms = new Set<number>();
+        for (const [dx, dz] of [[0, -1], [0, 1], [-1, 0], [1, 0], [-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+          const nx = gx + dx, nz = gz + dz;
+          if (nx >= 0 && nx < gridW && nz >= 0 && nz < gridD) {
+            const nid = ownership[nz * gridW + nx];
+            if (nid !== undefined) adjRooms.add(nid);
+          }
+        }
+        wallMesh.userData.roomIds = [...adjRooms];
+        wallMeshList.push(wallMesh);
+      }
       wallCount++;
     }
   }
@@ -342,6 +371,8 @@ export async function loadVoxelDungeonVisuals(
   }
 
   console.log(`[VoxelDungeon] ${groundCount} ground + ${wallCount} wall tiles`);
+
+  return { groundMeshList, wallMeshList, groundMaterial: voxMat, wallMaterial: wallMat };
 }
 
 // ── Helpers ──
