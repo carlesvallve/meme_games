@@ -456,15 +456,22 @@ export class DoorSystem {
         door.pivots[0].rotation.y = easedProgress * (Math.PI / 2) * door.swingSign;
       }
 
-      // Manage dynamic debris collision
-      if (prev < 1 && door.openProgress >= 1) {
+      // Manage dynamic debris collision: disable while opening or closing so character isn't blocked
+      if (door.openProgress > 0) {
         this.terrain.removeDynamicDebris(door.debrisBox);
-      } else if (prev >= 1 && door.openProgress < 1) {
-        this.terrain.addDynamicDebris(door.debrisBox);
-      } else if (prev > 0 && door.openProgress <= 0) {
+      } else {
         this.terrain.addDynamicDebris(door.debrisBox);
       }
     }
+  }
+
+  /** Return door groups that are currently open or opening/closing (so projectiles don't raycast them). */
+  getOpenDoorObjects(): THREE.Object3D[] {
+    const out: THREE.Object3D[] = [];
+    for (const door of this.doors) {
+      if (door.openProgress > 0) out.push(door.group);
+    }
+    return out;
   }
 
   dispose(): void {

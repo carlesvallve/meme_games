@@ -23,6 +23,14 @@ export class EntityRegistry {
     this.entities.delete(e);
   }
 
+  /** Remove all entities (call on full scene teardown / hot reload). */
+  clear(): void {
+    for (const e of this.entities) {
+      e.object3D.userData.entity = undefined;
+    }
+    this.entities.clear();
+  }
+
   getByLayer(mask: number): Entity[] {
     const result: Entity[] = [];
     for (const e of this.entities) {
