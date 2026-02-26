@@ -229,6 +229,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     collectibles.dispose();
     terrain.dispose();
     scene.remove(terrain.group);
+    entityRegistry.clear(); // purge stale Architecture/Prop entities from previous generation
     setTerrainCache(null); // invalidate HMR cache on explicit regeneration
 
     // Read current settings from store

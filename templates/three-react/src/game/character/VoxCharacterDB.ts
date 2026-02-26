@@ -315,7 +315,7 @@ const STEP_MODE_BY_ARCHETYPE: Partial<Record<Archetype, StepMode>> = {
   ghost: 'flyer',
   blob: 'jumper',
   mimic: 'jumper',
-  slob: 'jumper',
+  slob: 'walker',
 };
 
 function getPersonality(folder: string): Pick<VoxCharEntry, 'thoughts' | 'exclamations' | 'sounds'> {

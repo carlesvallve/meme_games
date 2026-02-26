@@ -165,6 +165,7 @@ export class Terrain {
   private doorSystem: DoorSystem | null = null;
   private propSystem: DungeonPropSystem | null = null;
   private natureResult: NatureGeneratorResult | null = null;
+  private _disposed = false;
   /** Called when voxel dungeon props are ready; used to register prop chests with ChestSystem */
   private propChestRegistrar: ((list: { position: THREE.Vector3; mesh: THREE.Mesh; entity: Entity; openGeo?: THREE.BufferGeometry }[]) => void) | null = null;
 
@@ -1497,8 +1498,12 @@ export class Terrain {
 
     console.log(`[Terrain] voxelDungeon: ${output.roomCount} rooms, ${output.corridorCount} corridors, ${output.doors.length} doors`);
 
-    // Mark door-flanking cells (pillar cells) as unwalkable so only the central cell is passable
+    // Snapshot openGrid for visual tile placement BEFORE door-flanking mutation
     const { openGrid, gridW, gridD } = output.walkMask;
+    const visualOpenGrid = openGrid.slice();
+
+    // Mark door-flanking cells (pillar cells) as unwalkable so only the central cell is passable
+    // This only affects walkMask/collision — visuals use the pre-mutation snapshot
     for (const d of output.gridDoors) {
       const gx = Math.round(d.x);
       const gz = Math.round(d.z);
@@ -1519,7 +1524,7 @@ export class Terrain {
       : dungeonVariant;
 
     const voxConfig = {
-      openGrid: output.walkMask.openGrid,
+      openGrid: visualOpenGrid,
       gridW: output.walkMask.gridW,
       gridD: output.walkMask.gridD,
       cellSize,
@@ -1539,6 +1544,7 @@ export class Terrain {
 
     // Load visuals async, then create doors + props (need tile geometry to be loaded first)
     loadVoxelDungeonVisuals(voxConfig, this.group).then(async () => {
+      if (this._disposed) return; // terrain was regenerated while loading — bail out
       if (output.doors.length > 0) {
         this.doorSystem = new DoorSystem(
           this.group,
@@ -2628,10 +2634,36 @@ export class Terrain {
   }
 
   dispose(): void {
+    this._disposed = true;
+
     for (const entity of this.debrisEntities) {
       entity.destroy();
     }
     this.debrisEntities.length = 0;
+    this.debris.length = 0;
+
+    // Dispose and clear boxGroup children (collision meshes)
+    while (this.boxGroup.children.length > 0) {
+      const child = this.boxGroup.children[0];
+      this.boxGroup.remove(child);
+      if (child instanceof THREE.Mesh) {
+        child.geometry.dispose();
+        if (child.material instanceof THREE.Material) child.material.dispose();
+      }
+    }
+
+    // Dispose all children of main group (ground tiles, wallVisuals, grid, etc.)
+    const toRemove = [...this.group.children];
+    for (const child of toRemove) {
+      this.group.remove(child);
+      child.traverse((node) => {
+        if (node instanceof THREE.Mesh) {
+          node.geometry.dispose();
+          const mats = Array.isArray(node.material) ? node.material : [node.material];
+          for (const mat of mats) mat.dispose();
+        }
+      });
+    }
 
     // Clear heightmap thumbnail
     useGameStore.getState().setHeightmapThumb(null);

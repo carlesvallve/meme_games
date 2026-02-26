@@ -52,6 +52,7 @@ export class Character implements BehaviorAgent {
   torchLightEntity: Entity;
   fillLight: THREE.PointLight;
   torchTime = 0;
+  private _baseSpeed: number | undefined;
 
   protected scene: THREE.Scene;
   terrain: Terrain;
@@ -212,7 +213,16 @@ export class Character implements BehaviorAgent {
   // ── VOX skin loading ─────────────────────────────────────────────
 
   async applyVoxSkin(entry: VoxCharEntry): Promise<void> {
+    // Store base speed on first skin apply, restore it on subsequent ones
+    if (this._baseSpeed === undefined) this._baseSpeed = this.params.speed;
+    else this.params.speed = this._baseSpeed;
+
     await this.animator.applySkin(this, entry, this.footIK);
+
+    // Jumpers move slower than walkers
+    if (entry.stepMode === 'jumper') {
+      this.params.speed *= 0.6;
+    }
   }
 
   private updateVoxAnimation(dt: number, isMoving: boolean): void {
