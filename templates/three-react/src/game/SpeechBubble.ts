@@ -3,7 +3,7 @@ import { useGameStore } from '../store';
 import { entityRegistry, Layer } from './Entity';
 import { revealUniforms } from './RevealShader';
 import type { SpeechBubbleData } from '../types';
-import type { Character } from './Character';
+import type { Character } from './character';
 
 /** Height offset above the character mesh for speech bubble placement */
 const BUBBLE_Y_OFFSET = 0.7;

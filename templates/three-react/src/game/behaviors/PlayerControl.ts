@@ -1,6 +1,6 @@
 import { Behavior, type BehaviorAgent, type BehaviorStatus } from './Behavior';
 import type { InputState } from '../Input';
-import type { MovementParams } from '../Character';
+import type { MovementParams } from '../character';
 import { audioSystem } from '../../utils/AudioSystem';
 
 /** Dependencies injected at construction (not per-frame). */

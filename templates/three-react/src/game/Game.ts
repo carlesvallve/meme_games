@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { useGameStore, DEFAULT_PLAYER_PARAMS, DEFAULT_CAMERA_PARAMS, DEFAULT_LIGHT_PRESET, DEFAULT_TORCH_PARAMS, DEFAULT_PARTICLE_TOGGLES, DEFAULT_SCENE_SETTINGS } from '../store';
+import { useGameStore, DEFAULT_CAMERA_PARAMS, DEFAULT_LIGHT_PRESET, DEFAULT_TORCH_PARAMS, DEFAULT_PARTICLE_TOGGLES, DEFAULT_SCENE_SETTINGS } from '../store';
+import { DEFAULT_CHARACTER_PARAMS } from './character';
 import { Input } from './Input';
 import { Camera } from './Camera';
 import { createScene, applyLightPreset } from './Scene';
@@ -10,11 +11,10 @@ import { CollectibleSystem } from './Collectible';
 import { ChestSystem } from './Chest';
 import { LootSystem } from './Loot';
 import { SpeechBubbleSystem } from './SpeechBubble';
-import { Character } from './Character';
+import { Character, CHARACTER_TEAM_COLORS, getSlots, getCharacterName, rerollRoster, voxRoster, VOX_HEROES, VOX_ENEMIES, getProjectileConfig, getMuzzleOffset, isRangedHeroId, type CharacterType } from './character';
 import { EnemySystem, type HitImpactCallbacks } from './EnemySystem';
 import { ProjectileSystem, setDebugProjectileStick } from './ProjectileSystem';
 import { GoreSystem } from './GoreSystem';
-import { getProjectileConfig, getMuzzleOffset, isRangedHeroId } from './CombatConfig';
 import { createDustMotes, createRainEffect, createDebrisEffect } from '../utils/particles';
 import type { ParticleToggles } from '../store';
 import type { ParticleSystem } from '../types';
@@ -22,8 +22,6 @@ import { audioSystem } from '../utils/AudioSystem';
 import { updateReveal, patchSceneArchitecture } from './RevealShader';
 import { entityRegistry } from './Entity';
 import type { GameInstance } from '../types';
-import { CHARACTER_TEAM_COLORS, getSlots, getCharacterName, rerollRoster, voxRoster, type CharacterType } from './characters';
-import { VOX_HEROES, VOX_ENEMIES } from './VoxCharacterDB';
 
 /** Nav cell size: 0.25m for all presets. */
 function navCellForPreset(_preset: string): number {
@@ -164,7 +162,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       setTerrainCache(null);
     }
     terrain = new Terrain(scene, initPreset, initStyle, initPalette);
-    const { playerParams: initParams } = useGameStore.getState();
+    const { characterParams: initParams } = useGameStore.getState();
     navGrid = terrain.buildNavGrid(initParams.stepHeight, initParams.capsuleRadius, navCellForPreset(initPreset), initParams.slopeHeight);
   }
 
@@ -229,7 +227,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     setTerrainCache(null); // invalidate HMR cache on explicit regeneration
 
     // Read current settings from store
-    const { terrainPreset, heightmapStyle, playerParams: pp, paletteName: palPick } = useGameStore.getState();
+    const { terrainPreset, heightmapStyle, characterParams: pp, paletteName: palPick } = useGameStore.getState();
 
     // Rebuild
     terrain = new Terrain(scene, terrainPreset, heightmapStyle, palPick);
@@ -359,11 +357,11 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   }
 
   /** Sync movement params from the store to all characters (for settings sliders). */
-  let lastSyncedPlayerParams: ReturnType<typeof useGameStore.getState>['playerParams'] | null = null;
+  let lastSyncedCharacterParams: ReturnType<typeof useGameStore.getState>['characterParams'] | null = null;
   function syncAllCharacterParams(): void {
-    const pp = useGameStore.getState().playerParams;
-    if (pp === lastSyncedPlayerParams) return;
-    lastSyncedPlayerParams = pp;
+    const pp = useGameStore.getState().characterParams;
+    if (pp === lastSyncedCharacterParams) return;
+    lastSyncedCharacterParams = pp;
     for (const char of characters) {
       const p = char.params;
       p.speed = pp.speed;
@@ -654,7 +652,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       onHitstop: (duration) => triggerHitstop(duration),
       onCameraShake: (intensity, duration, dirX, dirZ) => cam.shake(intensity, duration, dirX, dirZ),
     };
-    enemySystem.spawnEnemies(0);
+    enemySystem.spawnEnemies(8);
   }
 
   // Store callbacks
@@ -686,17 +684,17 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       useGameStore.getState().setPaletteActive(name);
       sceneSky.setPalette(name);
     },
-    onResetPlayerParams: () => {
-      const d = DEFAULT_PLAYER_PARAMS;
+    onResetCharacterParams: () => {
+      const d = DEFAULT_CHARACTER_PARAMS;
       const store = useGameStore.getState();
-      store.setPlayerParam('speed', d.speed);
-      store.setPlayerParam('stepHeight', d.stepHeight);
-      store.setPlayerParam('slopeHeight', d.slopeHeight);
-      store.setPlayerParam('capsuleRadius', d.capsuleRadius);
-      store.setPlayerParam('arrivalReach', d.arrivalReach);
-      store.setPlayerParam('hopHeight', d.hopHeight);
-      store.setPlayerParam('magnetRadius', d.magnetRadius);
-      store.setPlayerParam('magnetSpeed', d.magnetSpeed);
+      store.setCharacterParam('speed', d.speed);
+      store.setCharacterParam('stepHeight', d.stepHeight);
+      store.setCharacterParam('slopeHeight', d.slopeHeight);
+      store.setCharacterParam('capsuleRadius', d.capsuleRadius);
+      store.setCharacterParam('arrivalReach', d.arrivalReach);
+      store.setCharacterParam('hopHeight', d.hopHeight);
+      store.setCharacterParam('magnetRadius', d.magnetRadius);
+      store.setCharacterParam('magnetSpeed', d.magnetSpeed);
       // syncAllCharacterParams will pick up the changes next frame
     },
     onResetCameraParams: () => {
@@ -866,7 +864,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
         if (enemySystem) {
           charPositions.push(...enemySystem.getEnemyPositions());
         }
-        const stepHeight = useGameStore.getState().playerParams.stepHeight;
+        const stepHeight = useGameStore.getState().characterParams.stepHeight;
         doorSystem.update(dt, charPositions, stepHeight);
       }
 
@@ -875,7 +873,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
 
       // Enemy system
       if (enemySystem) {
-        const showSlashEffect = useGameStore.getState().playerParams.showSlashEffect;
+        const showSlashEffect = useGameStore.getState().characterParams.showSlashEffect;
         enemySystem.update(dt, playerChar,
           (damage) => {
             const s = useGameStore.getState();
@@ -982,7 +980,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
 
       // Active character position (for collectibles, chests, loot)
       const activePos = activeCharacter.getPosition();
-      const params = useGameStore.getState().playerParams;
+      const params = useGameStore.getState().characterParams;
 
       // Collectibles
       const pickedUp = collectibles.update(dt, activePos);

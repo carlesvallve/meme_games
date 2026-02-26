@@ -1,11 +1,11 @@
 import * as THREE from 'three';
 import { Character } from './Character';
-import type { Terrain } from './Terrain';
-import type { NavGrid } from './NavGrid';
-import type { LadderDef } from './Ladder';
+import type { Terrain } from '../Terrain';
+import type { NavGrid } from '../NavGrid';
+import type { LadderDef } from '../Ladder';
 import type { VoxCharEntry } from './VoxCharacterDB';
 import { VOX_ENEMIES } from './VoxCharacterDB';
-import { ChaseBehavior } from './behaviors/ChaseBehavior';
+import { ChaseBehavior } from '../behaviors/ChaseBehavior';
 import type { CharacterType } from './characters';
 
 export class Enemy extends Character {

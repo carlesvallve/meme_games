@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import type { ProjectileConfig } from './CombatConfig';
-import type { Enemy } from './Enemy';
+import type { ProjectileConfig } from './character';
+import type { Enemy } from './character';
 import { entityRegistry, Layer } from './Entity';
 import { audioSystem } from '../utils/AudioSystem';
 

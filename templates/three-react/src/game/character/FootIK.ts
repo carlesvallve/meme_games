@@ -9,8 +9,8 @@
  *   footIK.apply(mesh, groundY);              // every frame, after animation
  */
 import * as THREE from 'three';
-import type { Terrain } from './Terrain';
-import type { VoxCharacterData } from '../utils/VoxModelLoader';
+import type { Terrain } from '../Terrain';
+import type { VoxCharacterData } from '../../utils/VoxModelLoader';
 
 // ── Constants ────────────────────────────────────────────────────────
 

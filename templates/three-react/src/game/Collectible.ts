@@ -91,7 +91,7 @@ export class CollectibleSystem {
       const dist = Math.sqrt(dx * dx + dz * dz);
 
       // Magnet attraction
-      const { magnetRadius, magnetSpeed } = useGameStore.getState().playerParams;
+      const { magnetRadius, magnetSpeed } = useGameStore.getState().characterParams;
       if (dist < magnetRadius && dist > this.pickupRadius) {
         const speed = (1 - dist / magnetRadius) * magnetSpeed * dt;
         c.mesh.position.x += (dx / dist) * speed;

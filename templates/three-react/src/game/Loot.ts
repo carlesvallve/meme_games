@@ -109,7 +109,7 @@ export class LootSystem {
   update(dt: number, playerPos: THREE.Vector3): { coins: number; potions: number } {
     let coins = 0;
     let potions = 0;
-    const { magnetRadius, magnetSpeed } = useGameStore.getState().playerParams;
+    const { magnetRadius, magnetSpeed } = useGameStore.getState().characterParams;
 
     for (let i = this.items.length - 1; i >= 0; i--) {
       const item = this.items[i];
