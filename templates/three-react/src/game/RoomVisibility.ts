@@ -68,6 +68,7 @@ export class RoomVisibility {
   /** Register a mesh (or group) under one or more room IDs */
   registerMesh(obj: THREE.Object3D, roomIds: number[]): void {
     this.allRegistered.add(obj);
+    this.prevActiveKey = ''; // force re-apply on next update
     for (const id of roomIds) {
       if (id === -1) continue; // skip unowned
       let list = this.roomObjects.get(id);
@@ -159,10 +160,12 @@ export class RoomVisibility {
         if (reached.has(nidx)) continue;
         if (!openGrid[nidx]) continue;
 
-        // Closed door blocks flood-fill
+        // Door cell: blocks if door is closed OR doorSystem not yet loaded
         const doorIdx = this.doorCellMap.get(nidx);
-        if (doorIdx !== undefined && doorSystem && !doorSystem.isDoorOpen(doorIdx)) {
-          continue;
+        if (doorIdx !== undefined) {
+          if (!doorSystem || !doorSystem.isDoorOpen(doorIdx)) {
+            continue;
+          }
         }
 
         reached.add(nidx);
