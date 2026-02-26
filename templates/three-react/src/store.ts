@@ -44,6 +44,14 @@ export interface CameraParams {
   collisionSkin: number;
 }
 
+export interface PostProcessSettings {
+  enabled: boolean;
+  bloom: { enabled: boolean; strength: number; radius: number; threshold: number };
+  ssao: { enabled: boolean; radius: number; minDistance: number; maxDistance: number };
+  vignette: { enabled: boolean; offset: number; darkness: number };
+  colorGrade: { enabled: boolean; brightness: number; contrast: number; saturation: number };
+}
+
 // ── Defaults ──────────────────────────────────────────────────────────
 
 export const DEFAULT_CAMERA_PARAMS: CameraParams = {
@@ -58,6 +66,14 @@ export const DEFAULT_TORCH_PARAMS: TorchParams = {
 };
 
 export const DEFAULT_LIGHT_PRESET: LightPreset = 'default';
+
+export const DEFAULT_POST_PROCESS: PostProcessSettings = {
+  enabled: true,
+  bloom: { enabled: true, strength: 0.3, radius: 0.4, threshold: 0.85 },
+  ssao: { enabled: true, radius: 0.5, minDistance: 0.001, maxDistance: 0.1 },
+  vignette: { enabled: true, offset: 1.0, darkness: 1.2 },
+  colorGrade: { enabled: true, brightness: 0, contrast: 0.1, saturation: 0.1 },
+};
 
 export const DEFAULT_PARTICLE_TOGGLES: ParticleToggles = {
   dust: true, lightRain: false, rain: false, debris: false,
@@ -113,6 +129,7 @@ interface SavedSettings {
   debugProjectileStick?: boolean;
   hmrCacheEnabled?: boolean;
   dungeonVariant?: string;
+  postProcess?: PostProcessSettings;
   characterPushEnabled?: boolean;
   particleToggles?: ParticleToggles;
   /** @deprecated Renamed to characterParams; kept for migration. */
@@ -153,6 +170,7 @@ function saveSettings(): void {
     debugProjectileStick: s.debugProjectileStick,
     hmrCacheEnabled: s.hmrCacheEnabled,
     dungeonVariant: s.dungeonVariant,
+    postProcess: s.postProcess,
     characterPushEnabled: s.characterPushEnabled,
     particleToggles: s.particleToggles,
   };
@@ -210,6 +228,9 @@ interface GameStore {
   setHmrCacheEnabled: (on: boolean) => void;
   dungeonVariant: string;
   setDungeonVariant: (variant: string) => void;
+  postProcess: PostProcessSettings;
+  setPostProcess: (settings: PostProcessSettings) => void;
+  setPostProcessParam: <K extends keyof PostProcessSettings>(key: K, value: PostProcessSettings[K]) => void;
 
   /** If true, characters push each other apart when overlapping; if false, only the non-player is pushed (player stays put). */
   characterPushEnabled: boolean;
@@ -328,6 +349,10 @@ export const useGameStore = create<GameStore>((set) => ({
   setHmrCacheEnabled: (hmrCacheEnabled) => set({ hmrCacheEnabled }),
   dungeonVariant: saved.dungeonVariant ?? DEFAULT_SCENE_SETTINGS.dungeonVariant,
   setDungeonVariant: (dungeonVariant) => set({ dungeonVariant }),
+  postProcess: saved.postProcess ?? { ...DEFAULT_POST_PROCESS },
+  setPostProcess: (postProcess) => set({ postProcess }),
+  setPostProcessParam: (key, value) =>
+    set((s) => ({ postProcess: { ...s.postProcess, [key]: value } })),
 
   characterPushEnabled: saved.characterPushEnabled ?? true,
   setCharacterPushEnabled: (characterPushEnabled) => set({ characterPushEnabled }),

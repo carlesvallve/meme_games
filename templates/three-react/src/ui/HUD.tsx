@@ -97,7 +97,7 @@ export function HUD() {
     <div
       style={{
         position: 'absolute',
-        top: 16,
+        top: 28,
         left: 16,
         right: 16,
         display: 'flex',
