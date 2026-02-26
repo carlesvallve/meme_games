@@ -12,6 +12,7 @@ import { DoorSystem } from './Door';
 import { generateNature, type NatureGeneratorResult } from './NatureGenerator';
 import { paletteBiome } from './ColorPalettes';
 import { buildVoxelDungeonCollision, loadVoxelDungeonVisuals } from './VoxelDungeon';
+import { DUNGEON_VARIANTS } from './VoxDungeonDB';
 import { DungeonPropSystem, clearPropCache } from './DungeonProps';
 import { useGameStore } from '../store';
 import { randomPalette, palettes } from './ColorPalettes';
@@ -1488,7 +1489,7 @@ export class Terrain {
   }
 
   private createVoxelDungeonDebris(): void {
-    const { wallGap, roomSpacing, tileSize, doorChance } = useGameStore.getState();
+    const { wallGap, roomSpacing, tileSize, doorChance, dungeonVariant } = useGameStore.getState();
     const output = generateDungeon('dungeon', this.groundSize, wallGap, tileSize, roomSpacing, doorChance);
     this.walkMask = output.walkMask;
     this.effectiveGroundSize = this.groundSize;
@@ -1512,6 +1513,11 @@ export class Terrain {
       }
     }
 
+    // Resolve dungeon theme variant
+    const theme = dungeonVariant === 'random'
+      ? DUNGEON_VARIANTS[Math.floor(Math.random() * DUNGEON_VARIANTS.length)]
+      : dungeonVariant;
+
     const voxConfig = {
       openGrid: output.walkMask.openGrid,
       gridW: output.walkMask.gridW,
@@ -1521,6 +1527,7 @@ export class Terrain {
       doors: output.doors,
       gridDoors: output.gridDoors,
       roomOwnership: output.roomOwnership,
+      theme,
     };
 
     const vdResult = buildVoxelDungeonCollision(voxConfig, this.boxGroup);

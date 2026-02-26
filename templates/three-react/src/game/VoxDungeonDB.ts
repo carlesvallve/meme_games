@@ -57,73 +57,93 @@ export interface DungeonPropEntry {
 
 // ── Paths ──
 
-const BASE = '/models/Square%20Dungeon%20Asset%20Pack/Dungeons/Dungeon%20A/Dungeon%20A-A%20Pieces';
+const DUNGEON_ROOT = '/models/Square%20Dungeon%20Asset%20Pack/Dungeons';
 const P = '/models/Square%20Dungeon%20Asset%20Pack/Props';
 
-// ── Dungeon A-A tile entries ──
+// ── All 8 dungeon variants: {major}_{minor} ──
 
-const THEME = 'a_a';
+export const DUNGEON_VARIANTS = [
+  'a_a', 'a_b', 'b_a', 'b_b', 'c_a', 'c_b', 'd_a', 'd_b',
+] as const;
 
-const A_A_TILES: DungeonTileEntry[] = [
+export type DungeonVariant = typeof DUNGEON_VARIANTS[number];
+
+/** Return the full list of variant keys */
+export function getDungeonVariants(): readonly string[] {
+  return DUNGEON_VARIANTS;
+}
+
+/** Build the URL-encoded base path for a theme, e.g. 'b_a' → '.../Dungeon B/Dungeon B-A Pieces' */
+function buildBasePath(theme: string): string {
+  const [major, minor] = theme.split('_');
+  const M = major.toUpperCase();
+  const m = minor.toUpperCase();
+  return `${DUNGEON_ROOT}/Dungeon%20${M}/Dungeon%20${M}-${m}%20Pieces`;
+}
+
+/** Generate all tile entries for a single theme variant */
+function buildThemeTiles(theme: string): DungeonTileEntry[] {
+  const BASE = buildBasePath(theme);
+  const prefix = theme; // e.g. 'a_a', used in file names like dungeon_a_a_ground_a_a.vox
+  const tiles: DungeonTileEntry[] = [];
+
   // Ground tiles (4 decoration variants × 2 sub-variants each)
-  { id: 'ground_a_a', role: 'ground', theme: THEME, voxPath: `${BASE}/Ground/VOX/dungeon_a_a_ground_a_a.vox` },
-  { id: 'ground_a_b', role: 'ground', theme: THEME, voxPath: `${BASE}/Ground/VOX/dungeon_a_a_ground_a_b.vox` },
-  { id: 'ground_b_a', role: 'ground', theme: THEME, voxPath: `${BASE}/Ground/VOX/dungeon_a_a_ground_b_a.vox` },
-  { id: 'ground_b_b', role: 'ground', theme: THEME, voxPath: `${BASE}/Ground/VOX/dungeon_a_a_ground_b_b.vox` },
-  { id: 'ground_c_a', role: 'ground', theme: THEME, voxPath: `${BASE}/Ground/VOX/dungeon_a_a_ground_c_a.vox` },
-  { id: 'ground_c_b', role: 'ground', theme: THEME, voxPath: `${BASE}/Ground/VOX/dungeon_a_a_ground_c_b.vox` },
-  { id: 'ground_d_a', role: 'ground', theme: THEME, voxPath: `${BASE}/Ground/VOX/dungeon_a_a_ground_d_a.vox` },
-  { id: 'ground_d_b', role: 'ground', theme: THEME, voxPath: `${BASE}/Ground/VOX/dungeon_a_a_ground_d_b.vox` },
+  for (const deco of ['a', 'b', 'c', 'd']) {
+    for (const sub of ['a', 'b']) {
+      tiles.push({ id: `${theme}:ground_${deco}_${sub}`, role: 'ground', theme, voxPath: `${BASE}/Ground/VOX/dungeon_${prefix}_ground_${deco}_${sub}.vox` });
+    }
+  }
 
   // Outer wall segments (4 decoration variants × normal + flipped)
-  { id: 'outer_wall_segment_a', role: 'outer_wall_segment', theme: THEME, voxPath: `${BASE}/Wall/VOX/dungeon_a_a_outer_wall_segment_a.vox` },
-  { id: 'outer_wall_segment_a_flip', role: 'outer_wall_segment', theme: THEME, voxPath: `${BASE}/Wall/VOX/dungeon_a_a_outer_wall_segment_a_flipped.vox`, flipped: true },
-  { id: 'outer_wall_segment_b', role: 'outer_wall_segment', theme: THEME, voxPath: `${BASE}/Wall/VOX/dungeon_a_a_outer_wall_segment_b.vox` },
-  { id: 'outer_wall_segment_b_flip', role: 'outer_wall_segment', theme: THEME, voxPath: `${BASE}/Wall/VOX/dungeon_a_a_outer_wall_segment_b_flipped.vox`, flipped: true },
-  { id: 'outer_wall_segment_c', role: 'outer_wall_segment', theme: THEME, voxPath: `${BASE}/Wall/VOX/dungeon_a_a_outer_wall_segment_c.vox` },
-  { id: 'outer_wall_segment_c_flip', role: 'outer_wall_segment', theme: THEME, voxPath: `${BASE}/Wall/VOX/dungeon_a_a_outer_wall_segment_c_flipped.vox`, flipped: true },
-  { id: 'outer_wall_segment_d', role: 'outer_wall_segment', theme: THEME, voxPath: `${BASE}/Wall/VOX/dungeon_a_a_outer_wall_segment_d.vox` },
-  { id: 'outer_wall_segment_d_flip', role: 'outer_wall_segment', theme: THEME, voxPath: `${BASE}/Wall/VOX/dungeon_a_a_outer_wall_segment_d_flipped.vox`, flipped: true },
+  for (const deco of ['a', 'b', 'c', 'd']) {
+    tiles.push({ id: `${theme}:outer_wall_segment_${deco}`, role: 'outer_wall_segment', theme, voxPath: `${BASE}/Wall/VOX/dungeon_${prefix}_outer_wall_segment_${deco}.vox` });
+    tiles.push({ id: `${theme}:outer_wall_segment_${deco}_flip`, role: 'outer_wall_segment', theme, voxPath: `${BASE}/Wall/VOX/dungeon_${prefix}_outer_wall_segment_${deco}_flipped.vox`, flipped: true });
+  }
 
   // Outer wall corners (4 decoration variants)
-  { id: 'outer_wall_corner_a', role: 'outer_wall_corner', theme: THEME, voxPath: `${BASE}/Wall/VOX/dungeon_a_a_outer_wall_corner_a.vox` },
-  { id: 'outer_wall_corner_b', role: 'outer_wall_corner', theme: THEME, voxPath: `${BASE}/Wall/VOX/dungeon_a_a_outer_wall_corner_b.vox` },
-  { id: 'outer_wall_corner_c', role: 'outer_wall_corner', theme: THEME, voxPath: `${BASE}/Wall/VOX/dungeon_a_a_outer_wall_corner_c.vox` },
-  { id: 'outer_wall_corner_d', role: 'outer_wall_corner', theme: THEME, voxPath: `${BASE}/Wall/VOX/dungeon_a_a_outer_wall_corner_d.vox` },
+  for (const deco of ['a', 'b', 'c', 'd']) {
+    tiles.push({ id: `${theme}:outer_wall_corner_${deco}`, role: 'outer_wall_corner', theme, voxPath: `${BASE}/Wall/VOX/dungeon_${prefix}_outer_wall_corner_${deco}.vox` });
+  }
 
-  // Outer wall fill (solid block — all 4 sides are walls)
-  { id: 'outer_wall_fill', role: 'outer_wall_fill', theme: THEME, voxPath: `${BASE}/Wall/VOX/dungeon_a_a_outer_wall_fill.vox` },
+  // Outer wall fill (solid block)
+  tiles.push({ id: `${theme}:outer_wall_fill`, role: 'outer_wall_fill', theme, voxPath: `${BASE}/Wall/VOX/dungeon_${prefix}_outer_wall_fill.vox` });
 
   // Inner wall segments (2 variants + flipped)
-  { id: 'inner_wall_segment_a', role: 'inner_wall_segment', theme: THEME, voxPath: `${BASE}/Wall/VOX/dungeon_a_a_inner_wall_segment_a.vox` },
-  { id: 'inner_wall_segment_b', role: 'inner_wall_segment', theme: THEME, voxPath: `${BASE}/Wall/VOX/dungeon_a_a_inner_wall_segment_b.vox` },
-  { id: 'inner_wall_segment_b_flip', role: 'inner_wall_segment', theme: THEME, voxPath: `${BASE}/Wall/VOX/dungeon_a_a_inner_wall_segment_b_flipped.vox`, flipped: true },
+  tiles.push({ id: `${theme}:inner_wall_segment_a`, role: 'inner_wall_segment', theme, voxPath: `${BASE}/Wall/VOX/dungeon_${prefix}_inner_wall_segment_a.vox` });
+  tiles.push({ id: `${theme}:inner_wall_segment_b`, role: 'inner_wall_segment', theme, voxPath: `${BASE}/Wall/VOX/dungeon_${prefix}_inner_wall_segment_b.vox` });
+  tiles.push({ id: `${theme}:inner_wall_segment_b_flip`, role: 'inner_wall_segment', theme, voxPath: `${BASE}/Wall/VOX/dungeon_${prefix}_inner_wall_segment_b_flipped.vox`, flipped: true });
 
   // Inner wall corners (2 variants)
-  { id: 'inner_wall_corner_a', role: 'inner_wall_corner', theme: THEME, voxPath: `${BASE}/Wall/VOX/dungeon_a_a_inner_wall_corner_a.vox` },
-  { id: 'inner_wall_corner_b', role: 'inner_wall_corner', theme: THEME, voxPath: `${BASE}/Wall/VOX/dungeon_a_a_inner_wall_corner_b.vox` },
+  tiles.push({ id: `${theme}:inner_wall_corner_a`, role: 'inner_wall_corner', theme, voxPath: `${BASE}/Wall/VOX/dungeon_${prefix}_inner_wall_corner_a.vox` });
+  tiles.push({ id: `${theme}:inner_wall_corner_b`, role: 'inner_wall_corner', theme, voxPath: `${BASE}/Wall/VOX/dungeon_${prefix}_inner_wall_corner_b.vox` });
 
   // Inner wall crossing (T or + junction)
-  { id: 'inner_wall_crossing', role: 'inner_wall_crossing', theme: THEME, voxPath: `${BASE}/Wall/VOX/dungeon_a_a_inner_wall_crossing.vox` },
+  tiles.push({ id: `${theme}:inner_wall_crossing`, role: 'inner_wall_crossing', theme, voxPath: `${BASE}/Wall/VOX/dungeon_${prefix}_inner_wall_crossing.vox` });
 
   // Inner wall endings (dead-end cap + flipped)
-  { id: 'inner_wall_ending', role: 'inner_wall_ending', theme: THEME, voxPath: `${BASE}/Wall/VOX/dungeon_a_a_inner_wall_ending.vox` },
-  { id: 'inner_wall_ending_flip', role: 'inner_wall_ending', theme: THEME, voxPath: `${BASE}/Wall/VOX/dungeon_a_a_inner_wall_ending_flipped.vox`, flipped: true },
+  tiles.push({ id: `${theme}:inner_wall_ending`, role: 'inner_wall_ending', theme, voxPath: `${BASE}/Wall/VOX/dungeon_${prefix}_inner_wall_ending.vox` });
+  tiles.push({ id: `${theme}:inner_wall_ending_flip`, role: 'inner_wall_ending', theme, voxPath: `${BASE}/Wall/VOX/dungeon_${prefix}_inner_wall_ending_flipped.vox`, flipped: true });
 
   // Inner wall solo (single isolated wall post)
-  { id: 'inner_wall_solo', role: 'inner_wall_solo', theme: THEME, voxPath: `${BASE}/Wall/VOX/dungeon_a_a_inner_wall_solo.vox` },
+  tiles.push({ id: `${theme}:inner_wall_solo`, role: 'inner_wall_solo', theme, voxPath: `${BASE}/Wall/VOX/dungeon_${prefix}_inner_wall_solo.vox` });
 
-  // Entrance pieces (wall frame with opening — used at door positions)
-  { id: 'entrance_a', role: 'entrance', theme: THEME, voxPath: `${BASE}/Entrance/VOX/dungeon_a_a_entrance_a.vox` },
-  { id: 'entrance_b', role: 'entrance', theme: THEME, voxPath: `${BASE}/Entrance/VOX/dungeon_a_a_entrance_b.vox` },
-  { id: 'entrance_b_flip', role: 'entrance', theme: THEME, voxPath: `${BASE}/Entrance/VOX/dungeon_a_a_entrance_b_flipped.vox`, flipped: true },
-  { id: 'entrance_c', role: 'entrance', theme: THEME, voxPath: `${BASE}/Entrance/VOX/dungeon_a_a_entrance_c.vox` },
+  // Entrance pieces
+  tiles.push({ id: `${theme}:entrance_a`, role: 'entrance', theme, voxPath: `${BASE}/Entrance/VOX/dungeon_${prefix}_entrance_a.vox` });
+  tiles.push({ id: `${theme}:entrance_b`, role: 'entrance', theme, voxPath: `${BASE}/Entrance/VOX/dungeon_${prefix}_entrance_b.vox` });
+  tiles.push({ id: `${theme}:entrance_b_flip`, role: 'entrance', theme, voxPath: `${BASE}/Entrance/VOX/dungeon_${prefix}_entrance_b_flipped.vox`, flipped: true });
+  tiles.push({ id: `${theme}:entrance_c`, role: 'entrance', theme, voxPath: `${BASE}/Entrance/VOX/dungeon_${prefix}_entrance_c.vox` });
 
-  // Door props (wooden door panels — placed inside entrance frames)
-  { id: 'door_a_a', role: 'door', theme: THEME, voxPath: `${P}/Door/Door%20A%20(Wood)/VOX/door_a_a.vox` },
-  { id: 'door_a_b', role: 'door', theme: THEME, voxPath: `${P}/Door/Door%20A%20(Wood)/VOX/door_a_b.vox` },
-  { id: 'door_a_c', role: 'door', theme: THEME, voxPath: `${P}/Door/Door%20A%20(Wood)/VOX/door_a_c.vox` },
-];
+  // Door props (shared across themes — wooden door panels)
+  tiles.push({ id: `${theme}:door_a_a`, role: 'door', theme, voxPath: `${P}/Door/Door%20A%20(Wood)/VOX/door_a_a.vox` });
+  tiles.push({ id: `${theme}:door_a_b`, role: 'door', theme, voxPath: `${P}/Door/Door%20A%20(Wood)/VOX/door_a_b.vox` });
+  tiles.push({ id: `${theme}:door_a_c`, role: 'door', theme, voxPath: `${P}/Door/Door%20A%20(Wood)/VOX/door_a_c.vox` });
+
+  return tiles;
+}
+
+// ── Build all tiles for every variant ──
+
+const ALL_TILES: DungeonTileEntry[] = DUNGEON_VARIANTS.flatMap(v => buildThemeTiles(v));
 
 // ── Dungeon prop entries ──
 
@@ -236,7 +256,7 @@ const ALL_PROPS: DungeonPropEntry[] = [
 // ── Tile grouped registry ──
 
 const TILE_MAP = new Map<string, DungeonTileEntry[]>();
-for (const entry of A_A_TILES) {
+for (const entry of ALL_TILES) {
   const key = `${entry.theme}:${entry.role}`;
   if (!TILE_MAP.has(key)) TILE_MAP.set(key, []);
   TILE_MAP.get(key)!.push(entry);
@@ -259,7 +279,7 @@ export function getDungeonTiles(role: TileRole, theme = 'a_a'): DungeonTileEntry
 
 /** Get all unique vox paths for a theme (for preloading) */
 export function getAllThemePaths(theme = 'a_a'): string[] {
-  return A_A_TILES.filter(e => e.theme === theme).map(e => e.voxPath);
+  return ALL_TILES.filter(e => e.theme === theme).map(e => e.voxPath);
 }
 
 /** Pick a random tile entry for a role */
@@ -271,7 +291,7 @@ export function getRandomTile(role: TileRole, theme = 'a_a'): DungeonTileEntry |
 
 /** Get a specific tile by id */
 export function getTileById(id: string): DungeonTileEntry | null {
-  return A_A_TILES.find(e => e.id === id) ?? null;
+  return ALL_TILES.find(e => e.id === id) ?? null;
 }
 
 /** Get the first tile for a role (use as the "default" / plain variant) */

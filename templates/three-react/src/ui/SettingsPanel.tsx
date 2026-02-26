@@ -4,7 +4,7 @@ import { Layer } from '../game/Entity';
 import type { TerrainPreset } from '../game/Terrain';
 import type { HeightmapStyle } from '../game/TerrainNoise';
 import { palettes } from '../game/ColorPalettes';
-import { getPropCategories, getGroundTileIds } from '../game/VoxDungeonDB';
+import { getPropCategories, getGroundTileIds, getDungeonVariants } from '../game/VoxDungeonDB';
 import { swapGroundTiles } from '../game/VoxelDungeon';
 
 type ActivePanel = 'player' | 'camera' | 'light' | 'scene' | null;
@@ -24,6 +24,7 @@ function useIsMobile() {
 const TERRAIN_PRESETS: TerrainPreset[] = ['scattered', 'terraced', 'heightmap', 'dungeon', 'rooms', 'voxelDungeon'];
 const PROP_CATEGORIES = getPropCategories().sort();
 const GROUND_TILE_IDS = getGroundTileIds().sort();
+const DUNGEON_VARIANT_OPTIONS = ['random', ...getDungeonVariants()];
 const HEIGHTMAP_STYLES: HeightmapStyle[] = ['rolling', 'terraces', 'islands', 'caves'];
 const PALETTE_NAMES = ['random', ...Object.keys(palettes)];
 
@@ -240,6 +241,8 @@ function ScenePanel() {
   const debugBiomes = useGameStore((s) => s.debugBiomes);
   const setDebugBiomes = useGameStore((s) => s.setDebugBiomes);
   const propCategories = PROP_CATEGORIES;
+  const dungeonVariant = useGameStore((s) => s.dungeonVariant);
+  const setDungeonVariant = useGameStore((s) => s.setDungeonVariant);
   const hmrCacheEnabled = useGameStore((s) => s.hmrCacheEnabled);
   const setHmrCacheEnabled = useGameStore((s) => s.setHmrCacheEnabled);
   const remesh = useGameStore((s) => s.onRemesh);
@@ -425,6 +428,24 @@ function ScenePanel() {
                 <span style={{ color: '#fff', width: 36, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
                   {tileSize}m
                 </span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Variant</span>
+                <select
+                  value={dungeonVariant}
+                  onChange={(e) => setDungeonVariant(e.target.value)}
+                  style={{
+                    flex: 1, padding: '3px 6px',
+                    background: 'rgba(255,255,255,0.08)', color: '#ccc',
+                    border: '1px solid rgba(255,255,255,0.2)', borderRadius: 3,
+                  }}
+                >
+                  {DUNGEON_VARIANT_OPTIONS.map((v) => (
+                    <option key={v} value={v}>
+                      {v === 'random' ? 'Random' : v.replace('_', '-').toUpperCase()}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
                 <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Door Chance</span>

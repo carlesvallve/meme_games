@@ -652,7 +652,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       onHitstop: (duration) => triggerHitstop(duration),
       onCameraShake: (intensity, duration, dirX, dirZ) => cam.shake(intensity, duration, dirX, dirZ),
     };
-    enemySystem.spawnEnemies(8);
+    enemySystem.spawnEnemies(DEFAULT_SCENE_SETTINGS.enemyCount);
   }
 
   // Store callbacks
