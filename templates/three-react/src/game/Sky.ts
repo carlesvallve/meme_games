@@ -91,10 +91,14 @@ void main() {
   float wideGlow = pow(sunDot, 6.0) * 0.15;
   color += uSunGlow * wideGlow;
 
-  // Stars (subtle, only in dark upper sky)
+  // Stars — raised from horizon, moderate density
   float starField = fract(sin(dot(floor(dir * 800.0), vec3(12.9898, 78.233, 45.164))) * 43758.5453);
-  float starMask = smoothstep(0.3, 0.8, y) * smoothstep(0.998, 1.0, starField);
-  color += vec3(starMask * 0.4);
+  float starBright = smoothstep(0.998, 1.0, starField);          // sparse bright stars
+  float starDim = smoothstep(0.995, 0.998, starField) * 0.3;     // sparse faint stars
+  float horizonFade = smoothstep(0.05, 0.25, y);                  // slightly lower start
+  float sunFade = 1.0 - smoothstep(0.8, 1.0, sunDot);            // fade near sun
+  float starMask = (starBright + starDim) * horizonFade * sunFade;
+  color += vec3(starMask * 0.7);
 
   gl_FragColor = vec4(color, 1.0);
 }

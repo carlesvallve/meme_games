@@ -1,3 +1,4 @@
+import { useState, useEffect, useRef } from 'react';
 import { useGameStore } from '../store';
 import { HUD } from './HUD';
 import { MenuScreen } from './MenuScreen';
@@ -6,6 +7,44 @@ import { DialogUI } from './DialogUI';
 import { CharacterSelect } from './CharacterSelect';
 import { SpeechBubbles } from './SpeechBubbles';
 import { SettingsPanel } from './SettingsPanel';
+
+function FPSCounter() {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let raf = 0;
+    let frames = 0;
+    let last = performance.now();
+
+    const tick = () => {
+      frames++;
+      const now = performance.now();
+      if (now - last >= 500) {
+        const fps = Math.round(frames / ((now - last) / 1000));
+        frames = 0;
+        last = now;
+        if (ref.current) {
+          ref.current.textContent = `${fps} fps`;
+          ref.current.style.color = fps >= 50 ? '#8f8' : fps >= 30 ? '#ff8' : '#f88';
+        }
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
+  return (
+    <div ref={ref} style={{
+      position: 'absolute', top: 8, right: 12,
+      color: '#8f8',
+      fontSize: 11, fontFamily: 'monospace', fontWeight: 600,
+      opacity: 0.7, pointerEvents: 'none', userSelect: 'none',
+    }}>
+      -- fps
+    </div>
+  );
+}
 
 function PauseLabel() {
   return (
@@ -51,6 +90,7 @@ export function UIOverlay() {
       {phase === 'player_dead' && <DeathOverlay />}
       {phase === 'paused' && <PauseLabel />}
       {message && <DialogUI message={message} />}
+      <FPSCounter />
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { useGameStore, type MovementParams, type CameraParams, type TorchParams, type LightPreset, type MovementMode } from '../store';
+import { useGameStore, type MovementParams, type CameraParams, type TorchParams, type LightPreset, type MovementMode, type PostProcessSettings, DEFAULT_POST_PROCESS } from '../store';
 import { Layer } from '../game/Entity';
 import type { TerrainPreset } from '../game/Terrain';
 import type { HeightmapStyle } from '../game/TerrainNoise';
@@ -243,6 +243,8 @@ function ScenePanel() {
   const propCategories = PROP_CATEGORIES;
   const dungeonVariant = useGameStore((s) => s.dungeonVariant);
   const setDungeonVariant = useGameStore((s) => s.setDungeonVariant);
+  const postProcess = useGameStore((s) => s.postProcess);
+  const setPostProcess = useGameStore((s) => s.setPostProcess);
   const hmrCacheEnabled = useGameStore((s) => s.hmrCacheEnabled);
   const setHmrCacheEnabled = useGameStore((s) => s.setHmrCacheEnabled);
   const remesh = useGameStore((s) => s.onRemesh);
@@ -592,6 +594,158 @@ function ScenePanel() {
             </button>
           ))}
         </div>
+      </div>
+
+      {/* ── POST FX ── */}
+      <div style={separator}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+          <div style={sectionTitle}>POST FX</div>
+          <div style={{ flex: 1 }} />
+          {(['on', 'off'] as const).map((val) => (
+            <button
+              key={val}
+              onClick={() => setPostProcess({ ...postProcess, enabled: val === 'on' })}
+              style={{
+                ...resetBtnStyle, flex: 'none', width: 36, margin: 0, textAlign: 'center',
+                background: (postProcess.enabled ? 'on' : 'off') === val ? '#6af' : '#333',
+                color: (postProcess.enabled ? 'on' : 'off') === val ? '#000' : '#aaa',
+              }}
+            >
+              {val}
+            </button>
+          ))}
+        </div>
+        {postProcess.enabled && (<>
+          {/* Bloom */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+            <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Bloom</span>
+            {(['on', 'off'] as const).map((val) => (
+              <button key={val}
+                onClick={() => setPostProcess({ ...postProcess, bloom: { ...postProcess.bloom, enabled: val === 'on' } })}
+                style={{ ...resetBtnStyle, flex: 1, margin: 0, background: (postProcess.bloom.enabled ? 'on' : 'off') === val ? '#6af' : '#333', color: (postProcess.bloom.enabled ? 'on' : 'off') === val ? '#000' : '#aaa' }}
+              >{val}</button>
+            ))}
+          </div>
+          {postProcess.bloom.enabled && (<>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Strength</span>
+              <input type="range" min={0} max={2} step={0.05} value={postProcess.bloom.strength}
+                onChange={(e) => setPostProcess({ ...postProcess, bloom: { ...postProcess.bloom, strength: parseFloat(e.target.value) } })}
+                style={{ flex: 1, height: 14, accentColor: '#6af' }} />
+              <span style={{ color: '#fff', width: 36, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{postProcess.bloom.strength.toFixed(2)}</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Radius</span>
+              <input type="range" min={0} max={1} step={0.05} value={postProcess.bloom.radius}
+                onChange={(e) => setPostProcess({ ...postProcess, bloom: { ...postProcess.bloom, radius: parseFloat(e.target.value) } })}
+                style={{ flex: 1, height: 14, accentColor: '#6af' }} />
+              <span style={{ color: '#fff', width: 36, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{postProcess.bloom.radius.toFixed(2)}</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+              <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Threshold</span>
+              <input type="range" min={0} max={1} step={0.05} value={postProcess.bloom.threshold}
+                onChange={(e) => setPostProcess({ ...postProcess, bloom: { ...postProcess.bloom, threshold: parseFloat(e.target.value) } })}
+                style={{ flex: 1, height: 14, accentColor: '#6af' }} />
+              <span style={{ color: '#fff', width: 36, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{postProcess.bloom.threshold.toFixed(2)}</span>
+            </div>
+          </>)}
+
+          {/* SSAO */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+            <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>SSAO</span>
+            {(['on', 'off'] as const).map((val) => (
+              <button key={val}
+                onClick={() => setPostProcess({ ...postProcess, ssao: { ...postProcess.ssao, enabled: val === 'on' } })}
+                style={{ ...resetBtnStyle, flex: 1, margin: 0, background: (postProcess.ssao.enabled ? 'on' : 'off') === val ? '#6af' : '#333', color: (postProcess.ssao.enabled ? 'on' : 'off') === val ? '#000' : '#aaa' }}
+              >{val}</button>
+            ))}
+          </div>
+          {postProcess.ssao.enabled && (<>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Radius</span>
+              <input type="range" min={0.01} max={2} step={0.01} value={postProcess.ssao.radius}
+                onChange={(e) => setPostProcess({ ...postProcess, ssao: { ...postProcess.ssao, radius: parseFloat(e.target.value) } })}
+                style={{ flex: 1, height: 14, accentColor: '#6af' }} />
+              <span style={{ color: '#fff', width: 36, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{postProcess.ssao.radius.toFixed(2)}</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+              <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Max Dist</span>
+              <input type="range" min={0.01} max={0.5} step={0.01} value={postProcess.ssao.maxDistance}
+                onChange={(e) => setPostProcess({ ...postProcess, ssao: { ...postProcess.ssao, maxDistance: parseFloat(e.target.value) } })}
+                style={{ flex: 1, height: 14, accentColor: '#6af' }} />
+              <span style={{ color: '#fff', width: 36, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{postProcess.ssao.maxDistance.toFixed(2)}</span>
+            </div>
+          </>)}
+
+          {/* Vignette */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+            <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Vignette</span>
+            {(['on', 'off'] as const).map((val) => (
+              <button key={val}
+                onClick={() => setPostProcess({ ...postProcess, vignette: { ...postProcess.vignette, enabled: val === 'on' } })}
+                style={{ ...resetBtnStyle, flex: 1, margin: 0, background: (postProcess.vignette.enabled ? 'on' : 'off') === val ? '#6af' : '#333', color: (postProcess.vignette.enabled ? 'on' : 'off') === val ? '#000' : '#aaa' }}
+              >{val}</button>
+            ))}
+          </div>
+          {postProcess.vignette.enabled && (<>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Offset</span>
+              <input type="range" min={0} max={3} step={0.1} value={postProcess.vignette.offset}
+                onChange={(e) => setPostProcess({ ...postProcess, vignette: { ...postProcess.vignette, offset: parseFloat(e.target.value) } })}
+                style={{ flex: 1, height: 14, accentColor: '#6af' }} />
+              <span style={{ color: '#fff', width: 36, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{postProcess.vignette.offset.toFixed(1)}</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+              <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Darkness</span>
+              <input type="range" min={0} max={3} step={0.1} value={postProcess.vignette.darkness}
+                onChange={(e) => setPostProcess({ ...postProcess, vignette: { ...postProcess.vignette, darkness: parseFloat(e.target.value) } })}
+                style={{ flex: 1, height: 14, accentColor: '#6af' }} />
+              <span style={{ color: '#fff', width: 36, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{postProcess.vignette.darkness.toFixed(1)}</span>
+            </div>
+          </>)}
+
+          {/* Color Grade */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+            <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Color Grade</span>
+            {(['on', 'off'] as const).map((val) => (
+              <button key={val}
+                onClick={() => setPostProcess({ ...postProcess, colorGrade: { ...postProcess.colorGrade, enabled: val === 'on' } })}
+                style={{ ...resetBtnStyle, flex: 1, margin: 0, background: (postProcess.colorGrade.enabled ? 'on' : 'off') === val ? '#6af' : '#333', color: (postProcess.colorGrade.enabled ? 'on' : 'off') === val ? '#000' : '#aaa' }}
+              >{val}</button>
+            ))}
+          </div>
+          {postProcess.colorGrade.enabled && (<>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Brightness</span>
+              <input type="range" min={-0.5} max={0.5} step={0.01} value={postProcess.colorGrade.brightness}
+                onChange={(e) => setPostProcess({ ...postProcess, colorGrade: { ...postProcess.colorGrade, brightness: parseFloat(e.target.value) } })}
+                style={{ flex: 1, height: 14, accentColor: '#6af' }} />
+              <span style={{ color: '#fff', width: 36, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{postProcess.colorGrade.brightness.toFixed(2)}</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Contrast</span>
+              <input type="range" min={-0.5} max={0.5} step={0.01} value={postProcess.colorGrade.contrast}
+                onChange={(e) => setPostProcess({ ...postProcess, colorGrade: { ...postProcess.colorGrade, contrast: parseFloat(e.target.value) } })}
+                style={{ flex: 1, height: 14, accentColor: '#6af' }} />
+              <span style={{ color: '#fff', width: 36, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{postProcess.colorGrade.contrast.toFixed(2)}</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+              <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Saturation</span>
+              <input type="range" min={-1} max={1} step={0.01} value={postProcess.colorGrade.saturation}
+                onChange={(e) => setPostProcess({ ...postProcess, colorGrade: { ...postProcess.colorGrade, saturation: parseFloat(e.target.value) } })}
+                style={{ flex: 1, height: 14, accentColor: '#6af' }} />
+              <span style={{ color: '#fff', width: 36, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{postProcess.colorGrade.saturation.toFixed(2)}</span>
+            </div>
+          </>)}
+
+          {/* Reset PostFX */}
+          <button
+            onClick={() => setPostProcess({ ...DEFAULT_POST_PROCESS })}
+            style={{ ...resetBtnStyle, marginTop: 2 }}
+          >
+            Reset PostFX
+          </button>
+        </>)}
       </div>
 
       {/* Buttons */}

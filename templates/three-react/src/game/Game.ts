@@ -15,6 +15,7 @@ import { Character, CHARACTER_TEAM_COLORS, getSlots, getCharacterName, rerollRos
 import { EnemySystem, type HitImpactCallbacks } from './EnemySystem';
 import { ProjectileSystem, setDebugProjectileStick } from './ProjectileSystem';
 import { GoreSystem } from './GoreSystem';
+import { PostProcessStack } from './PostProcessing';
 import { createDustMotes, createRainEffect, createDebrisEffect } from '../utils/particles';
 import type { ParticleToggles } from '../store';
 import type { ParticleSystem } from '../types';
@@ -101,7 +102,7 @@ function findMeleeAimTarget(
 
 export function createGame(canvas: HTMLCanvasElement): GameInstance {
   // Renderer
-  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.shadowMap.enabled = true;
@@ -124,6 +125,10 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     onDistanceChange: (d) => useGameStore.getState().setCameraParam('distance', d),
     onPointerUpAfterDrag: () => useGameStore.getState().setLastPointerUpWasAfterDrag(true),
   });
+
+  // Post-processing
+  const postProcess = new PostProcessStack(renderer, scene, cam.camera);
+  postProcess.sync(useGameStore.getState().postProcess);
 
   // Input
   const input = new Input();
@@ -735,6 +740,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   const onResize = () => {
     renderer.setSize(window.innerWidth, window.innerHeight);
     cam.resize(window.innerWidth / window.innerHeight);
+    postProcess.resize(window.innerWidth, window.innerHeight);
   };
   window.addEventListener('resize', onResize);
 
@@ -1052,7 +1058,15 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
 
     update(dt);
     terrain.updateWater(dt, renderer, scene, cam.camera);
-    renderer.render(scene, cam.camera);
+
+    // Sync post-processing settings and render
+    const ppSettings = useGameStore.getState().postProcess;
+    postProcess.sync(ppSettings);
+    if (ppSettings.enabled) {
+      postProcess.render();
+    } else {
+      renderer.render(scene, cam.camera);
+    }
   }
 
   rafId = requestAnimationFrame(loop);
@@ -1067,6 +1081,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       canvas.removeEventListener('pointerup', onPointerUp);
       input.destroy();
       cam.destroy();
+      postProcess.dispose();
       scene.remove(clickMarker);
       markerGeo.dispose();
       markerMat.dispose();
