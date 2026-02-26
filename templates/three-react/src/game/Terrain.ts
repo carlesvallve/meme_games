@@ -13,6 +13,7 @@ import { generateNature, type NatureGeneratorResult } from './NatureGenerator';
 import { paletteBiome } from './ColorPalettes';
 import { buildVoxelDungeonCollision, loadVoxelDungeonVisuals } from './VoxelDungeon';
 import { DUNGEON_VARIANTS } from './VoxDungeonDB';
+import { RoomVisibility } from './RoomVisibility';
 import { DungeonPropSystem, clearPropCache } from './DungeonProps';
 import { useGameStore } from '../store';
 import { randomPalette, palettes } from './ColorPalettes';
@@ -164,6 +165,7 @@ export class Terrain {
   // Door system (only for rooms preset)
   private doorSystem: DoorSystem | null = null;
   private propSystem: DungeonPropSystem | null = null;
+  private roomVisibility: RoomVisibility | null = null;
   private natureResult: NatureGeneratorResult | null = null;
   private _disposed = false;
   /** Called when voxel dungeon props are ready; used to register prop chests with ChestSystem */
@@ -1542,8 +1544,17 @@ export class Terrain {
     // VOX ground tiles are ~0.1m tall — characters should stand on top
     this.baseFloorY = 1 * (cellSize / 15); // VOX_GROUND_Y * voxelScale
 
+    // Create room visibility system
+    this.roomVisibility = new RoomVisibility(
+      output.roomOwnership,
+      visualOpenGrid,
+      gridW, gridD, cellSize,
+      this.groundSize,
+      output.gridDoors,
+    );
+
     // Load visuals async, then create doors + props (need tile geometry to be loaded first)
-    loadVoxelDungeonVisuals(voxConfig, this.group).then(async () => {
+    loadVoxelDungeonVisuals(voxConfig, this.group).then(async (visualResult) => {
       if (this._disposed) return; // terrain was regenerated while loading — bail out
       if (output.doors.length > 0) {
         this.doorSystem = new DoorSystem(
@@ -1553,6 +1564,37 @@ export class Terrain {
           cellSize,
           true, // useVoxDoors
         );
+      }
+
+      // Register door groups with room visibility — same as walls: use adjacent cell room IDs
+      if (this.doorSystem && this.roomVisibility && output.gridDoors) {
+        const doorGroups = this.doorSystem.getDoorGroups();
+        for (let i = 0; i < doorGroups.length && i < output.gridDoors.length; i++) {
+          const d = output.gridDoors[i];
+          const gx = Math.round(d.x);
+          const gz = Math.round(d.z);
+          const adjRooms = new Set<number>();
+          for (const [dx, dz] of [[0, -1], [0, 1], [-1, 0], [1, 0], [-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+            const nx = gx + dx, nz = gz + dz;
+            if (nx >= 0 && nx < gridW && nz >= 0 && nz < gridD) {
+              const rid = output.roomOwnership[nz * gridW + nx];
+              if (rid !== -1) adjRooms.add(rid);
+            }
+          }
+          if (adjRooms.size > 0) this.roomVisibility.registerMesh(doorGroups[i], [...adjRooms]);
+        }
+      }
+
+      // Register visual meshes with room visibility system
+      if (visualResult && this.roomVisibility) {
+        for (const mesh of visualResult.groundMeshList) {
+          const rid = mesh.userData.roomId;
+          if (rid !== undefined) this.roomVisibility.registerMesh(mesh, [rid]);
+        }
+        for (const mesh of visualResult.wallMeshList) {
+          const rids = mesh.userData.roomIds as number[] | undefined;
+          if (rids && rids.length > 0) this.roomVisibility.registerMesh(mesh, rids);
+        }
       }
 
       // Place props in rooms
@@ -1568,6 +1610,24 @@ export class Terrain {
         undefined, // wallHeight default
         useGameStore.getState().roomLabels,
       );
+
+      // Register prop meshes + labels with room visibility
+      // Use grid cell (not world position) so wall-mounted props map to their room, not the wall
+      if (this.roomVisibility && this.propSystem) {
+        const rv = this.roomVisibility;
+        const halfW = this.groundSize / 2;
+        for (const { mesh, gx, gz } of this.propSystem.getAllPropMeshesWithCells()) {
+          // Use grid cell to find room if available, fall back to world position
+          const wx = -halfW + (gx + 0.5) * cellSize;
+          const wz = -halfW + (gz + 0.5) * cellSize;
+          const rid = (gx > 0 || gz > 0) ? rv.getRoomAtWorld(wx, wz) : rv.getRoomAtWorld(mesh.position.x, mesh.position.z);
+          if (rid !== -1) rv.registerMesh(mesh, [rid]);
+        }
+        for (const label of this.propSystem.getAllLabels()) {
+          const rid = rv.getRoomAtWorld(label.position.x, label.position.z);
+          if (rid !== -1) rv.registerMesh(label, [rid]);
+        }
+      }
 
       // Register prop debris boxes for physical collision (keyboard movement)
       const propDebris = this.propSystem.getDebrisBoxes();
@@ -2247,6 +2307,10 @@ export class Terrain {
     return this.doorSystem;
   }
 
+  getRoomVisibility(): RoomVisibility | null {
+    return this.roomVisibility;
+  }
+
   /** Objects to exclude from projectile raycasts (e.g. open doors). */
   getOpenDoorObjects(): THREE.Object3D[] {
     return this.doorSystem?.getOpenDoorObjects() ?? [];
@@ -2707,6 +2771,11 @@ export class Terrain {
       this.natureResult = null;
     }
 
+    // Dispose room visibility
+    if (this.roomVisibility) {
+      this.roomVisibility.dispose();
+      this.roomVisibility = null;
+    }
     // Dispose door system
     if (this.doorSystem) {
       this.doorSystem.dispose();

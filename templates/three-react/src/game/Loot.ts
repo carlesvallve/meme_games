@@ -233,6 +233,11 @@ export class LootSystem {
     return { coins, potions };
   }
 
+  /** All active loot item meshes (for room visibility). */
+  getMeshes(): THREE.Mesh[] {
+    return this.items.filter(i => !i.collected).map(i => i.mesh);
+  }
+
   dispose(): void {
     for (const item of this.items) {
       item.entity.destroy();

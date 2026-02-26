@@ -875,6 +875,13 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
         doorSystem.update(dt, charPositions, stepHeight);
       }
 
+      // Room visibility — flood-fill through open doors from player position
+      const roomVis = terrain.getRoomVisibility();
+      if (roomVis && playerChar) {
+        const pp = playerChar.getPosition();
+        roomVis.update(pp.x, pp.z, doorSystem);
+      }
+
       // Gore system (body chunks + blood decals)
       goreSystem.update(dt);
 
@@ -901,6 +908,25 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
           },
           showSlashEffect,
         );
+      }
+
+      // Hide entities in non-visible rooms
+      if (roomVis) {
+        if (enemySystem) {
+          for (const enemy of enemySystem.getEnemies()) {
+            const pos = enemy.getPosition();
+            enemy.mesh.visible = roomVis.isPositionVisible(pos.x, pos.z);
+          }
+        }
+        for (const mesh of collectibles.getMeshes()) {
+          mesh.visible = roomVis.isPositionVisible(mesh.position.x, mesh.position.z);
+        }
+        for (const mesh of lootSystem.getMeshes()) {
+          mesh.visible = roomVis.isPositionVisible(mesh.position.x, mesh.position.z);
+        }
+        for (const group of chestSystem.getGroups()) {
+          group.visible = roomVis.isPositionVisible(group.position.x, group.position.z);
+        }
       }
 
       // Projectile system
