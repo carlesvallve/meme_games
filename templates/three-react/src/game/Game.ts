@@ -741,6 +741,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
                 ...(terrain.getTerrainMesh() ? [terrain.getTerrainMesh()!] : []),
               ],
               terrain.getOpenDoorObjects(),
+              muzzle.up,
             );
           }
         } else {
@@ -825,7 +826,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
             s.setScore(s.score + 10);
           }
         }, {
-          getGroundY: terrainHeightAt,
+          getGroundY: (x: number, z: number) => terrain.getTerrainYNoProps(x, z),
           terrainColliders: [
             terrain.getBoxGroup(),
             ...(terrain.getTerrainMesh() ? [terrain.getTerrainMesh()!] : []),

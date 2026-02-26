@@ -32,6 +32,8 @@ export interface DebrisBox {
   halfD: number;
   height: number;
   slopeDir?: SlopeDir;
+  /** If true, this debris is from a prop (table, chair, etc.) — excluded from projectile terrain-follow. */
+  isProp?: boolean;
 }
 
 // ── Terrain presets ─────────────────────────────────────────────────
@@ -1556,6 +1558,7 @@ export class Terrain {
 
       // Register prop debris boxes for physical collision (keyboard movement)
       const propDebris = this.propSystem.getDebrisBoxes();
+      for (const d of propDebris) d.isProp = true;
       this.debris.push(...propDebris);
 
       // Block the nav cell at each prop's actual world position (accounts for wall push offset).
@@ -2252,6 +2255,22 @@ export class Terrain {
       return sampleHeightmap(this.heightmapData, this.heightmapRes, this.heightmapGroundSize, x, z);
     }
     return this.baseFloorY;
+  }
+
+  /** Like getTerrainY but ignores prop debris (tables, chairs). Used for projectile terrain-follow. */
+  getTerrainYNoProps(x: number, z: number): number {
+    if (this.heightmapData) {
+      return sampleHeightmap(this.heightmapData, this.heightmapRes, this.heightmapGroundSize, x, z);
+    }
+    let maxY = this.baseFloorY;
+    for (const box of this.debris) {
+      if (box.isProp) continue;
+      if (Math.abs(x - box.x) < box.halfW && Math.abs(z - box.z) < box.halfD) {
+        const h = getBoxHeightAt(box, x, z);
+        maxY = Math.max(maxY, h);
+      }
+    }
+    return maxY;
   }
 
   getTerrainY(x: number, z: number, radius = 0): number {
