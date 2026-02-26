@@ -236,7 +236,7 @@ export async function loadVoxelDungeonVisuals(
   cachedGroundTheme = theme;
 
   // Use corner variant c for convex room corners
-  const convexCornerTile = getTileById('outer_wall_corner_c') ?? getFirstTile('outer_wall_corner', theme);
+  const convexCornerTile = getTileById(`${theme}:outer_wall_corner_c`) ?? getFirstTile('outer_wall_corner', theme);
 
   // ── Pass 1: Ground tiles (open cells) ──
   for (let gz = 0; gz < gridD; gz++) {
@@ -257,7 +257,7 @@ export async function loadVoxelDungeonVisuals(
       }
       if (!tile) tile = normalGroundTiles[Math.floor(Math.random() * normalGroundTiles.length)] ?? null;
 
-      const mesh = placeVoxReturn(group, wx, wz, 'ground', 0, voxMat, tile);
+      const mesh = placeVoxReturn(group, wx, wz, 'ground', 0, voxMat, tile, theme);
       if (mesh) groundMeshes.push(mesh);
       groundCount++;
 
@@ -318,7 +318,7 @@ export async function loadVoxelDungeonVisuals(
         else         rot = BASE_ROT + 270;
       }
 
-      placeVox(wallVisualGroup, wx, wz, role, rot, wallMat, tileOverride);
+      placeVox(wallVisualGroup, wx, wz, role, rot, wallMat, tileOverride, theme);
       wallCount++;
     }
   }
@@ -354,8 +354,9 @@ function placeVoxReturn(
   rotation: number,
   material: THREE.Material,
   specificEntry?: import('./VoxDungeonDB').DungeonTileEntry | null,
+  theme = 'a_a',
 ): THREE.Mesh | null {
-  const entry = specificEntry ?? getFirstTile(role);
+  const entry = specificEntry ?? getFirstTile(role, theme);
   if (!entry) return null;
 
   const geo = getTileGeometry(entry);
@@ -382,6 +383,7 @@ function placeVox(
   rotation: number,
   material: THREE.Material,
   specificEntry?: import('./VoxDungeonDB').DungeonTileEntry | null,
+  theme = 'a_a',
 ): void {
-  placeVoxReturn(group, wx, wz, role, rotation, material, specificEntry);
+  placeVoxReturn(group, wx, wz, role, rotation, material, specificEntry, theme);
 }

@@ -81,6 +81,8 @@ export const DEFAULT_SCENE_SETTINGS = {
   debugBiomes: false,
   debugProjectileStick: false,
   hmrCacheEnabled: false,
+  dungeonVariant: 'random',
+  enemyCount: 0,
 };
 
 // ── localStorage persistence ──────────────────────────────────────────
@@ -110,6 +112,7 @@ interface SavedSettings {
   debugBiomes?: boolean;
   debugProjectileStick?: boolean;
   hmrCacheEnabled?: boolean;
+  dungeonVariant?: string;
   characterPushEnabled?: boolean;
   particleToggles?: ParticleToggles;
   /** @deprecated Renamed to characterParams; kept for migration. */
@@ -149,6 +152,7 @@ function saveSettings(): void {
     debugBiomes: s.debugBiomes,
     debugProjectileStick: s.debugProjectileStick,
     hmrCacheEnabled: s.hmrCacheEnabled,
+    dungeonVariant: s.dungeonVariant,
     characterPushEnabled: s.characterPushEnabled,
     particleToggles: s.particleToggles,
   };
@@ -204,6 +208,8 @@ interface GameStore {
   setDebugProjectileStick: (on: boolean) => void;
   hmrCacheEnabled: boolean;
   setHmrCacheEnabled: (on: boolean) => void;
+  dungeonVariant: string;
+  setDungeonVariant: (variant: string) => void;
 
   /** If true, characters push each other apart when overlapping; if false, only the non-player is pushed (player stays put). */
   characterPushEnabled: boolean;
@@ -320,6 +326,8 @@ export const useGameStore = create<GameStore>((set) => ({
   setDebugProjectileStick: (debugProjectileStick) => set({ debugProjectileStick }),
   hmrCacheEnabled: saved.hmrCacheEnabled ?? DEFAULT_SCENE_SETTINGS.hmrCacheEnabled,
   setHmrCacheEnabled: (hmrCacheEnabled) => set({ hmrCacheEnabled }),
+  dungeonVariant: saved.dungeonVariant ?? DEFAULT_SCENE_SETTINGS.dungeonVariant,
+  setDungeonVariant: (dungeonVariant) => set({ dungeonVariant }),
 
   characterPushEnabled: saved.characterPushEnabled ?? true,
   setCharacterPushEnabled: (characterPushEnabled) => set({ characterPushEnabled }),
