@@ -38,6 +38,8 @@ export interface MovementParams {
   attackDuration: number;
   /** Exhaustion duration after combo (seconds). */
   exhaustDuration: number;
+  /** Enable poor-man's foot IK: bottom voxels conform to terrain slope. */
+  footIKEnabled: boolean;
 }
 
 /** Default params for any character. Override only what you need (e.g. enemies). */
@@ -64,4 +66,5 @@ export const DEFAULT_CHARACTER_PARAMS: MovementParams = {
   stunDuration: 0.08,
   attackDuration: 0.2,
   exhaustDuration: 1.0,
+  footIKEnabled: false,
 };

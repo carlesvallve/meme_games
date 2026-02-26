@@ -39,6 +39,7 @@ export interface PlayerParams {
   attackDuration: number;
   exhaustDuration: number;
   showSlashEffect: boolean;
+  footIKEnabled: boolean;
 }
 
 export type LightPreset = 'default' | 'bright' | 'dark' | 'none';

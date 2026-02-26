@@ -16,6 +16,7 @@ import { PlayerControl, type PlayerControlDeps } from './behaviors/PlayerControl
 import { audioSystem } from '../utils/AudioSystem';
 import type { LadderDef } from './Ladder';
 import { DEFAULT_CHARACTER_PARAMS, type MovementParams } from './CharacterParams';
+import { FootIK } from './FootIK';
 
 export type { MovementParams, MovementMode } from './CharacterParams';
 export { DEFAULT_CHARACTER_PARAMS } from './CharacterParams';
@@ -110,6 +111,8 @@ export class Character implements BehaviorAgent {
   private voxFrameIndex = 0;
   private voxFrameTimer = 0;
   private voxLoaded = false;
+  /** Foot IK: deforms bottom voxels to conform to terrain slopes */
+  private footIK: FootIK;
   /** Frame rates per animation type */
   private static readonly VOX_FPS: Record<string, number> = { 
     idle: 2.5, 
@@ -186,6 +189,7 @@ export class Character implements BehaviorAgent {
   constructor(scene: THREE.Scene, terrain: Terrain, navGrid: NavGrid, type: CharacterType, position: THREE.Vector3, ladderDefs: ReadonlyArray<LadderDef> = [], skipAutoSkin = false) {
     this.scene = scene;
     this.terrain = terrain;
+    this.footIK = new FootIK(terrain);
     this.navGrid = navGrid;
     this.characterType = type;
     this.ladderDefs = ladderDefs;
@@ -287,6 +291,7 @@ export class Character implements BehaviorAgent {
       }
       this.voxData = null;
       this.voxLoaded = false;
+      this.footIK.clear();
     }
 
     try {
@@ -300,6 +305,7 @@ export class Character implements BehaviorAgent {
       this.mesh.geometry.dispose();
       this.mesh.geometry = data.base;
       console.log(`[Character] VOX skin applied: '${entry.name}' (${entry.category})`);
+      this.footIK.build(data);
     } catch (err) {
       console.error(`[Character] Failed to apply VOX skin '${entry.name}':`, err);
     }
@@ -332,6 +338,7 @@ export class Character implements BehaviorAgent {
             }
           }
         }
+        if (this.params.footIKEnabled) this.footIK.apply(this.mesh, this.groundY);
         return;
       }
     }
@@ -372,6 +379,7 @@ export class Character implements BehaviorAgent {
         }
       }
     }
+    if (this.params.footIKEnabled) this.footIK.apply(this.mesh, this.groundY);
   }
 
   // ── Selection & control switching ────────────────────────────────

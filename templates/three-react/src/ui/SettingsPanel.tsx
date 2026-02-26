@@ -698,6 +698,24 @@ export function SettingsPanel() {
               </button>
             ))}
           </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+            <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Foot IK</span>
+            {(['on', 'off'] as const).map((val) => (
+              <button
+                key={val}
+                onClick={() => setPlayerParam('footIKEnabled', val === 'on')}
+                style={{
+                  ...resetBtnStyle,
+                  flex: 1,
+                  background: (playerParams.footIKEnabled ? 'on' : 'off') === val ? '#6af' : '#333',
+                  color: (playerParams.footIKEnabled ? 'on' : 'off') === val ? '#000' : '#aaa',
+                  margin: 0,
+                }}
+              >
+                {val}
+              </button>
+            ))}
+          </div>
           {PLAYER_MOVE_PARAMS.map(({ key, label, min, max, step }) => (
             <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>{label}</span>
