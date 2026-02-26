@@ -386,6 +386,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       p.stunDuration = pp.stunDuration;
       p.attackDuration = pp.attackDuration;
       p.exhaustDuration = pp.exhaustDuration;
+      p.footIKEnabled = pp.footIKEnabled;
     }
   }
 
