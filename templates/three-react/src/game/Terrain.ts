@@ -18,6 +18,7 @@ import { DungeonPropSystem, clearPropCache } from './DungeonProps';
 import { useGameStore } from '../store';
 import { randomPalette, palettes } from './ColorPalettes';
 import type { TerrainPalette } from './ColorPalettes';
+import { SeededRandom } from '../utils/SeededRandom';
 
 const HALF = 0.25;
 function snapHalf(v: number): number { return Math.max(HALF, Math.round(v / HALF) * HALF); }
@@ -121,7 +122,7 @@ export class Terrain {
   private debris: DebrisBox[] = [];
   private debrisEntities: Entity[] = [];
   private boxGroup = new THREE.Group(); // visible box meshes for click raycast
-  private readonly groundSize = 40;
+  private readonly groundSize: number;
   readonly preset: TerrainPreset;
   private readonly heightmapStyle: HeightmapStyle;
   private palette: TerrainPalette;
@@ -166,13 +167,24 @@ export class Terrain {
   private doorSystem: DoorSystem | null = null;
   private propSystem: DungeonPropSystem | null = null;
   private roomVisibility: RoomVisibility | null = null;
+
+  // Entrance/exit room center positions (computed synchronously from dungeon output)
+  private entranceRoomCenter: THREE.Vector3 | null = null;
+  private exitRoomCenter: THREE.Vector3 | null = null;
   private natureResult: NatureGeneratorResult | null = null;
   private _disposed = false;
   /** Called when voxel dungeon props are ready; used to register prop chests with ChestSystem */
   private propChestRegistrar: ((list: { position: THREE.Vector3; mesh: THREE.Mesh; entity: Entity; openGeo?: THREE.BufferGeometry }[]) => void) | null = null;
+  /** Called when async prop system is ready (entrance/exit positions available) */
+  private onPropsReadyCb: (() => void) | null = null;
+  private onLayoutReadyCb: (() => void) | null = null;
 
+  /** Seed for deterministic dungeon generation (undefined = random) */
+  private dungeonSeed: number | undefined;
 
-  constructor(scene: THREE.Scene, preset: TerrainPreset = 'scattered', heightmapStyle: HeightmapStyle = 'rolling', palettePick: string = 'random') {
+  constructor(scene: THREE.Scene, preset: TerrainPreset = 'scattered', heightmapStyle: HeightmapStyle = 'rolling', palettePick: string = 'random', dungeonSeed?: number) {
+    this.groundSize = useGameStore.getState().dungeonSize;
+    this.dungeonSeed = dungeonSeed;
     this.preset = preset;
     this.heightmapStyle = heightmapStyle;
     if (palettePick !== 'random' && palettes[palettePick]) {
@@ -756,7 +768,7 @@ export class Terrain {
     if (!this.isRemeshing) {
       this.ladderDefs = result.ladders;
     }
-    console.log(`[Terrain] Heightmap style=${this.heightmapStyle}, ladders=${this.ladderDefs.length}, rampCells=${rampCells.size}`);
+    // console.log(`[Terrain] Heightmap style=${this.heightmapStyle}, ladders=${this.ladderDefs.length}, rampCells=${rampCells.size}`);
     this.heightmapRes = res;
     this.heightmapGroundSize = groundSize;
     this.heightmapMaxHeight = config.maxHeight;
@@ -772,7 +784,7 @@ export class Terrain {
 
     // Slope-based color palette
     const pal = this.palette;
-    console.log(`[Terrain] Palette: ${this.paletteName}`);
+    // console.log(`[Terrain] Palette: ${this.paletteName}`);
     const colorFlat = new THREE.Color(pal.flat);
     const colorGentleSlope = new THREE.Color(pal.gentleSlope);
     const colorSteepSlope = new THREE.Color(pal.steepSlope);
@@ -1343,14 +1355,14 @@ export class Terrain {
       colorAttr.setXYZ(i, tmpBase.r, tmpBase.g, tmpBase.b);
     }
 
-    console.log(`[Terrain] Patch tint: ${tinted}/${posAttr.count} vertices tinted`);
+    // console.log(`[Terrain] Patch tint: ${tinted}/${posAttr.count} vertices tinted`);
 
     colorAttr.needsUpdate = true;
   }
 
   /** Create procedural ladder meshes at each detected ladder site. */
   private createLadderMeshes(): void {
-    console.log(`[Terrain] Creating ${this.ladderDefs.length} ladder meshes`);
+    // console.log(`[Terrain] Creating ${this.ladderDefs.length} ladder meshes`);
     for (let li = 0; li < this.ladderDefs.length; li++) {
       this.createSingleLadderMesh(li);
     }
@@ -1471,11 +1483,11 @@ export class Terrain {
 
   private createDungeonDebris(): void {
     const { wallGap, doorChance } = useGameStore.getState();
-    const output = generateDungeon(this.preset as 'dungeon' | 'rooms', this.groundSize, wallGap, undefined, undefined, doorChance);
+    const output = generateDungeon(this.preset as 'dungeon' | 'rooms', this.groundSize, wallGap, undefined, undefined, doorChance, this.dungeonSeed);
     this.walkMask = output.walkMask;
     this.effectiveGroundSize = this.groundSize;
 
-    console.log(`[Terrain] ${this.preset}: ${output.roomCount} rooms, ${output.corridorCount} corridors, ${output.boxes.length} boxes, ${output.doors.length} doors`);
+    // console.log(`[Terrain] ${this.preset}: ${output.roomCount} rooms, ${output.corridorCount} corridors, ${output.boxes.length} boxes, ${output.doors.length} doors`);
 
     for (const def of output.boxes) {
       this.placeBox(def.x, def.z, def.w, def.d, def.h, true);
@@ -1493,12 +1505,25 @@ export class Terrain {
 
   private createVoxelDungeonDebris(): void {
     const { wallGap, roomSpacing, tileSize, doorChance, dungeonVariant } = useGameStore.getState();
-    const output = generateDungeon('dungeon', this.groundSize, wallGap, tileSize, roomSpacing, doorChance);
+    const output = generateDungeon('dungeon', this.groundSize, wallGap, tileSize, roomSpacing, doorChance, this.dungeonSeed);
     this.walkMask = output.walkMask;
     this.effectiveGroundSize = this.groundSize;
     const cellSize = output.walkMask.cellSize;
 
-    console.log(`[Terrain] voxelDungeon: ${output.roomCount} rooms, ${output.corridorCount} corridors, ${output.doors.length} doors`);
+    // console.log(`[Terrain] voxelDungeon: ${output.roomCount} rooms, ${output.corridorCount} corridors, ${output.doors.length} doors`);
+
+    // Compute entrance/exit room centers for character spawn/exit detection
+    const halfWorld = this.groundSize / 2;
+    if (output.rooms.length > 0) {
+      const computeRoomCenter = (roomIdx: number): THREE.Vector3 => {
+        const r = output.rooms[roomIdx];
+        const cx = -halfWorld + (r.x + r.w / 2) * cellSize;
+        const cz = -halfWorld + (r.z + r.d / 2) * cellSize;
+        return new THREE.Vector3(cx, 0, cz);
+      };
+      this.entranceRoomCenter = computeRoomCenter(output.entranceRoom);
+      this.exitRoomCenter = computeRoomCenter(output.exitRoom);
+    }
 
     // Snapshot openGrid for visual tile placement BEFORE door-flanking mutation
     const { openGrid, gridW, gridD } = output.walkMask;
@@ -1520,10 +1545,23 @@ export class Terrain {
       }
     }
 
-    // Resolve dungeon theme variant
-    const theme = dungeonVariant === 'random'
-      ? DUNGEON_VARIANTS[Math.floor(Math.random() * DUNGEON_VARIANTS.length)]
-      : dungeonVariant;
+    // Resolve dungeon theme variant — use currentTheme from store (set by snapshot restore)
+    // or derive deterministically from seed, or use the settings panel choice
+    const storedTheme = useGameStore.getState().currentTheme;
+    let theme: string;
+    if (storedTheme) {
+      theme = storedTheme;
+      // Clear it so next generation doesn't reuse stale value
+      useGameStore.getState().setCurrentTheme('');
+    } else if (dungeonVariant === 'random') {
+      // Deterministic theme selection from seed
+      const themeRng = new SeededRandom(this.dungeonSeed ?? 0);
+      theme = DUNGEON_VARIANTS[themeRng.int(0, DUNGEON_VARIANTS.length)];
+    } else {
+      theme = dungeonVariant;
+    }
+    // Store the resolved theme so it can be saved in level snapshots
+    useGameStore.getState().setCurrentTheme(theme);
 
     const voxConfig = {
       openGrid: visualOpenGrid,
@@ -1597,9 +1635,24 @@ export class Terrain {
         }
       }
 
-      // Place props in rooms
+      // Create prop system and place portals early (before layout-ready callback)
       clearPropCache();
       this.propSystem = new DungeonPropSystem(this.group);
+      const gridH = Math.floor(this.groundSize / cellSize);
+      await this.propSystem.placeEntranceExit(
+        output.rooms, output.entranceRoom, output.exitRoom,
+        new Set<string>(), output.walkMask.openGrid,
+        output.walkMask.gridW, gridH,
+        cellSize, this.groundSize / 2, undefined, theme,
+      );
+
+      // Layout + portals ready — notify before remaining props load
+      if (this.onLayoutReadyCb) {
+        this.onLayoutReadyCb();
+        this.onLayoutReadyCb = null;
+      }
+
+      // Place remaining props in rooms (portals already placed, will be skipped)
       await this.propSystem.populate(
         output.rooms,
         cellSize,
@@ -1609,6 +1662,10 @@ export class Terrain {
         output.gridDoors,
         undefined, // wallHeight default
         useGameStore.getState().roomLabels,
+        output.entranceRoom,
+        output.exitRoom,
+        theme,
+        this.dungeonSeed,
       );
 
       // Register prop meshes + labels with room visibility
@@ -1652,7 +1709,23 @@ export class Terrain {
 
       // Apply grid opacity to async-loaded grid overlay
       this.setGridOpacity(useGameStore.getState().gridOpacity);
+
+      // Notify listeners that props (and entrance/exit positions) are ready
+      if (this.onPropsReadyCb) {
+        this.onPropsReadyCb();
+        this.onPropsReadyCb = null;
+      }
     });
+  }
+
+  /** Register a callback that fires once async props are loaded (entrance/exit positions become available). */
+  setOnPropsReady(cb: (() => void) | null): void {
+    this.onPropsReadyCb = cb;
+  }
+
+  /** Register a callback that fires once walls/floors/doors are loaded (before props). */
+  setOnLayoutReady(cb: (() => void) | null): void {
+    this.onLayoutReadyCb = cb;
   }
 
   /** Set callback to run when voxel dungeon prop chests are placed (so Game can register them with ChestSystem). */
@@ -2271,7 +2344,7 @@ export class Terrain {
       }
     }
 
-    console.log(`[Terrain] NavGrid connectivity: ${this.ladderDefs.length} total ladders`);
+    // console.log(`[Terrain] NavGrid connectivity: ${this.ladderDefs.length} total ladders`);
   }
 
   /** Get the ladder definitions for this terrain */
@@ -2309,6 +2382,36 @@ export class Terrain {
 
   getRoomVisibility(): RoomVisibility | null {
     return this.roomVisibility;
+  }
+
+  /** World position where the player should spawn (cell center, in front of portal). */
+  getEntrancePosition(): THREE.Vector3 | null {
+    return this.propSystem?.getEntrancePosition() ?? this.entranceRoomCenter;
+  }
+
+  /** World position of the entrance portal wall (trigger point). */
+  getEntrancePortalPosition(): THREE.Vector3 | null {
+    return this.propSystem?.getEntrancePortalPosition() ?? null;
+  }
+
+  /** Y rotation the entrance faces (into the room). */
+  getEntranceFacing(): number {
+    return this.propSystem?.getEntranceFacing() ?? 0;
+  }
+
+  /** World position where the player should spawn (cell center, in front of exit). */
+  getExitPosition(): THREE.Vector3 | null {
+    return this.propSystem?.getExitPosition() ?? this.exitRoomCenter;
+  }
+
+  /** World position of the exit portal wall (trigger point). */
+  getExitPortalPosition(): THREE.Vector3 | null {
+    return this.propSystem?.getExitPortalPosition() ?? null;
+  }
+
+  /** Unit vector [dx, dz] pointing toward the exit wall. */
+  getExitWallDir(): [number, number] {
+    return this.propSystem?.getExitWallDir() ?? [0, 0];
   }
 
   /** Objects to exclude from projectile raycasts (e.g. open doors). */
@@ -2636,7 +2739,7 @@ export class Terrain {
   remesh(): void {
     if (this.preset !== 'heightmap') return;
     const { resolutionScale } = useGameStore.getState();
-    console.log(`[Terrain] Remesh at ${resolutionScale}× (seed=${this.heightmapSeed})`);
+    // console.log(`[Terrain] Remesh at ${resolutionScale}× (seed=${this.heightmapSeed})`);
 
     // Dispose old mesh, grid, and ladder visuals
     if (this.heightmapMesh) {

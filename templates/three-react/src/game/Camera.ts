@@ -257,6 +257,28 @@ export class Camera {
     }
   }
 
+  /** Instantly snap camera to current target — no lerp/smoothing/collision. */
+  snapToTarget(): void {
+    this.smoothedTarget.copy(this.target);
+    this.hasInitialTarget = true;
+    this.snapAngleY = null;
+    this.collisionDist = 0;
+    this.collisionCooldown = 0;
+
+    // Compute orbit position directly — bypass collision raycasts
+    const cosAx = Math.cos(this.angleX);
+    const sinAx = Math.sin(-this.angleX);
+    const sinAy = Math.sin(this.angleY);
+    const cosAy = Math.cos(this.angleY);
+    this.currentPos.set(
+      this.smoothedTarget.x + this.distance * cosAx * sinAy,
+      this.smoothedTarget.y + this.distance * sinAx,
+      this.smoothedTarget.z + this.distance * cosAx * cosAy,
+    );
+    this.camera.position.copy(this.currentPos);
+    this.camera.lookAt(this.smoothedTarget);
+  }
+
   resize(aspect: number): void {
     this.camera.aspect = aspect;
     this.camera.updateProjectionMatrix();

@@ -3,6 +3,7 @@ import type { Terrain } from './Terrain';
 import { useGameStore } from '../store';
 import { Entity, Layer } from './Entity';
 import { audioSystem } from '../utils/AudioSystem';
+import type { SavedLoot } from './LevelState';
 
 interface LootItem {
   mesh: THREE.Mesh;
@@ -236,6 +237,51 @@ export class LootSystem {
   /** All active loot item meshes (for room visibility). */
   getMeshes(): THREE.Mesh[] {
     return this.items.filter(i => !i.collected).map(i => i.mesh);
+  }
+
+  /** Serialize grounded loot for level persistence (skip in-flight items) */
+  serialize(): SavedLoot[] {
+    return this.items
+      .filter(i => !i.collected && i.grounded)
+      .map(i => ({
+        x: i.mesh.position.x,
+        z: i.mesh.position.z,
+        type: i.type,
+        value: i.value,
+      }));
+  }
+
+  /** Restore loot from saved state — place directly on ground */
+  restoreLoot(saved: SavedLoot[]): void {
+    for (const s of saved) {
+      const isCoin = s.type === 'coin';
+      const geo = isCoin ? this.coinGeo : this.potionGeo;
+      const mat = isCoin
+        ? this.coinMat
+        : this.potionMats[Math.floor(Math.random() * this.potionMats.length)];
+
+      const mesh = new THREE.Mesh(geo, mat);
+      const terrainY = this.terrain.getFloorY(s.x, s.z);
+      mesh.position.set(s.x, terrainY + 0.04, s.z);
+      mesh.castShadow = true;
+      this.scene.add(mesh);
+
+      const entity = new Entity(mesh, { layer: Layer.Collectible, radius: 0.04 });
+
+      this.items.push({
+        mesh,
+        entity,
+        vel: new THREE.Vector3(),
+        grounded: true,
+        bounceCount: 0,
+        age: 10, // past grace period
+        delay: 0,
+        gracePeriod: 0,
+        collected: false,
+        type: s.type,
+        value: s.value,
+      });
+    }
   }
 
   dispose(): void {

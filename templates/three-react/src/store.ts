@@ -5,6 +5,8 @@ import type { TerrainPreset } from './game/Terrain';
 import type { HeightmapStyle } from './game/TerrainNoise';
 import { DEFAULT_CHARACTER_PARAMS } from './game/character';
 import type { MovementParams } from './game/character';
+import type { LevelSnapshot } from './game/LevelState';
+import { floorSeed } from './utils/SeededRandom';
 
 export type { MovementParams } from './game/character';
 
@@ -98,6 +100,7 @@ export const DEFAULT_SCENE_SETTINGS = {
   debugProjectileStick: false,
   hmrCacheEnabled: false,
   dungeonVariant: 'random',
+  dungeonSize: 40,
   enemyCount: 0,
 };
 
@@ -129,6 +132,7 @@ interface SavedSettings {
   debugProjectileStick?: boolean;
   hmrCacheEnabled?: boolean;
   dungeonVariant?: string;
+  dungeonSize?: number;
   postProcess?: PostProcessSettings;
   characterPushEnabled?: boolean;
   particleToggles?: ParticleToggles;
@@ -170,6 +174,7 @@ function saveSettings(): void {
     debugProjectileStick: s.debugProjectileStick,
     hmrCacheEnabled: s.hmrCacheEnabled,
     dungeonVariant: s.dungeonVariant,
+    dungeonSize: s.dungeonSize,
     postProcess: s.postProcess,
     characterPushEnabled: s.characterPushEnabled,
     particleToggles: s.particleToggles,
@@ -190,6 +195,12 @@ interface GameStore {
   hp: number;
   maxHp: number;
   floor: number;
+  /** Base seed for the entire dungeon run — combined with floor number for per-level seeds */
+  dungeonBaseSeed: number;
+  /** Cached level snapshots keyed by floor number */
+  levelCache: Record<number, LevelSnapshot>;
+  /** Dungeon theme for the current level */
+  currentTheme: string;
   message: string | null;
 
   selectedCharacter: CharacterType | null;
@@ -228,6 +239,8 @@ interface GameStore {
   setHmrCacheEnabled: (on: boolean) => void;
   dungeonVariant: string;
   setDungeonVariant: (variant: string) => void;
+  dungeonSize: number;
+  setDungeonSize: (size: number) => void;
   postProcess: PostProcessSettings;
   setPostProcess: (settings: PostProcessSettings) => void;
   setPostProcessParam: <K extends keyof PostProcessSettings>(key: K, value: PostProcessSettings[K]) => void;
@@ -246,6 +259,16 @@ interface GameStore {
   setScore: (score: number) => void;
   setHP: (hp: number, maxHp: number) => void;
   setFloor: (floor: number) => void;
+  setDungeonBaseSeed: (seed: number) => void;
+  /** Get the deterministic seed for a given floor */
+  getFloorSeed: (floor: number) => number;
+  /** Save a level snapshot to the cache */
+  saveLevelSnapshot: (floor: number, snapshot: LevelSnapshot) => void;
+  /** Get a cached level snapshot (or undefined) */
+  getLevelSnapshot: (floor: number) => LevelSnapshot | undefined;
+  /** Clear all level cache (e.g. on new game) */
+  clearLevelCache: () => void;
+  setCurrentTheme: (theme: string) => void;
   showMessage: (msg: string | null) => void;
 
   selectCharacter: (type: CharacterType) => void;
@@ -294,7 +317,7 @@ interface GameStore {
 
 const saved = loadSettings();
 
-export const useGameStore = create<GameStore>((set) => ({
+export const useGameStore = create<GameStore>((set, get) => ({
   phase: 'menu',
   playerDeadAt: null,
   lastPointerUpWasAfterDrag: false,
@@ -302,6 +325,9 @@ export const useGameStore = create<GameStore>((set) => ({
   hp: 100,
   maxHp: 100,
   floor: 1,
+  dungeonBaseSeed: (Math.random() * 0xFFFFFFFF) >>> 0,
+  levelCache: {},
+  currentTheme: '',
   message: null,
 
   selectedCharacter: null,
@@ -349,6 +375,8 @@ export const useGameStore = create<GameStore>((set) => ({
   setHmrCacheEnabled: (hmrCacheEnabled) => set({ hmrCacheEnabled }),
   dungeonVariant: saved.dungeonVariant ?? DEFAULT_SCENE_SETTINGS.dungeonVariant,
   setDungeonVariant: (dungeonVariant) => set({ dungeonVariant }),
+  dungeonSize: saved.dungeonSize ?? DEFAULT_SCENE_SETTINGS.dungeonSize,
+  setDungeonSize: (dungeonSize) => set({ dungeonSize }),
   postProcess: saved.postProcess ?? { ...DEFAULT_POST_PROCESS },
   setPostProcess: (postProcess) => set({ postProcess }),
   setPostProcessParam: (key, value) =>
@@ -371,6 +399,13 @@ export const useGameStore = create<GameStore>((set) => ({
   setScore: (score) => set({ score }),
   setHP: (hp, maxHp) => set({ hp, maxHp }),
   setFloor: (floor) => set({ floor }),
+  setDungeonBaseSeed: (dungeonBaseSeed) => set({ dungeonBaseSeed }),
+  getFloorSeed: (floor) => floorSeed(get().dungeonBaseSeed, floor),
+  saveLevelSnapshot: (floor, snapshot) =>
+    set((s) => ({ levelCache: { ...s.levelCache, [floor]: snapshot } })),
+  getLevelSnapshot: (floor) => get().levelCache[floor],
+  clearLevelCache: () => set({ levelCache: {}, dungeonBaseSeed: (Math.random() * 0xFFFFFFFF) >>> 0 }),
+  setCurrentTheme: (currentTheme) => set({ currentTheme }),
   showMessage: (message) => set({ message }),
 
   selectCharacter: (type) => set({ selectedCharacter: type, phase: 'playing' }),

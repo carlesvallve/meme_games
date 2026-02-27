@@ -232,6 +232,8 @@ function ScenePanel() {
   const setTestFloor = useGameStore((s) => s.setTestFloor);
   const doorChance = useGameStore((s) => s.doorChance);
   const setDoorChance = useGameStore((s) => s.setDoorChance);
+  const dungeonSize = useGameStore((s) => s.dungeonSize);
+  const setDungeonSize = useGameStore((s) => s.setDungeonSize);
   const roomLabels = useGameStore((s) => s.roomLabels);
   const setRoomLabels = useGameStore((s) => s.setRoomLabels);
   const natureEnabled = useGameStore((s) => s.natureEnabled);
@@ -418,6 +420,17 @@ function ScenePanel() {
                 />
                 <span style={{ color: '#fff', width: 36, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
                   {roomSpacing}
+                </span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Dungeon Size</span>
+                <input
+                  type="range" min={12} max={60} step={4} value={dungeonSize}
+                  onChange={(e) => setDungeonSize(parseInt(e.target.value, 10))}
+                  style={{ flex: 1, height: 14, accentColor: '#6af' }}
+                />
+                <span style={{ color: '#fff', width: 36, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                  {dungeonSize}
                 </span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>

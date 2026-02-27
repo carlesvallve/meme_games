@@ -52,6 +52,37 @@ const ColorGradeShader = {
   `,
 };
 
+// ── Fade shader (screen multiply) ────────────────────────────────────
+const FadeShader = {
+  name: 'FadeShader',
+  uniforms: {
+    tDiffuse: { value: null as THREE.Texture | null },
+    fadeAlpha: { value: 1.0 },       // 1 = fully visible, 0 = black
+    vignetteBoost: { value: 0.0 },   // extra vignette darkness during fade
+  },
+  vertexShader: /* glsl */ `
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: /* glsl */ `
+    uniform sampler2D tDiffuse;
+    uniform float fadeAlpha;
+    uniform float vignetteBoost;
+    varying vec2 vUv;
+    void main() {
+      vec4 color = texture2D(tDiffuse, vUv);
+      // Vignette: darken edges more during fade
+      float dist = distance(vUv, vec2(0.5));
+      float vig = smoothstep(0.2, 0.9, dist) * vignetteBoost;
+      color.rgb *= max(0.0, fadeAlpha - vig);
+      gl_FragColor = color;
+    }
+  `,
+};
+
 // ── PostProcessStack ─────────────────────────────────────────────────
 
 export class PostProcessStack {
@@ -65,6 +96,14 @@ export class PostProcessStack {
   private bloomPass: UnrealBloomPass;
   private vignettePass: ShaderPass;
   private colorGradePass: ShaderPass;
+  private fadePass: ShaderPass;
+
+  // Fade state
+  private fadeValue = 1.0;        // current alpha (1 = visible, 0 = black)
+  private fadeTarget = 1.0;       // target alpha
+  private fadeSpeed = 3.0;        // lerp speed
+  private fadeCallback: (() => void) | null = null; // called when fade-out reaches 0
+  private fadeHolding = false;    // true = stay black until releaseFade() is called
 
   constructor(
     renderer: THREE.WebGLRenderer,
@@ -107,6 +146,11 @@ export class PostProcessStack {
     // 5. Color grade
     this.colorGradePass = new ShaderPass(ColorGradeShader);
     this.composer.addPass(this.colorGradePass);
+
+    // 6. Fade (always last — screen-wide darken for transitions)
+    this.fadePass = new ShaderPass(FadeShader);
+    this.fadePass.enabled = false;
+    this.composer.addPass(this.fadePass);
   }
 
   /** Sync all pass parameters from store settings */
@@ -133,6 +177,69 @@ export class PostProcessStack {
     this.colorGradePass.uniforms['brightness'].value = settings.colorGrade.brightness;
     this.colorGradePass.uniforms['contrast'].value = settings.colorGrade.contrast;
     this.colorGradePass.uniforms['saturation'].value = settings.colorGrade.saturation;
+  }
+
+  /**
+   * Fade screen to black, call `onBlack` when fully dark, hold black until `releaseFade()`.
+   * @param onBlack — called at the midpoint (screen is black). Call `releaseFade()` when ready to fade in.
+   * @param speed — fade speed (default 3.0, higher = faster)
+   */
+  fadeTransition(onBlack: () => void, speed = 3.0): void {
+    this.fadeSpeed = speed;
+    this.fadeTarget = 0;
+    this.fadeCallback = onBlack;
+    this.fadeHolding = false;
+  }
+
+  /** Release the fade hold — starts the fade-in from black. */
+  releaseFade(): void {
+    this.fadeHolding = false;
+    this.fadeTarget = 1;
+  }
+
+  /** Update fade animation — call every frame with dt */
+  updateFade(dt: number): void {
+    if (this.fadeValue === this.fadeTarget && !this.fadeCallback && !this.fadeHolding) return;
+
+    // Holding black — wait for releaseFade()
+    if (this.fadeHolding) {
+      this.fadePass.enabled = true;
+      this.fadePass.uniforms['fadeAlpha'].value = 0;
+      this.fadePass.uniforms['vignetteBoost'].value = 0.6;
+      return;
+    }
+
+    // Lerp toward target
+    const diff = this.fadeTarget - this.fadeValue;
+    this.fadeValue += diff * Math.min(1, this.fadeSpeed * dt);
+
+    // Snap when close
+    if (Math.abs(diff) < 0.01) {
+      this.fadeValue = this.fadeTarget;
+    }
+
+    // Hit black — fire callback and hold
+    if (this.fadeTarget === 0 && this.fadeValue <= 0.01 && this.fadeCallback) {
+      this.fadeValue = 0;
+      const cb = this.fadeCallback;
+      this.fadeCallback = null;
+      cb();
+      // Hold black until releaseFade() is called
+      this.fadeHolding = true;
+    }
+
+    // Update shader uniforms
+    const active = this.fadeValue < 0.999;
+    this.fadePass.enabled = active;
+    if (active) {
+      this.fadePass.uniforms['fadeAlpha'].value = this.fadeValue;
+      this.fadePass.uniforms['vignetteBoost'].value = (1 - this.fadeValue) * 0.6;
+    }
+  }
+
+  /** True if a fade transition is in progress */
+  get isFading(): boolean {
+    return this.fadeValue < 0.999 || this.fadeCallback !== null || this.fadeHolding;
   }
 
   /** Call instead of renderer.render() */

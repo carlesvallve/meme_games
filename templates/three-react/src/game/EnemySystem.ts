@@ -6,9 +6,10 @@ import type { LadderDef } from './Ladder';
 import { Character } from './character';
 import { Enemy } from './character';
 import { audioSystem } from '../utils/AudioSystem';
-import { isRangedHeroId } from './character';
+import { isRangedHeroId, VOX_ENEMIES } from './character';
 import type { GoreSystem } from './GoreSystem';
 import { useGameStore } from '../store';
+import type { SavedEnemy } from './LevelState';
 
 // ── Character collision constants ────────────────────────────────────
 
@@ -533,6 +534,39 @@ export class EnemySystem {
 
   getEnemies(): ReadonlyArray<Enemy> {
     return this.enemies;
+  }
+
+  /** Serialize all living enemies for level persistence */
+  serialize(): SavedEnemy[] {
+    return this.enemies
+      .filter(e => e.isAlive)
+      .map(e => ({
+        type: e.voxEntry?.id ?? '',
+        x: e.mesh.position.x,
+        z: e.mesh.position.z,
+        hp: e.hp,
+        maxHp: e.maxHp,
+        facing: e.getFacing(),
+      }));
+  }
+
+  /** Spawn enemies from saved state instead of random placement */
+  restoreEnemies(saved: SavedEnemy[]): void {
+    for (const s of saved) {
+      const y = this.terrain.getTerrainY(s.x, s.z);
+      const pos = new THREE.Vector3(s.x, y, s.z);
+      const enemy = new Enemy(this.scene, this.terrain, this.navGrid, pos, this.ladderDefs);
+      enemy.initChaseBehavior(this.navGrid, this.ladderDefs);
+      enemy.hp = s.hp;
+      enemy.maxHp = s.maxHp;
+      enemy.setFacing(s.facing);
+      // Apply saved vox skin if possible
+      if (s.type) {
+        const entry = VOX_ENEMIES.find(e => e.id === s.type);
+        if (entry) enemy.applyVoxSkin(entry);
+      }
+      this.enemies.push(enemy);
+    }
   }
 
   dispose(): void {

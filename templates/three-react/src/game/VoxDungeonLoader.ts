@@ -68,7 +68,7 @@ export async function preloadTheme(theme = 'a_a'): Promise<void> {
     return loadTile(voxPath, isWall);
   });
   await Promise.all(tasks);
-  console.log(`[VoxDungeonLoader] Preloaded ${paths.length} tiles (cellSize=${cellSize})`);
+  // console.log(`[VoxDungeonLoader] Preloaded ${paths.length} tiles (cellSize=${cellSize})`);
 }
 
 /** Get a cached geometry for a tile entry. Returns null if not loaded. */

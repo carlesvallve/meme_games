@@ -225,7 +225,14 @@ export class Character implements BehaviorAgent {
     }
   }
 
+  private _wasMoving = false;
+
   private updateVoxAnimation(dt: number, isMoving: boolean): void {
+    // Stop step loop when player-controlled character transitions to idle
+    if (this._selected && this._wasMoving && !isMoving) {
+      audioSystem.stopSteps();
+    }
+    this._wasMoving = isMoving;
     this.animator.update(this, dt, isMoving, this.footIK);
   }
 
