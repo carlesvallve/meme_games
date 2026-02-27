@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { Terrain } from './Terrain';
 import { useGameStore } from '../store';
 import { Entity, Layer } from './Entity';
+import type { SavedCollectible } from './LevelState';
 
 interface CollectibleObj {
   mesh: THREE.Mesh;
@@ -118,6 +119,37 @@ export class CollectibleSystem {
 
   getTotalCollected(): number {
     return this.totalCollected;
+  }
+
+  /** Serialize collectible state for level persistence */
+  serialize(): SavedCollectible[] {
+    return this.collectibles.map(c => ({
+      x: c.mesh.position.x,
+      z: c.mesh.position.z,
+      collected: c.collected,
+    }));
+  }
+
+  /** Restore collectible state from saved data */
+  restoreState(saved: SavedCollectible[]): void {
+    for (const s of saved) {
+      if (!s.collected) continue;
+      // Find closest matching collectible
+      let bestDist = Infinity;
+      let bestCol: CollectibleObj | null = null;
+      for (const c of this.collectibles) {
+        if (c.collected) continue;
+        const dx = c.mesh.position.x - s.x;
+        const dz = c.mesh.position.z - s.z;
+        const dist = dx * dx + dz * dz;
+        if (dist < bestDist) { bestDist = dist; bestCol = c; }
+      }
+      if (bestCol && bestDist < 1) {
+        bestCol.collected = true;
+        bestCol.mesh.visible = false;
+        bestCol.respawnTimer = 999; // don't respawn on revisit
+      }
+    }
   }
 
   dispose(): void {

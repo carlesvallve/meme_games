@@ -370,7 +370,7 @@ export async function loadVoxelDungeonVisuals(
     group.add(grid);
   }
 
-  console.log(`[VoxelDungeon] ${groundCount} ground + ${wallCount} wall tiles`);
+  // console.log(`[VoxelDungeon] ${groundCount} ground + ${wallCount} wall tiles`);
 
   return { groundMeshList, wallMeshList, groundMaterial: voxMat, wallMaterial: wallMat };
 }

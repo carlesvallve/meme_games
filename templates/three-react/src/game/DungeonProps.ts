@@ -5,7 +5,12 @@ import * as THREE from 'three';
 import { loadVoxModel, buildVoxMesh } from '../utils/VoxModelLoader';
 import { Entity, Layer } from './Entity';
 import type { DungeonPropEntry, PropPlacement } from './VoxDungeonDB';
-import { getRandomProp, getPropsWhere } from './VoxDungeonDB';
+import { getRandomProp, getPropsWhere, getRandomTile } from './VoxDungeonDB';
+import { loadTileEntry } from './VoxDungeonLoader';
+import { SeededRandom } from '../utils/SeededRandom';
+
+/** Module-level seeded RNG for prop placement — set at start of populate(). */
+let rng = new SeededRandom(0);
 
 // ── Geometry cache ──
 
@@ -351,6 +356,14 @@ export class DungeonPropSystem {
   private readonly parent: THREE.Object3D;
   private cellSize = 0.75;
 
+  // Entrance/exit: spawn positions (cell center) and portal trigger positions (at wall)
+  private entrancePos: THREE.Vector3 | null = null;
+  private entrancePortalPos: THREE.Vector3 | null = null;
+  private exitPos: THREE.Vector3 | null = null;
+  private exitPortalPos: THREE.Vector3 | null = null;
+  private entranceFacing: number = 0; // Y rotation facing into room
+  private exitWallDir: [number, number] = [0, 0]; // unit vector pointing toward exit wall
+
   constructor(parent: THREE.Object3D) {
     this.parent = parent;
   }
@@ -364,7 +377,15 @@ export class DungeonPropSystem {
     gridDoors?: { x: number; z: number; orientation: 'NS' | 'EW' }[],
     wallHeight = 2.5,
     showRoomLabels = true,
+    entranceRoom = -1,
+    exitRoom = -1,
+    dungeonTheme = 'a_a',
+    seed?: number,
   ): Promise<void> {
+    // Initialize seeded RNG for prop placement
+    const actualSeed = seed ?? (Math.random() * 0xFFFFFFFF) >>> 0;
+    rng = new SeededRandom(actualSeed);
+
     this.cellSize = cellSize;
     const halfWorld = groundSize / 2;
     const floorY = cellSize / 15; // VOX ground tile thickness
@@ -440,10 +461,10 @@ export class DungeonPropSystem {
         const eligible = ROOM_TEMPLATES.filter(t => t.minSize <= minDim);
         if (eligible.length === 0) continue;
         // ~5% chance to leave a room empty (atmospheric)
-        if (Math.random() < 0.05) continue;
+        if (rng.next() < 0.05) continue;
         // Weighted pick
         const totalWeight = eligible.reduce((s, t) => s + t.weight, 0);
-        let roll = Math.random() * totalWeight;
+        let roll = rng.next() * totalWeight;
         let template = eligible[0];
         for (const t of eligible) {
           roll -= t.weight;
@@ -459,10 +480,10 @@ export class DungeonPropSystem {
 
         // Start with template props, then sprinkle 1-3 random extras for variety
         propList = [...template.props];
-        const extraRolls = Math.random() < 0.3 ? 3 : Math.random() < 0.6 ? 2 : 1;
+        const extraRolls = rng.next() < 0.3 ? 3 : rng.next() < 0.6 ? 2 : 1;
         const extras = ['pot', 'bottle', 'book', 'mug', 'potion', 'torch_wall', 'banner', 'bookcase_small', 'bookcase_small'];
         for (let e = 0; e < extraRolls; e++) {
-          propList.push({ category: extras[Math.floor(Math.random() * extras.length)], count: 1 });
+          propList.push({ category: extras[Math.floor(rng.next() * extras.length)], count: 1 });
         }
       }
 
@@ -491,7 +512,7 @@ export class DungeonPropSystem {
       // ── Pass 1: place furniture and large items ──
       for (const { category, count } of largeItems) {
         for (let i = 0; i < count; i++) {
-          const entry = getRandomProp(category);
+          const entry = getRandomProp(category, () => rng.next());
           if (!entry) continue;
 
           // ── Wall-mounted props (banners, wall torches) ──
@@ -565,7 +586,7 @@ export class DungeonPropSystem {
             mesh.position.x += push[0] * cellSize * 0.35;
             mesh.position.z += push[1] * cellSize * 0.35;
           } else {
-            mesh.rotation.y = (Math.floor(Math.random() * 4)) * Math.PI / 2;
+            mesh.rotation.y = (Math.floor(rng.next() * 4)) * Math.PI / 2;
           }
 
           mesh.castShadow = true;
@@ -618,7 +639,7 @@ export class DungeonPropSystem {
       // ── Pass 2: place chairs around tables (or against walls) ──
       for (const { category, count } of chairItems) {
         for (let i = 0; i < count; i++) {
-          const entry = getRandomProp(category);
+          const entry = getRandomProp(category, () => rng.next());
           if (!entry) continue;
 
           const geo = await loadPropGeo(entry, cellSize);
@@ -627,7 +648,7 @@ export class DungeonPropSystem {
           // Try to seat around a table
           const availableTables = tables.filter(t => t.seatsUsed < t.maxSeats);
           if (availableTables.length > 0) {
-            const table = availableTables[Math.floor(Math.random() * availableTables.length)];
+            const table = availableTables[Math.floor(rng.next() * availableTables.length)];
             const seatIdx = table.seatsUsed;
             table.seatsUsed++;
 
@@ -678,13 +699,13 @@ export class DungeonPropSystem {
       // ── Pass 3: place small items on surfaces ──
       for (const { category, count } of smallItems) {
         for (let i = 0; i < count; i++) {
-          const entry = getRandomProp(category);
+          const entry = getRandomProp(category, () => rng.next());
           if (!entry) continue;
 
           // Try to find an available surface
           const available = surfaces.filter(s => s.used < s.maxItems);
           if (available.length > 0) {
-            const surface = available[Math.floor(Math.random() * available.length)];
+            const surface = available[Math.floor(rng.next() * available.length)];
             surface.used++;
 
             const geo = await loadPropGeo(entry, cellSize);
@@ -704,7 +725,7 @@ export class DungeonPropSystem {
               surface.surfaceY,
               surface.wz + slot[1],
             );
-            mesh.rotation.y = Math.random() * Math.PI * 2;
+            mesh.rotation.y = rng.next() * Math.PI * 2;
             mesh.castShadow = true;
             this.parent.add(mesh);
 
@@ -721,7 +742,7 @@ export class DungeonPropSystem {
 
             const mesh = new THREE.Mesh(geo, voxMat.clone());
             mesh.position.set(toWorldX(cell.gx), floorY, toWorldZ(cell.gz));
-            mesh.rotation.y = Math.random() * Math.PI * 2;
+            mesh.rotation.y = rng.next() * Math.PI * 2;
             mesh.castShadow = true;
             this.parent.add(mesh);
 
@@ -831,6 +852,14 @@ export class DungeonPropSystem {
       }
     }
 
+    // ── Entrance / Exit wall props (skip if already placed externally) ──
+    if (!this.entrancePos && !this.exitPos) {
+      await this.placeEntranceExit(
+        rooms, entranceRoom, exitRoom, occupied, openGrid, gridW, gridH,
+        cellSize, halfWorld, wallHeight, dungeonTheme,
+      );
+    }
+
     // ── Corridor wall props (torches & banners) ──
     // Find open cells not inside any room, adjacent to a wall
 
@@ -859,10 +888,10 @@ export class DungeonPropSystem {
     const corridorWallProps = ['torch_wall', 'torch_wall', 'banner']; // bias toward torches
     for (const cell of corridorWallCells) {
       if (occupied.has(`${cell.gx},${cell.gz}`)) continue;
-      if (Math.random() > 0.3) continue;
+      if (rng.next() > 0.3) continue;
 
-      const category = corridorWallProps[Math.floor(Math.random() * corridorWallProps.length)];
-      const entry = getRandomProp(category);
+      const category = corridorWallProps[Math.floor(rng.next() * corridorWallProps.length)];
+      const entry = getRandomProp(category, () => rng.next());
       if (!entry) continue;
 
       const geo = await loadPropGeo(entry, cellSize);
@@ -891,7 +920,11 @@ export class DungeonPropSystem {
       this.props.push({ mesh, entity: dummyEntity, entry, gridCell: { gx: cell.gx, gz: cell.gz } });
     }
 
-    console.log(`[DungeonProps] Placed ${this.props.length} props in ${rooms.length} rooms + corridors`);
+    // console.log(`[DungeonProps] Placed ${this.props.length} props in ${rooms.length} rooms + corridors`);
+
+    // Start hidden — room visibility will show props in visible rooms
+    for (const p of this.props) p.mesh.visible = false;
+    for (const l of this.labels) l.visible = false;
   }
 
   /** Grid cells (dungeon space gx, gz) that have a floor prop — use to mark those nav cells unwalkable.
@@ -1006,7 +1039,176 @@ export class DungeonPropSystem {
     }
 
     if (candidates.length === 0) return null;
-    return candidates[Math.floor(Math.random() * candidates.length)];
+    return candidates[Math.floor(rng.next() * candidates.length)];
+  }
+
+  /** Place entrance and exit VOX props on wall edges of the designated rooms.
+   *  Can be called before populate() so portals are available at layout-ready time. */
+  async placeEntranceExit(
+    rooms: RoomRect[],
+    entranceRoomIdx: number,
+    exitRoomIdx: number,
+    occupied: Set<string>,
+    openGrid: boolean[],
+    gridW: number,
+    gridH: number,
+    cellSize: number,
+    halfWorld: number,
+    wallHeight = 2.5,
+    theme: string,
+  ): Promise<void> {
+    if (entranceRoomIdx < 0 || exitRoomIdx < 0) return;
+    if (entranceRoomIdx >= rooms.length || exitRoomIdx >= rooms.length) return;
+
+    // Ensure cellSize is set (needed if called before populate())
+    if (!this.cellSize) this.cellSize = cellSize;
+
+    const toWorldX = (gx: number) => -halfWorld + (gx + 0.5) * cellSize;
+    const toWorldZ = (gz: number) => -halfWorld + (gz + 0.5) * cellSize;
+
+    const voxMat = new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      roughness: 0.75,
+      metalness: 0.1,
+    });
+
+    const placePortal = async (
+      roomIdx: number,
+      isEntrance: boolean,
+    ): Promise<void> => {
+      const room = rooms[roomIdx];
+
+      // Find a wall-edge cell: room edge cell with a closed neighbor (wall) on one side
+      const candidates: { gx: number; gz: number; wallSide: 'N' | 'S' | 'E' | 'W' }[] = [];
+      for (let gz = room.z; gz < room.z + room.d; gz++) {
+        for (let gx = room.x; gx < room.x + room.w; gx++) {
+          if (!openGrid[gz * gridW + gx]) continue;
+          if (occupied.has(`${gx},${gz}`)) continue;
+
+          const atLeft = gx === room.x;
+          const atRight = gx === room.x + room.w - 1;
+          const atTop = gz === room.z;
+          const atBottom = gz === room.z + room.d - 1;
+
+          // Must be on an edge with a wall behind it
+          if (atTop && (gz - 1 < 0 || !openGrid[(gz - 1) * gridW + gx])) {
+            candidates.push({ gx, gz, wallSide: 'N' });
+          } else if (atBottom && (gz + 1 >= gridH || !openGrid[(gz + 1) * gridW + gx])) {
+            candidates.push({ gx, gz, wallSide: 'S' });
+          } else if (atLeft && (gx - 1 < 0 || !openGrid[gz * gridW + (gx - 1)])) {
+            candidates.push({ gx, gz, wallSide: 'W' });
+          } else if (atRight && (gx + 1 >= gridW || !openGrid[gz * gridW + (gx + 1)])) {
+            candidates.push({ gx, gz, wallSide: 'E' });
+          }
+        }
+      }
+
+      if (candidates.length === 0) return;
+
+      // Pick a random candidate
+      const cell = candidates[Math.floor(rng.next() * candidates.length)];
+      occupied.add(`${cell.gx},${cell.gz}`);
+
+      // Load entrance VOX tile
+      const tileEntry = getRandomTile('entrance', theme);
+      if (!tileEntry) return;
+      const geo = await loadTileEntry(tileEntry);
+      if (!geo) return;
+
+      const mesh = new THREE.Mesh(geo, voxMat.clone());
+      const wx = toWorldX(cell.gx);
+      const wz = toWorldZ(cell.gz);
+
+      // Rotate to face into the room from the wall
+      const faceRot = WALL_ROT[cell.wallSide];
+      mesh.rotation.y = faceRot;
+
+      // Push mesh to the wall face
+      const push = WALL_PUSH[cell.wallSide];
+      mesh.position.set(
+        wx + push[0] * cellSize * 0.5,
+        0,
+        wz + push[1] * cellSize * 0.5,
+      );
+
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+
+      // Tint exit prop slightly to distinguish it
+      if (!isEntrance) {
+        const mat = mesh.material as THREE.MeshStandardMaterial;
+        mat.emissive.setHex(0x001133);
+        mat.emissiveIntensity = 0.5;
+      }
+
+      this.parent.add(mesh);
+
+      // Point light to make the portal visually attractive
+      const lightColor = isEntrance ? 0xffcc66 : 0x88bbff;
+      const light = new THREE.PointLight(lightColor, isEntrance ? 2 : 8, cellSize * 5, 1.5);
+      light.position.set(wx, wallHeight * 0.5, wz);
+      this.parent.add(light);
+
+      // Debug: visible glowing sphere so we can spot entrance/exit
+      const bulbGeo = new THREE.SphereGeometry(0.12, 8, 8);
+      const bulbMat = new THREE.MeshBasicMaterial({ color: lightColor });
+      const bulb = new THREE.Mesh(bulbGeo, bulbMat);
+      bulb.position.copy(light.position);
+      this.parent.add(bulb);
+
+      const dummyEntity = new Entity(mesh, { layer: Layer.Prop, radius: 0.01, weight: 0 });
+      this.props.push({ mesh, entity: dummyEntity, entry: { id: tileEntry.id, category: 'entrance', voxPath: tileEntry.voxPath, baseHeight: 1, radius: 0.01, placement: 'wall_mount' as PropPlacement }, gridCell: { gx: cell.gx, gz: cell.gz } });
+
+      // Store positions: spawn in cell center, portal trigger at the wall
+      const spawnPos = new THREE.Vector3(wx, 0, wz);
+      const portalPos = new THREE.Vector3(
+        wx + push[0] * cellSize * 0.5,
+        0,
+        wz + push[1] * cellSize * 0.5,
+      );
+      if (isEntrance) {
+        this.entrancePos = spawnPos;
+        this.entrancePortalPos = portalPos;
+        this.entranceFacing = faceRot;
+      } else {
+        this.exitPos = spawnPos;
+        this.exitPortalPos = portalPos;
+        this.exitWallDir = [push[0], push[1]];
+      }
+    };
+
+    await placePortal(entranceRoomIdx, true);
+    await placePortal(exitRoomIdx, false);
+  }
+
+  /** World position where the player should spawn (cell center, in front of portal). */
+  getEntrancePosition(): THREE.Vector3 | null {
+    return this.entrancePos;
+  }
+
+  /** World position of the entrance portal wall (trigger point). */
+  getEntrancePortalPosition(): THREE.Vector3 | null {
+    return this.entrancePortalPos;
+  }
+
+  /** Y rotation the entrance faces (into the room). */
+  getEntranceFacing(): number {
+    return this.entranceFacing;
+  }
+
+  /** World position where the player should spawn (cell center, in front of exit). */
+  getExitPosition(): THREE.Vector3 | null {
+    return this.exitPos;
+  }
+
+  /** World position of the exit portal wall (trigger point). */
+  getExitPortalPosition(): THREE.Vector3 | null {
+    return this.exitPortalPos;
+  }
+
+  /** Unit vector [dx, dz] pointing toward the exit wall. */
+  getExitWallDir(): [number, number] {
+    return this.exitWallDir;
   }
 
   /** Return all prop entities (for HMR re-registration). */

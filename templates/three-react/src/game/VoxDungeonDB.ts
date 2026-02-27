@@ -170,7 +170,7 @@ const ALL_PROPS: DungeonPropEntry[] = [
   // Barrels
   { id: 'barrel_a', category: 'barrel', voxPath: `${P}/Barrel/Barrel%20A%20(Wood)/VOX/barrel_a_closed.vox`,     baseHeight: 0.22, radius: 0.1, placement: 'wall', destroyable: true },
   { id: 'barrel_b', category: 'barrel', voxPath: `${P}/Barrel/Barrel%20B%20(Dark%20Wood)/VOX/barrel_b_closed.vox`, baseHeight: 0.22, radius: 0.1, placement: 'wall', destroyable: true },
-  { id: 'barrel_tnt', category: 'barrel', voxPath: `${P}/Barrel/TNT%20Barrel/VOX/tnt_barrel_closed.vox`,        baseHeight: 0.22, radius: 0.1, placement: 'wall', destroyable: true },
+  { id: 'barrel_tnt', category: 'barrel', voxPath: `${P}/Barrel/TNT%20Barrel/VOX/tnt_barrel.vox`,        baseHeight: 0.22, radius: 0.1, placement: 'wall', destroyable: true },
 
   // Boxes / crates
   { id: 'box_a', category: 'box', voxPath: `${P}/Box/Box%20A%20(Wood)/VOX/box_a_a.vox`,           baseHeight: 0.18, radius: 0.1, placement: 'wall', destroyable: true },
@@ -283,10 +283,11 @@ export function getAllThemePaths(theme = 'a_a'): string[] {
 }
 
 /** Pick a random tile entry for a role */
-export function getRandomTile(role: TileRole, theme = 'a_a'): DungeonTileEntry | null {
+export function getRandomTile(role: TileRole, theme = 'a_a', rand?: () => number): DungeonTileEntry | null {
   const tiles = getDungeonTiles(role, theme);
   if (tiles.length === 0) return null;
-  return tiles[Math.floor(Math.random() * tiles.length)];
+  const r = rand ?? Math.random;
+  return tiles[Math.floor(r() * tiles.length)];
 }
 
 /** Get a specific tile by id */
@@ -308,10 +309,11 @@ export function getPropsForCategory(category: string): DungeonPropEntry[] {
 }
 
 /** Get a random prop from a category */
-export function getRandomProp(category: string): DungeonPropEntry | null {
+export function getRandomProp(category: string, rand?: () => number): DungeonPropEntry | null {
   const props = getPropsForCategory(category);
   if (props.length === 0) return null;
-  return props[Math.floor(Math.random() * props.length)];
+  const r = rand ?? Math.random;
+  return props[Math.floor(r() * props.length)];
 }
 
 /** Get a specific prop by id */

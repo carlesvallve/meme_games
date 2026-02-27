@@ -2,6 +2,11 @@
 // Produces BoxDef arrays (floors + walls) for the Terrain system.
 // Two modes: BSP-partitioned dungeon and adjacent-rooms grid.
 
+import { SeededRandom } from '../utils/SeededRandom';
+
+/** Module-level seeded RNG — set at start of generateDungeon(), used by all internal helpers. */
+let rng = new SeededRandom(0);
+
 export interface BoxDef {
   x: number;
   z: number;
@@ -38,6 +43,12 @@ export interface DungeonOutput {
   rooms: { x: number; z: number; w: number; d: number }[];
   /** Per-cell room index (-1 = corridor, >= 0 = room index) */
   roomOwnership: number[];
+  /** Index into rooms[] for the entrance room (player spawn) */
+  entranceRoom: number;
+  /** Index into rooms[] for the exit room (next level trigger) */
+  exitRoom: number;
+  /** Seed used for this generation (for deterministic replay) */
+  seed: number;
 }
 
 /**
@@ -51,7 +62,11 @@ export function generateDungeon(
   cellSizeOverride?: number,
   roomSpacing?: number,
   doorChance = 0.7,
+  seed?: number,
 ): DungeonOutput {
+  // Initialize seeded RNG — use provided seed or generate a random one
+  const actualSeed = seed ?? (Math.random() * 0xFFFFFFFF) >>> 0;
+  rng = new SeededRandom(actualSeed);
   const cellSize = cellSizeOverride ?? 2;
   const gridW = Math.floor(groundSize / cellSize);
   const gridD = gridW;
@@ -76,7 +91,7 @@ export function generateDungeon(
   const doors: DoorDef[] = [];
   const shiftedGridDoors: DoorDef[] = [];
   const isVoxelDungeon = cellSizeOverride !== undefined; // voxel dungeon uses cellSizeOverride
-  console.log(`[DOOR] mode=${mode}, gridDoors=${(result.doors || []).length}, corridors=${result.corridors.length}, isVoxelDungeon=${isVoxelDungeon}`);
+  // console.log(`[DOOR] mode=${mode}, gridDoors=${(result.doors || []).length}, corridors=${result.corridors.length}, isVoxelDungeon=${isVoxelDungeon}`);
   const roomGrid = result.roomOwnership;
   for (const d of result.doors || []) {
     // Skip wall-flanking check for voxel dungeon (walls are full cells, not edges)
@@ -110,7 +125,23 @@ export function generateDungeon(
     doors.push({ x: wx, z: wz, orientation: d.orientation, gapWidth: d.gapWidth });
     shiftedGridDoors.push({ x: d.x, z: d.z, orientation: d.orientation, gapWidth: d.gapWidth });
   }
-  console.log(`[DOOR] final world-space doors: ${doors.length}`);
+  // console.log(`[DOOR] final world-space doors: ${doors.length}`);
+
+  // Find the two most distant rooms for entrance/exit placement
+  const roomRects = result.rooms.map(r => r.rect);
+  let entranceRoom = 0;
+  let exitRoom = roomRects.length > 1 ? 1 : 0;
+  let maxDistSq = 0;
+  for (let i = 0; i < roomRects.length; i++) {
+    for (let j = i + 1; j < roomRects.length; j++) {
+      const cx1 = roomRects[i].x + roomRects[i].w / 2;
+      const cz1 = roomRects[i].z + roomRects[i].d / 2;
+      const cx2 = roomRects[j].x + roomRects[j].w / 2;
+      const cz2 = roomRects[j].z + roomRects[j].d / 2;
+      const dist = (cx2 - cx1) ** 2 + (cz2 - cz1) ** 2;
+      if (dist > maxDistSq) { maxDistSq = dist; entranceRoom = i; exitRoom = j; }
+    }
+  }
 
   return {
     boxes,
@@ -124,8 +155,11 @@ export function generateDungeon(
     corridorCount: result.corridors.length,
     doors,
     gridDoors: shiftedGridDoors,
-    rooms: result.rooms.map(r => r.rect),
+    rooms: roomRects,
     roomOwnership: result.roomOwnership ?? new Array(gridW * gridD).fill(-1),
+    entranceRoom,
+    exitRoom,
+    seed: actualSeed,
   };
 }
 
@@ -173,20 +207,20 @@ function splitBSP(rect: Rect, minSize: number, depth: number, maxDepth: number):
   }
 
   // Prefer splitting along longer axis
-  const splitH = rect.w > rect.d ? Math.random() < 0.7
-               : rect.d > rect.w ? Math.random() < 0.3
-               : Math.random() < 0.5;
+  const splitH = rect.w > rect.d ? rng.next() < 0.7
+               : rect.d > rect.w ? rng.next() < 0.3
+               : rng.next() < 0.5;
 
   if (splitH) {
     // Split horizontally (along x)
     if (rect.w <= minSize * 2) return node;
-    const split = minSize + Math.floor(Math.random() * (rect.w - minSize * 2 + 1));
+    const split = minSize + Math.floor(rng.next() * (rect.w - minSize * 2 + 1));
     node.left = splitBSP({ x: rect.x, z: rect.z, w: split, d: rect.d }, minSize, depth + 1, maxDepth);
     node.right = splitBSP({ x: rect.x + split, z: rect.z, w: rect.w - split, d: rect.d }, minSize, depth + 1, maxDepth);
   } else {
     // Split vertically (along z)
     if (rect.d <= minSize * 2) return node;
-    const split = minSize + Math.floor(Math.random() * (rect.d - minSize * 2 + 1));
+    const split = minSize + Math.floor(rng.next() * (rect.d - minSize * 2 + 1));
     node.left = splitBSP({ x: rect.x, z: rect.z, w: rect.w, d: split }, minSize, depth + 1, maxDepth);
     node.right = splitBSP({ x: rect.x, z: rect.z + split, w: rect.w, d: rect.d - split }, minSize, depth + 1, maxDepth);
   }
@@ -205,8 +239,8 @@ function placeRoomsInBSP(node: BSPNode, minRoomSize: number, padding: number, ma
     const capW = Math.min(availW, maxRoomSize);
     const capD = Math.min(availD, maxRoomSize);
     // Random size between minRoomSize and capped max
-    const w = minRoomSize + Math.floor(Math.random() * (capW - minRoomSize + 1));
-    const d = minRoomSize + Math.floor(Math.random() * (capD - minRoomSize + 1));
+    const w = minRoomSize + Math.floor(rng.next() * (capW - minRoomSize + 1));
+    const d = minRoomSize + Math.floor(rng.next() * (capD - minRoomSize + 1));
     // Center within padded area
     const x = node.rect.x + padding + Math.floor((availW - w) / 2);
     const z = node.rect.z + padding + Math.floor((availD - d) / 2);
@@ -337,7 +371,7 @@ function carveLCorridor(
   };
 
   // Randomly choose: horizontal-first or vertical-first
-  if (Math.random() < 0.5) {
+  if (rng.next() < 0.5) {
     // Horizontal then vertical
     const dx = x2 > x1 ? 1 : -1;
     for (let x = x1; x !== x2; x += dx) carve(x, z1);
@@ -407,10 +441,10 @@ export function generateBSPDungeon(
   // Log corridor cell count for debugging
   let totalCorridorCells = 0;
   for (const c of corridors) totalCorridorCells += c.cells.length;
-  console.log(`[DOOR] ${rooms.length} rooms, ${corridors.length} corridors (${totalCorridorCells} cells)`);
+  // console.log(`[DOOR] ${rooms.length} rooms, ${corridors.length} corridors (${totalCorridorCells} cells)`);
 
   const doors = detectCorridorDoors(corridors, roomGrid, openGrid, gridW, gridD, doorChance);
-  console.log(`[DOOR] detectCorridorDoors found ${doors.length} doors`);
+  // console.log(`[DOOR] detectCorridorDoors found ${doors.length} doors`);
 
   // Stamp corridor cells with unique negative IDs (-2, -3, ...) so each corridor gets its own floor
   for (let ci = 0; ci < corridors.length; ci++) {
@@ -468,7 +502,7 @@ export function generateAdjacentRooms(
     roomGrid[ry] = [];
     for (let rx = 0; rx < cols; rx++) {
       // Randomly skip ~15% of rooms for irregular layouts (not when wallGap=0, rooms must tile)
-      if (wallGap > 0 && Math.random() < 0.15 && rooms.length > 2) {
+      if (wallGap > 0 && rng.next() < 0.15 && rooms.length > 2) {
         roomGrid[ry][rx] = null;
         continue;
       }
@@ -495,8 +529,8 @@ export function generateAdjacentRooms(
 
         // Random size variation: shrink 0-2 cells per edge, biased toward square
         const maxShrink = 2;
-        const shrinkW = Math.floor(Math.random() * Math.min(maxShrink + 1, Math.max(0, roomW - 2)));
-        const shrinkD = Math.floor(Math.random() * Math.min(maxShrink + 1, Math.max(0, roomD - 2)));
+        const shrinkW = Math.floor(rng.next() * Math.min(maxShrink + 1, Math.max(0, roomW - 2)));
+        const shrinkD = Math.floor(rng.next() * Math.min(maxShrink + 1, Math.max(0, roomD - 2)));
 
         if (roomW - shrinkW > roomD - shrinkD + 2) {
           roomW = Math.max(2, roomW - shrinkW - 1);
@@ -511,8 +545,8 @@ export function generateAdjacentRooms(
 
         const maxOffX = slotW - inset * 2 - roomW;
         const maxOffZ = slotD - inset * 2 - roomD;
-        const offX = maxOffX > 0 ? Math.floor(Math.random() * (maxOffX + 1)) : 0;
-        const offZ = maxOffZ > 0 ? Math.floor(Math.random() * (maxOffZ + 1)) : 0;
+        const offX = maxOffX > 0 ? Math.floor(rng.next() * (maxOffX + 1)) : 0;
+        const offZ = maxOffZ > 0 ? Math.floor(rng.next() * (maxOffZ + 1)) : 0;
 
         rect = {
           x: slotX + inset + offX,
@@ -569,9 +603,9 @@ export function generateAdjacentRooms(
           const zMin = Math.max(room.rect.z, east.rect.z);
           const zMax = Math.min(room.rect.z + room.rect.d, east.rect.z + east.rect.d);
 
-          if (Math.random() < doorChance && zMax - zMin >= 1) {
+          if (rng.next() < doorChance && zMax - zMin >= 1) {
             const margin = zMax - zMin > 2 ? 1 : 0;
-            const doorZ = zMin + margin + Math.floor(Math.random() * Math.max(1, zMax - zMin - margin * 2));
+            const doorZ = zMin + margin + Math.floor(rng.next() * Math.max(1, zMax - zMin - margin * 2));
             const doorGridX = boundaryX + 0.5;
             doors.push({ x: doorGridX, z: doorZ, orientation: 'NS', gapWidth: 1 });
             doorCells.add(`${boundaryX},${doorZ}`);
@@ -587,9 +621,9 @@ export function generateAdjacentRooms(
           const xMin = Math.max(room.rect.x, south.rect.x);
           const xMax = Math.min(room.rect.x + room.rect.w, south.rect.x + south.rect.w);
 
-          if (Math.random() < doorChance && xMax - xMin >= 1) {
+          if (rng.next() < doorChance && xMax - xMin >= 1) {
             const margin = xMax - xMin > 2 ? 1 : 0;
-            const doorX = xMin + margin + Math.floor(Math.random() * Math.max(1, xMax - xMin - margin * 2));
+            const doorX = xMin + margin + Math.floor(rng.next() * Math.max(1, xMax - xMin - margin * 2));
             const doorGridZ = boundaryZ + 0.5;
             doors.push({ x: doorX, z: doorGridZ, orientation: 'EW', gapWidth: 1 });
             doorCells.add(`${doorX},${boundaryZ}`);
@@ -713,11 +747,11 @@ function detectCorridorDoors(
     }
   }
 
-  console.log(`[DOOR] candidates=${candidates.length}, corridorCells=${corridorSet.size}`);
+  // console.log(`[DOOR] candidates=${candidates.length}, corridorCells=${corridorSet.size}`);
 
   // Shuffle so selection isn't biased by scan order
   for (let i = candidates.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = Math.floor(rng.next() * (i + 1));
     [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
   }
 
@@ -726,7 +760,7 @@ function detectCorridorDoors(
   const doors: DoorDef[] = [];
 
   for (const c of candidates) {
-    if (Math.random() > doorChance) continue;
+    if (rng.next() > doorChance) continue;
     const tooClose = doors.some(d => {
       const dx = c.x - d.x;
       const dz = c.z - d.z;
@@ -773,7 +807,7 @@ function punchDoor(
     if (zMax - zMin < 1) return;
     // Pick door Z position (avoid corners)
     const margin = zMax - zMin > 2 ? 1 : 0;
-    const doorZ = zMin + margin + Math.floor(Math.random() * Math.max(1, zMax - zMin - margin * 2));
+    const doorZ = zMin + margin + Math.floor(rng.next() * Math.max(1, zMax - zMin - margin * 2));
     if (doorZ >= gridD) return;
     for (let gx = gapStart; gx < gapEnd; gx++) {
       if (gx >= 0 && gx < gridW) {
@@ -782,7 +816,7 @@ function punchDoor(
       }
     }
     // ~60% chance to place a door at midpoint of the gap
-    if (Math.random() < 0.7) {
+    if (rng.next() < 0.7) {
       const midGX = (gapStart + gapEnd - 1) / 2;
       doors.push({ x: midGX, z: doorZ, orientation: 'NS', gapWidth: 1 });
     }
@@ -794,7 +828,7 @@ function punchDoor(
     const xMax = Math.min(a.x + a.w, b.x + b.w);
     if (xMax - xMin < 1) return;
     const margin = xMax - xMin > 2 ? 1 : 0;
-    const doorX = xMin + margin + Math.floor(Math.random() * Math.max(1, xMax - xMin - margin * 2));
+    const doorX = xMin + margin + Math.floor(rng.next() * Math.max(1, xMax - xMin - margin * 2));
     if (doorX >= gridW) return;
     for (let gz = gapStart; gz < gapEnd; gz++) {
       if (gz >= 0 && gz < gridD) {
@@ -803,7 +837,7 @@ function punchDoor(
       }
     }
     // ~60% chance to place a door at midpoint of the gap
-    if (Math.random() < 0.7) {
+    if (rng.next() < 0.7) {
       const midGZ = (gapStart + gapEnd - 1) / 2;
       doors.push({ x: doorX, z: midGZ, orientation: 'EW', gapWidth: 1 });
     }

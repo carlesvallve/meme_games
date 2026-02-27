@@ -62,7 +62,7 @@ export class VoxAnimator {
       this.voxFrameTimer = 0;
       owner.mesh.geometry.dispose();
       owner.mesh.geometry = data.base;
-      console.log(`[Character] VOX skin applied: '${entry.name}' (${entry.category})`);
+      // console.log(`[Character] VOX skin applied: '${entry.name}' (${entry.category})`);
       footIK.build(data);
     } catch (err) {
       console.error(`[Character] Failed to apply VOX skin '${entry.name}':`, err);

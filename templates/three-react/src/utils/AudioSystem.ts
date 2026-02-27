@@ -4,7 +4,7 @@ import { sfxDamage } from './sfx/damage';
 import { sfxScore } from './sfx/score';
 import { sfxStart } from './sfx/start';
 import { sfxDeath } from './sfx/death';
-import { sfxStep, sfxLand } from './sfx/step';
+import { sfxStep, sfxStepStop, sfxLand } from './sfx/step';
 import { sfxPickup } from './sfx/pickup';
 import { sfxCoin } from './sfx/coin';
 import { sfxChest } from './sfx/chest';
@@ -155,6 +155,11 @@ class AudioSystemClass {
     gain.gain.value = volume;
     gain.connect(ctx.destination);
     return gain;
+  }
+
+  /** Stop the looping step sound (call when character stops moving) */
+  stopSteps(): void {
+    sfxStepStop();
   }
 
   toggleMute(): boolean {

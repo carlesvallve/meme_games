@@ -4,6 +4,7 @@ import type { LootSystem } from './Loot';
 import { Entity, Layer, entityRegistry } from './Entity';
 import { buildVoxelGeometry } from '../utils/voxelMesh';
 import type { VoxelModel } from '../types';
+import type { SavedChest } from './LevelState';
 
 interface ChestObj {
   group: THREE.Group;
@@ -265,6 +266,48 @@ export class ChestSystem {
   /** All active chest groups (for room visibility). */
   getGroups(): THREE.Group[] {
     return this.chests.filter(c => !c.removed).map(c => c.group);
+  }
+
+  /** Serialize chest state for level persistence */
+  serialize(): SavedChest[] {
+    return this.chests.map(c => {
+      const pos = c.propRef ? c.propRef.mesh.position : c.group.position;
+      return {
+        x: pos.x,
+        z: pos.z,
+        opened: c.opened || c.removed,
+      };
+    });
+  }
+
+  /** Mark chests as opened based on saved state (call after chests are created) */
+  restoreState(saved: SavedChest[]): void {
+    for (const s of saved) {
+      if (!s.opened) continue;
+      // Find closest matching chest
+      let bestDist = Infinity;
+      let bestChest: ChestObj | null = null;
+      for (const c of this.chests) {
+        if (c.opened || c.removed) continue;
+        const pos = c.propRef ? c.propRef.mesh.position : c.group.position;
+        const dx = pos.x - s.x;
+        const dz = pos.z - s.z;
+        const dist = dx * dx + dz * dz;
+        if (dist < bestDist) { bestDist = dist; bestChest = c; }
+      }
+      if (bestChest && bestDist < 1) {
+        bestChest.opened = true;
+        bestChest.removed = true;
+        bestChest.entity.destroy();
+        if (bestChest.propRef?.openGeo) {
+          const { mesh, openGeo } = bestChest.propRef;
+          if (mesh.geometry) mesh.geometry.dispose();
+          mesh.geometry = openGeo;
+        } else {
+          this.scene.remove(bestChest.group);
+        }
+      }
+    }
   }
 
   dispose(): void {
