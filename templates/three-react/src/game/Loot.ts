@@ -59,10 +59,7 @@ export class LootSystem {
   }
 
   spawnLoot(position: THREE.Vector3): void {
-    // 10% chance of no drop at all (just gore)
-    if (Math.random() < 0.1) return;
-
-    const count = 1 + Math.floor(Math.random() * 3); // 1-3 items
+    const count = 2 + Math.floor(Math.random() * 3); // 2-4 items
 
     for (let i = 0; i < count; i++) {
       const isCoin = Math.random() < 0.8;

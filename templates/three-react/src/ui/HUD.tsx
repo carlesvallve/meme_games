@@ -23,9 +23,8 @@ function usePop(value: number): boolean {
   return pop;
 }
 
-function StatRow({ icon, label, value, color }: {
+function Stat({ icon, value, color }: {
   icon: string;
-  label: string;
   value: number;
   color: string;
 }) {
@@ -34,18 +33,15 @@ function StatRow({ icon, label, value, color }: {
     <div style={{
       display: 'flex',
       alignItems: 'center',
-      gap: 4,
+      gap: 3,
     }}>
-      <span style={{ fontSize: 13 }}>{icon}</span>
-      <span style={{ fontSize: 11, opacity: 0.6, letterSpacing: 1 }}>{label}</span>
+      <span style={{ fontSize: 12 }}>{icon}</span>
       <span style={{
-        fontSize: 18,
+        fontSize: 14,
         fontWeight: 700,
-        marginLeft: 2,
         transform: pop ? 'scale(1.25)' : 'scale(1)',
         transition: 'transform 0.15s ease-out',
         color: pop ? color : '#fff',
-        transformOrigin: 'right center',
         display: 'inline-block',
       }}>
         {value}
@@ -146,7 +142,7 @@ export function HUD() {
         </div>
       </div>
 
-      {/* Right-side vertical stats */}
+      {/* Right-side stats */}
       <div style={{
         display: 'flex',
         flexDirection: 'column',
@@ -166,9 +162,11 @@ export function HUD() {
           </div>
         )}
         <HPBar hp={hp} maxHp={maxHp} />
-        <StatRow icon="💎" label="GEMS" value={collectibles} color="#44ffaa" />
-        <StatRow icon="🪙" label="COINS" value={coins} color="#ffd700" />
-        <StatRow icon="🧪" label="POTIONS" value={potions} color="#ff6688" />
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <Stat icon="💎" value={collectibles} color="#44ffaa" />
+          <Stat icon="🪙" value={coins} color="#ffd700" />
+          <Stat icon="🧪" value={potions} color="#ff6688" />
+        </div>
       </div>
     </div>
   );

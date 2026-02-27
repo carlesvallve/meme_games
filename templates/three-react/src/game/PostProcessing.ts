@@ -237,9 +237,14 @@ export class PostProcessStack {
     }
   }
 
-  /** True if a fade transition is in progress */
+  /** True if a fade transition is in progress (fading out, holding, or fading in) */
   get isFading(): boolean {
     return this.fadeValue < 0.999 || this.fadeCallback !== null || this.fadeHolding;
+  }
+
+  /** True only while fading to black or holding black (gameplay should freeze) */
+  get isFadingOut(): boolean {
+    return this.fadeCallback !== null || this.fadeHolding;
   }
 
   /** Call instead of renderer.render() */

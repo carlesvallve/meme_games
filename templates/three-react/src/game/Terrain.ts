@@ -165,6 +165,10 @@ export class Terrain {
 
   // Door system (only for rooms preset)
   private doorSystem: DoorSystem | null = null;
+  /** Door center world positions + orientation for corner correction steering */
+  private doorCenters: { x: number; z: number; orientation: 'NS' | 'EW' }[] = [];
+  /** Number of rooms in the current dungeon layout (0 for non-dungeon presets) */
+  private _roomCount = 0;
   private propSystem: DungeonPropSystem | null = null;
   private roomVisibility: RoomVisibility | null = null;
 
@@ -175,9 +179,8 @@ export class Terrain {
   private _disposed = false;
   /** Called when voxel dungeon props are ready; used to register prop chests with ChestSystem */
   private propChestRegistrar: ((list: { position: THREE.Vector3; mesh: THREE.Mesh; entity: Entity; openGeo?: THREE.BufferGeometry }[]) => void) | null = null;
-  /** Called when async prop system is ready (entrance/exit positions available) */
-  private onPropsReadyCb: (() => void) | null = null;
-  private onLayoutReadyCb: (() => void) | null = null;
+  /** Called when all dungeon placements are done (layout + props + portals) */
+  private onDungeonReadyCb: (() => void) | null = null;
 
   /** Seed for deterministic dungeon generation (undefined = random) */
   private dungeonSeed: number | undefined;
@@ -1487,7 +1490,7 @@ export class Terrain {
     this.walkMask = output.walkMask;
     this.effectiveGroundSize = this.groundSize;
 
-    // console.log(`[Terrain] ${this.preset}: ${output.roomCount} rooms, ${output.corridorCount} corridors, ${output.boxes.length} boxes, ${output.doors.length} doors`);
+    this._roomCount = output.roomCount;
 
     for (const def of output.boxes) {
       this.placeBox(def.x, def.z, def.w, def.d, def.h, true);
@@ -1510,7 +1513,7 @@ export class Terrain {
     this.effectiveGroundSize = this.groundSize;
     const cellSize = output.walkMask.cellSize;
 
-    // console.log(`[Terrain] voxelDungeon: ${output.roomCount} rooms, ${output.corridorCount} corridors, ${output.doors.length} doors`);
+    this._roomCount = output.roomCount;
 
     // Compute entrance/exit room centers for character spawn/exit detection
     const halfWorld = this.groundSize / 2;
@@ -1531,9 +1534,17 @@ export class Terrain {
 
     // Mark door-flanking cells (pillar cells) as unwalkable so only the central cell is passable
     // This only affects walkMask/collision — visuals use the pre-mutation snapshot
+    this.doorCenters = [];
+    const halfW = this.groundSize / 2;
     for (const d of output.gridDoors) {
       const gx = Math.round(d.x);
       const gz = Math.round(d.z);
+      // Store door center world position for corner correction
+      this.doorCenters.push({
+        x: -halfW + (gx + 0.5) * cellSize,
+        z: -halfW + (gz + 0.5) * cellSize,
+        orientation: d.orientation,
+      });
       if (d.orientation === 'NS') {
         // Corridor runs along X — pillars above and below
         if (gz - 1 >= 0) openGrid[(gz - 1) * gridW + gx] = false;
@@ -1591,16 +1602,28 @@ export class Terrain {
       output.gridDoors,
     );
 
+    // Hide terrain group until onDungeonReady — prevents flash of unhidden rooms
+    this.group.visible = false;
+
     // Load visuals async, then create doors + props (need tile geometry to be loaded first)
     loadVoxelDungeonVisuals(voxConfig, this.group).then(async (visualResult) => {
       if (this._disposed) return; // terrain was regenerated while loading — bail out
       if (output.doors.length > 0) {
+        // Create a flat material matching the ground tile color for door frames
+        const frameMat = visualResult
+          ? new THREE.MeshStandardMaterial({
+              color: visualResult.groundColor,
+              roughness: 0.85,
+              metalness: 0.1,
+            })
+          : undefined;
         this.doorSystem = new DoorSystem(
           this.group,
           this,
           output.doors,
           cellSize,
           true, // useVoxDoors
+          frameMat,
         );
       }
 
@@ -1635,24 +1658,9 @@ export class Terrain {
         }
       }
 
-      // Create prop system and place portals early (before layout-ready callback)
+      // Place all props (room props, portals, corridor props) — meshes start hidden
       clearPropCache();
       this.propSystem = new DungeonPropSystem(this.group);
-      const gridH = Math.floor(this.groundSize / cellSize);
-      await this.propSystem.placeEntranceExit(
-        output.rooms, output.entranceRoom, output.exitRoom,
-        new Set<string>(), output.walkMask.openGrid,
-        output.walkMask.gridW, gridH,
-        cellSize, this.groundSize / 2, undefined, theme,
-      );
-
-      // Layout + portals ready — notify before remaining props load
-      if (this.onLayoutReadyCb) {
-        this.onLayoutReadyCb();
-        this.onLayoutReadyCb = null;
-      }
-
-      // Place remaining props in rooms (portals already placed, will be skipped)
       await this.propSystem.populate(
         output.rooms,
         cellSize,
@@ -1710,22 +1718,19 @@ export class Terrain {
       // Apply grid opacity to async-loaded grid overlay
       this.setGridOpacity(useGameStore.getState().gridOpacity);
 
-      // Notify listeners that props (and entrance/exit positions) are ready
-      if (this.onPropsReadyCb) {
-        this.onPropsReadyCb();
-        this.onPropsReadyCb = null;
+      // All placements done — notify Game (floor transition) or just show terrain (initial load)
+      if (this.onDungeonReadyCb) {
+        this.onDungeonReadyCb();
+        this.onDungeonReadyCb = null;
+      } else {
+        this.group.visible = true;
       }
     });
   }
 
-  /** Register a callback that fires once async props are loaded (entrance/exit positions become available). */
-  setOnPropsReady(cb: (() => void) | null): void {
-    this.onPropsReadyCb = cb;
-  }
-
-  /** Register a callback that fires once walls/floors/doors are loaded (before props). */
-  setOnLayoutReady(cb: (() => void) | null): void {
-    this.onLayoutReadyCb = cb;
+  /** Register a callback that fires once all dungeon placements are done (layout + props + portals). */
+  setOnDungeonReady(cb: (() => void) | null): void {
+    this.onDungeonReadyCb = cb;
   }
 
   /** Set callback to run when voxel dungeon prop chests are placed (so Game can register them with ChestSystem). */
@@ -2380,6 +2385,11 @@ export class Terrain {
     return this.doorSystem;
   }
 
+  /** Number of rooms in the dungeon (0 for non-dungeon presets). */
+  getRoomCount(): number {
+    return this._roomCount;
+  }
+
   getRoomVisibility(): RoomVisibility | null {
     return this.roomVisibility;
   }
@@ -2414,6 +2424,31 @@ export class Terrain {
     return this.propSystem?.getExitWallDir() ?? [0, 0];
   }
 
+  /** Get nearest door center if character is within range and moving toward it.
+   *  Returns the door center world position and perpendicular correction axis, or null. */
+  getNearbyDoor(x: number, z: number, moveX: number, moveZ: number, range: number): { cx: number; cz: number; corrAxis: 'x' | 'z' } | null {
+    let bestDist = range * range;
+    let best: typeof this.doorCenters[0] | null = null;
+    for (const d of this.doorCenters) {
+      const ddx = x - d.x;
+      const ddz = z - d.z;
+      const distSq = ddx * ddx + ddz * ddz;
+      if (distSq < bestDist) {
+        bestDist = distSq;
+        best = d;
+      }
+    }
+    if (!best) return null;
+    // Only steer if moving roughly toward the door (dot > 0)
+    const toDoorX = best.x - x;
+    const toDoorZ = best.z - z;
+    const dot = toDoorX * moveX + toDoorZ * moveZ;
+    if (dot < 0.01) return null;
+    // NS door = corridor runs N-S, passage is along X → correct Z toward center
+    // EW door = corridor runs E-W, passage is along Z → correct X toward center
+    return { cx: best.x, cz: best.z, corrAxis: best.orientation === 'NS' ? 'z' : 'x' };
+  }
+
   /** Objects to exclude from projectile raycasts (e.g. open doors). */
   getOpenDoorObjects(): THREE.Object3D[] {
     return this.doorSystem?.getOpenDoorObjects() ?? [];
@@ -2436,6 +2471,11 @@ export class Terrain {
 
   getDebrisCount(): number {
     return this.debris.length;
+  }
+
+  /** Update prop animations (torch flickering etc.) — call once per frame. */
+  updateProps(dt: number): void {
+    this.propSystem?.update(dt);
   }
 
 
@@ -2907,7 +2947,7 @@ export class Terrain {
     return true;
   }
 
-  getRandomPosition(margin = 3, clearance = 0.6): THREE.Vector3 {
+  getRandomPosition(margin = 3, clearance = 0.6, excludePos?: { x: number; z: number }, excludeRadius = 0): THREE.Vector3 {
     const half = this.groundSize / 2 - margin;
 
     // Heightmap: sample random point, verify it's in the spawn region
@@ -2916,6 +2956,10 @@ export class Terrain {
         const x = (Math.random() - 0.5) * half * 2;
         const z = (Math.random() - 0.5) * half * 2;
         if (this.navGrid && !this.navGrid.isInSpawnRegion(x, z)) continue;
+        if (excludePos && excludeRadius > 0) {
+          const edx = x - excludePos.x, edz = z - excludePos.z;
+          if (edx * edx + edz * edz < excludeRadius * excludeRadius) continue;
+        }
         const y = this.getTerrainY(x, z);
         return new THREE.Vector3(x, y, z);
       }
@@ -2928,6 +2972,10 @@ export class Terrain {
       for (let attempt = 0; attempt < 50; attempt++) {
         const cell = this.navGrid.getRandomSpawnCell();
         if (!cell) break;
+        if (excludePos && excludeRadius > 0) {
+          const edx = cell.x - excludePos.x, edz = cell.z - excludePos.z;
+          if (edx * edx + edz * edz < excludeRadius * excludeRadius) continue;
+        }
         return new THREE.Vector3(cell.x, cell.surfaceHeight, cell.z);
       }
       // Fallback: center of first floor tile
@@ -2944,6 +2992,10 @@ export class Terrain {
       const y = this.getTerrainY(x, z);
       if ((y === 0 || this.isOnBoxSurface(x, z)) && this.hasClearance(x, z, y, clearance)) {
         if (this.navGrid && !this.navGrid.isInSpawnRegion(x, z)) continue;
+        if (excludePos && excludeRadius > 0) {
+          const edx = x - excludePos.x, edz = z - excludePos.z;
+          if (edx * edx + edz * edz < excludeRadius * excludeRadius) continue;
+        }
         return new THREE.Vector3(x, y, z);
       }
     }

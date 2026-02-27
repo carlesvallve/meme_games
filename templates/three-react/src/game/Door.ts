@@ -53,13 +53,14 @@ export class DoorSystem {
     doorDefs: DoorDef[],
     cellSize: number,
     useVoxDoors = false,
+    frameMaterial?: THREE.Material,
   ) {
     this.parent = parent;
     this.terrain = terrain;
 
     if (useVoxDoors) {
       for (const def of doorDefs) {
-        this.createVoxDoor(def, cellSize);
+        this.createVoxDoor(def, cellSize, frameMaterial);
       }
     } else {
       const doorMat = new THREE.MeshStandardMaterial({
@@ -81,7 +82,7 @@ export class DoorSystem {
   // ── VOX door creation ──
   // Procedural blocky frame (two pillars + lintel) with a downscaled VOX door panel inside.
 
-  private createVoxDoor(def: DoorDef, cellSize: number): void {
+  private createVoxDoor(def: DoorDef, cellSize: number, frameMaterial?: THREE.Material): void {
     const isNS = def.orientation === 'NS';
     const wallH = getWallTargetHeight();
 
@@ -101,8 +102,8 @@ export class DoorSystem {
     group.position.set(def.x, 0, def.z);
     if (isNS) group.rotation.y = Math.PI / 2;
 
-    // Blocky frame material — match dungeon wall/floor stone grey
-    const frameMat = new THREE.MeshStandardMaterial({
+    // Frame material — use dungeon ground material if provided, else fallback grey
+    const frameMat = frameMaterial ?? new THREE.MeshStandardMaterial({
       color: 0xa8a0a0,
       roughness: 0.85,
       metalness: 0.1,

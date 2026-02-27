@@ -78,7 +78,7 @@ const ROOM_TEMPLATES: RoomTemplate[] = [
     { category: 'candelabrum_small', count: 2 },
     { category: 'torch_wall', count: 3 },
     { category: 'book', count: 4 },
-    { category: 'chest', count: 1 },
+    { category: 'chest', count: 2 },
   ]},
   // ── Study ──  (small library variant)
   { name: 'study', minSize: 3, weight: 2, props: [
@@ -89,6 +89,7 @@ const ROOM_TEMPLATES: RoomTemplate[] = [
     { category: 'candelabrum_small', count: 1 },
     { category: 'torch_wall', count: 2 },
     { category: 'book', count: 3 },
+    { category: 'chest', count: 1 },
   ]},
   // ── Barracks ──
   { name: 'barracks', minSize: 4, weight: 3, props: [
@@ -97,7 +98,7 @@ const ROOM_TEMPLATES: RoomTemplate[] = [
     { category: 'bookcase_small', count: 1 },
     { category: 'torch_wall', count: 3 },
     { category: 'banner', count: 3 },
-    { category: 'chest', count: 1 },
+    { category: 'chest', count: 2 },
   ]},
   // ── Crypt ──
   { name: 'crypt', minSize: 4, weight: 2, props: [
@@ -107,6 +108,7 @@ const ROOM_TEMPLATES: RoomTemplate[] = [
     { category: 'banner', count: 2 },
     { category: 'pot', count: 2 },
     { category: 'bookcase_small', count: 1 },
+    { category: 'chest', count: 1 },
   ]},
   // ── Jail ──
   { name: 'jail', minSize: 3, weight: 2, props: [
@@ -116,10 +118,11 @@ const ROOM_TEMPLATES: RoomTemplate[] = [
     { category: 'torch_wall', count: 3 },
     { category: 'barrel', count: 1 },
     { category: 'bookcase_small', count: 1 },
+    { category: 'chest', count: 1 },
   ]},
   // ── Treasure Room ──
-  { name: 'treasure', minSize: 3, weight: 1, props: [
-    { category: 'chest', count: 4 },
+  { name: 'treasure', minSize: 3, weight: 2, props: [
+    { category: 'chest', count: 6 },
     { category: 'candelabrum', count: 3 },
     { category: 'torch_wall', count: 3 },
     { category: 'banner', count: 2 },
@@ -136,6 +139,7 @@ const ROOM_TEMPLATES: RoomTemplate[] = [
     { category: 'bottle', count: 3 },
     { category: 'torch_wall', count: 3 },
     { category: 'banner', count: 2 },
+    { category: 'chest', count: 1 },
   ]},
   // ── Chapel ──
   { name: 'chapel', minSize: 4, weight: 2, props: [
@@ -145,6 +149,7 @@ const ROOM_TEMPLATES: RoomTemplate[] = [
     { category: 'bench', count: 3 },
     { category: 'torch_wall', count: 3 },
     { category: 'bookcase_small', count: 1 },
+    { category: 'chest', count: 1 },
   ]},
   // ── Storage ──
   { name: 'storage', minSize: 3, weight: 4, props: [
@@ -152,7 +157,7 @@ const ROOM_TEMPLATES: RoomTemplate[] = [
     { category: 'box', count: 3 },
     { category: 'pot', count: 2 },
     { category: 'torch_wall', count: 2 },
-    { category: 'chest', count: 1 },
+    { category: 'chest', count: 2 },
     { category: 'bookcase_small', count: 1 },
   ]},
   // ── Armory ──
@@ -162,7 +167,7 @@ const ROOM_TEMPLATES: RoomTemplate[] = [
     { category: 'bench', count: 2 },
     { category: 'banner', count: 3 },
     { category: 'torch_wall', count: 3 },
-    { category: 'chest', count: 1 },
+    { category: 'chest', count: 2 },
     { category: 'bookcase_small', count: 1 },
   ]},
   // ── Alchemy Lab ──
@@ -174,6 +179,7 @@ const ROOM_TEMPLATES: RoomTemplate[] = [
     { category: 'bookcase_small', count: 3 },
     { category: 'bookcase_large', count: 1 },
     { category: 'torch_wall', count: 2 },
+    { category: 'chest', count: 1 },
   ]},
   // ── Dining Hall ──
   { name: 'dining', minSize: 4, weight: 2, props: [
@@ -186,6 +192,7 @@ const ROOM_TEMPLATES: RoomTemplate[] = [
     { category: 'torch_wall', count: 3 },
     { category: 'banner', count: 2 },
     { category: 'bookcase_small', count: 1 },
+    { category: 'chest', count: 1 },
   ]},
   // ── Shrine ──
   { name: 'shrine', minSize: 3, weight: 2, props: [
@@ -195,13 +202,14 @@ const ROOM_TEMPLATES: RoomTemplate[] = [
     { category: 'torch_wall', count: 3 },
     { category: 'potion', count: 2 },
     { category: 'bookcase_small', count: 1 },
+    { category: 'chest', count: 1 },
   ]},
   // ── Trap Room ──
   { name: 'trap', minSize: 3, weight: 1, props: [
     { category: 'trap_spike', count: 3 },
     { category: 'pot', count: 3 },
     { category: 'torch_wall', count: 3 },
-    { category: 'chest', count: 1 },
+    { category: 'chest', count: 2 },
     { category: 'bookcase_small', count: 1 },
   ]},
   // ── Guard Post ──
@@ -210,7 +218,7 @@ const ROOM_TEMPLATES: RoomTemplate[] = [
     { category: 'barrel', count: 2 },
     { category: 'torch_wall', count: 3 },
     { category: 'banner', count: 3 },
-    { category: 'chest', count: 1 },
+    { category: 'chest', count: 2 },
     { category: 'bookcase_small', count: 1 },
   ]},
   // ── Cellar ──
@@ -221,6 +229,7 @@ const ROOM_TEMPLATES: RoomTemplate[] = [
     { category: 'torch_wall', count: 2 },
     { category: 'bottle', count: 2 },
     { category: 'bookcase_small', count: 1 },
+    { category: 'chest', count: 1 },
   ]},
   // ── Torch Gallery ── (corridors / connector rooms)
   { name: 'gallery', minSize: 3, weight: 2, props: [
@@ -237,6 +246,7 @@ const ROOM_TEMPLATES: RoomTemplate[] = [
     { category: 'book', count: 2 },
     { category: 'bottle', count: 2 },
     { category: 'bookcase_small', count: 1 },
+    { category: 'chest', count: 1 },
   ]},
   // ── Tomb Vault ── (large crypt)
   { name: 'tomb_vault', minSize: 5, weight: 1, props: [
@@ -244,7 +254,7 @@ const ROOM_TEMPLATES: RoomTemplate[] = [
     { category: 'candelabrum', count: 3 },
     { category: 'torch_wall', count: 4 },
     { category: 'banner', count: 3 },
-    { category: 'chest', count: 1 },
+    { category: 'chest', count: 2 },
     { category: 'bookcase_large', count: 2 },
   ]},
   // ── Kitchen ──
@@ -256,6 +266,7 @@ const ROOM_TEMPLATES: RoomTemplate[] = [
     { category: 'mug', count: 2 },
     { category: 'bottle', count: 2 },
     { category: 'bookcase_small', count: 1 },
+    { category: 'chest', count: 1 },
   ]},
   // ── Trophy Room ──
   { name: 'trophy', minSize: 4, weight: 1, props: [
@@ -263,7 +274,7 @@ const ROOM_TEMPLATES: RoomTemplate[] = [
     { category: 'candelabrum', count: 3 },
     { category: 'torch_wall', count: 3 },
     { category: 'table_small', count: 1 },
-    { category: 'chest', count: 1 },
+    { category: 'chest', count: 2 },
     { category: 'bookcase_large', count: 1 },
   ]},
 ];
@@ -355,6 +366,8 @@ export class DungeonPropSystem {
   private labels: THREE.Sprite[] = [];
   private readonly parent: THREE.Object3D;
   private cellSize = 0.75;
+  private torchLights: { light: THREE.PointLight; baseIntensity: number; phase: number }[] = [];
+  private torchTime = 0;
 
   // Entrance/exit: spawn positions (cell center) and portal trigger positions (at wall)
   private entrancePos: THREE.Vector3 | null = null;
@@ -366,6 +379,27 @@ export class DungeonPropSystem {
 
   constructor(parent: THREE.Object3D) {
     this.parent = parent;
+  }
+
+  /** Attach a point light to a prop mesh if it's a light source (torch, candelabrum). */
+  private attachLight(mesh: THREE.Mesh, entry: DungeonPropEntry): void {
+    if (!entry.lightSource) return;
+    const isWallMount = entry.placement === 'wall_mount';
+    // Vary color from reddish to yellow-orange
+    const colors = [0xff6622, 0xff7733, 0xff8833, 0xff9944, 0xffaa44, 0xffbb55, 0xffcc66];
+    const color = colors[Math.floor(rng.next() * colors.length)];
+    const intensity = isWallMount ? 2.0 : 2.5;
+    const distance = isWallMount ? this.cellSize * 8 : this.cellSize * 6;
+    const light = new THREE.PointLight(color, intensity, distance, 1.5);
+    // Position light at the top of the prop (flame area)
+    if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+    const topY = mesh.geometry.boundingBox
+      ? mesh.geometry.boundingBox.max.y * 0.95
+      : this.cellSize * 0.3;
+    light.position.set(0, topY, 0);
+    light.castShadow = false;
+    mesh.add(light);
+    this.torchLights.push({ light, baseIntensity: intensity, phase: Math.random() * Math.PI * 2 });
   }
 
   async populate(
@@ -541,6 +575,7 @@ export class DungeonPropSystem {
             mesh.castShadow = true;
             mesh.receiveShadow = true;
             this.parent.add(mesh);
+            this.attachLight(mesh, entry);
 
             // No entity/collision — wall mounts are decorative
             const dummyEntity = new Entity(mesh, { layer: Layer.Prop, radius: 0.01, weight: 0 });
@@ -597,6 +632,7 @@ export class DungeonPropSystem {
             mat.emissiveIntensity = 0.4;
           }
           this.parent.add(mesh);
+          this.attachLight(mesh, entry);
 
           const propScale = entry.scalesWithDungeon ? cellSize : 1;
           const entity = new Entity(mesh, {
@@ -852,13 +888,11 @@ export class DungeonPropSystem {
       }
     }
 
-    // ── Entrance / Exit wall props (skip if already placed externally) ──
-    if (!this.entrancePos && !this.exitPos) {
-      await this.placeEntranceExit(
-        rooms, entranceRoom, exitRoom, occupied, openGrid, gridW, gridH,
-        cellSize, halfWorld, wallHeight, dungeonTheme,
-      );
-    }
+    // ── Entrance / Exit wall props ──
+    await this.placeEntranceExit(
+      rooms, entranceRoom, exitRoom, occupied, openGrid, gridW, gridH,
+      cellSize, halfWorld, wallHeight, dungeonTheme,
+    );
 
     // ── Corridor wall props (torches & banners) ──
     // Find open cells not inside any room, adjacent to a wall
@@ -915,6 +949,7 @@ export class DungeonPropSystem {
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       this.parent.add(mesh);
+      this.attachLight(mesh, entry);
 
       const dummyEntity = new Entity(mesh, { layer: Layer.Prop, radius: 0.01, weight: 0 });
       this.props.push({ mesh, entity: dummyEntity, entry, gridCell: { gx: cell.gx, gz: cell.gz } });
@@ -925,6 +960,24 @@ export class DungeonPropSystem {
     // Start hidden — room visibility will show props in visible rooms
     for (const p of this.props) p.mesh.visible = false;
     for (const l of this.labels) l.visible = false;
+  }
+
+  /** Update torch light flickering — call once per frame. */
+  update(dt: number): void {
+    if (this.torchLights.length === 0) return;
+    this.torchTime += dt * 12;
+    const flickerAmount = 0.15;
+    for (const t of this.torchLights) {
+      // Skip hidden lights (parent mesh not visible)
+      if (!t.light.parent || !t.light.parent.visible) continue;
+      const time = this.torchTime + t.phase;
+      const flicker = 1 + (
+        Math.sin(time) * 0.5 +
+        Math.sin(time * 2.3) * 0.3 +
+        Math.sin(time * 5.7) * 0.2
+      ) * flickerAmount;
+      t.light.intensity = t.baseIntensity * flicker;
+    }
   }
 
   /** Grid cells (dungeon space gx, gz) that have a floor prop — use to mark those nav cells unwalkable.
@@ -1042,9 +1095,8 @@ export class DungeonPropSystem {
     return candidates[Math.floor(rng.next() * candidates.length)];
   }
 
-  /** Place entrance and exit VOX props on wall edges of the designated rooms.
-   *  Can be called before populate() so portals are available at layout-ready time. */
-  async placeEntranceExit(
+  /** Place entrance and exit VOX props on wall edges of the designated rooms. */
+  private async placeEntranceExit(
     rooms: RoomRect[],
     entranceRoomIdx: number,
     exitRoomIdx: number,
@@ -1054,14 +1106,11 @@ export class DungeonPropSystem {
     gridH: number,
     cellSize: number,
     halfWorld: number,
-    wallHeight = 2.5,
+    wallHeight: number,
     theme: string,
   ): Promise<void> {
     if (entranceRoomIdx < 0 || exitRoomIdx < 0) return;
     if (entranceRoomIdx >= rooms.length || exitRoomIdx >= rooms.length) return;
-
-    // Ensure cellSize is set (needed if called before populate())
-    if (!this.cellSize) this.cellSize = cellSize;
 
     const toWorldX = (gx: number) => -halfWorld + (gx + 0.5) * cellSize;
     const toWorldZ = (gz: number) => -halfWorld + (gz + 0.5) * cellSize;
@@ -1145,7 +1194,7 @@ export class DungeonPropSystem {
 
       // Point light to make the portal visually attractive
       const lightColor = isEntrance ? 0xffcc66 : 0x88bbff;
-      const light = new THREE.PointLight(lightColor, isEntrance ? 2 : 8, cellSize * 5, 1.5);
+      const light = new THREE.PointLight(lightColor, 8, cellSize * 6, 1.5);
       light.position.set(wx, wallHeight * 0.5, wz);
       this.parent.add(light);
 

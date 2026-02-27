@@ -31,6 +31,7 @@ export class SpeechBubbleSystem {
 
   /** Per-character timer for staggered spawning */
   private charTimers = new Map<Character, { timer: number; nextDelay: number }>();
+  private paused = false;
 
   constructor() {
     window.addEventListener('resize', this.onResize);
@@ -67,6 +68,8 @@ export class SpeechBubbleSystem {
   }
 
   update(dt: number): void {
+    if (this.paused) return;
+
     // Spawn bubbles per character
     for (const char of this.characters) {
       const state = this.charTimers.get(char);
@@ -93,6 +96,18 @@ export class SpeechBubbleSystem {
 
     // Project to screen and push to store
     this.pushToStore();
+  }
+
+  /** Immediately clear all bubbles and pause updates (e.g. before floor transition). */
+  dismissAll(): void {
+    this.paused = true;
+    this.bubbles.length = 0;
+    useGameStore.getState().setSpeechBubbles([]);
+  }
+
+  /** Resume bubble spawning (call after floor transition completes). */
+  resume(): void {
+    this.paused = false;
   }
 
   /**
