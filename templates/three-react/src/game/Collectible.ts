@@ -18,15 +18,21 @@ export class CollectibleSystem {
   private readonly scene: THREE.Scene;
   private readonly terrain: Terrain;
   private readonly pickupRadius = 0.2;
-  private readonly count = 15;
+  private readonly count: number;
+  private readonly respawnEnabled: boolean;
   private totalCollected = 0;
 
   private readonly gemColors = [0x44ffaa, 0xff44aa, 0x44aaff, 0xffaa44, 0xaa44ff];
   private readonly geometry: THREE.BufferGeometry;
 
-  constructor(scene: THREE.Scene, terrain: Terrain) {
+  private playerSpawn: { x: number; z: number } | null = null;
+
+  constructor(scene: THREE.Scene, terrain: Terrain, playerSpawn?: { x: number; z: number }, count?: number) {
     this.scene = scene;
     this.terrain = terrain;
+    this.playerSpawn = playerSpawn ?? null;
+    this.count = count ?? 15;
+    this.respawnEnabled = count == null; // no respawn when count is explicitly set (dungeon mode)
     this.geometry = new THREE.OctahedronGeometry(0.06, 0);
 
     for (let i = 0; i < this.count; i++) {
@@ -35,7 +41,8 @@ export class CollectibleSystem {
   }
 
   private spawnCollectible(): void {
-    const pos = this.terrain.getRandomPosition(4);
+    const { magnetRadius } = useGameStore.getState().characterParams;
+    const pos = this.terrain.getRandomPosition(4, 0.6, this.playerSpawn ?? undefined, magnetRadius);
     const color = this.gemColors[Math.floor(Math.random() * this.gemColors.length)];
 
     const mat = new THREE.MeshStandardMaterial({
@@ -68,14 +75,16 @@ export class CollectibleSystem {
 
     for (const c of this.collectibles) {
       if (c.collected) {
-        c.respawnTimer -= dt;
-        if (c.respawnTimer <= 0) {
-          // Respawn at new position
-          const pos = this.terrain.getRandomPosition(4);
-          c.mesh.position.set(pos.x, pos.y + 0.18, pos.z);
-          c.baseY = pos.y + 0.18;
-          c.collected = false;
-          c.mesh.visible = true;
+        if (this.respawnEnabled) {
+          c.respawnTimer -= dt;
+          if (c.respawnTimer <= 0) {
+            // Respawn at new position
+            const pos = this.terrain.getRandomPosition(4);
+            c.mesh.position.set(pos.x, pos.y + 0.18, pos.z);
+            c.baseY = pos.y + 0.18;
+            c.collected = false;
+            c.mesh.visible = true;
+          }
         }
         continue;
       }
@@ -103,7 +112,7 @@ export class CollectibleSystem {
       if (dist < this.pickupRadius) {
         c.collected = true;
         c.mesh.visible = false;
-        c.respawnTimer = 3 + Math.random() * 4;
+        c.respawnTimer = 15 + Math.random() * 15;
         collected++;
         this.totalCollected++;
       }

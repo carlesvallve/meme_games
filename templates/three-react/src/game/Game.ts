@@ -180,7 +180,9 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   useGameStore.getState().setPaletteActive(terrain.getPaletteName());
   sceneSky.setPalette(terrain.getPaletteName());
   terrain.setGridOpacity(useGameStore.getState().gridOpacity);
-  let collectibles = new CollectibleSystem(scene, terrain);
+  const initSpawn = terrain.getEntrancePosition();
+  const initGemCount = initPreset === 'voxelDungeon' ? Math.max(2, Math.ceil(terrain.getRoomCount() / 2)) : undefined;
+  let collectibles = new CollectibleSystem(scene, terrain, initSpawn ? { x: initSpawn.x, z: initSpawn.z } : undefined, initGemCount);
   let lootSystem = new LootSystem(scene, terrain);
   const usePropChestsOnly = initPreset === 'voxelDungeon';
   let chestSystem = new ChestSystem(scene, terrain, lootSystem, usePropChestsOnly);
@@ -248,7 +250,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     debugLadderIndex = -1;
     if (!opts.spawnAt) rerollRoster(); // only randomize roster on full regen, not floor transitions
     exitTriggered = false;
-    portalSpawnPos = null;
+    portalCooldown = 0;
     pendingSnapshot = opts.snapshot ?? null;
 
     // Dispose old systems
@@ -286,7 +288,12 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     sceneSky.setPalette(terrain.getPaletteName());
     navGrid = terrain.buildNavGrid(pp.stepHeight, pp.capsuleRadius, navCellForPreset(terrainPreset), pp.slopeHeight);
     terrain.setGridOpacity(useGameStore.getState().gridOpacity);
-    collectibles = new CollectibleSystem(scene, terrain);
+    // Get player spawn position for exclusion zone (avoid spawning collectibles inside magnet radius)
+    const spawnExclude = opts.spawnAt === 'exit'
+      ? terrain.getExitPosition()
+      : terrain.getEntrancePosition();
+    const gemCount = terrainPreset === 'voxelDungeon' ? Math.max(2, Math.ceil(terrain.getRoomCount() / 2)) : undefined;
+    collectibles = new CollectibleSystem(scene, terrain, spawnExclude ? { x: spawnExclude.x, z: spawnExclude.z } : undefined, gemCount);
     lootSystem = new LootSystem(scene, terrain);
     const usePropChestsOnlyRegen = terrainPreset === 'voxelDungeon';
     chestSystem = new ChestSystem(scene, terrain, lootSystem, usePropChestsOnlyRegen);
@@ -314,25 +321,48 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     // When props finish loading, reposition character to precise entrance/exit
     const spawnAtCapture = opts.spawnAt;
     if (usePropChestsOnlyRegen && spawnAtCapture) {
-      // Layout ready (walls/floors/doors loaded, before props) — run visibility + release fade
-      terrain.setOnLayoutReady(() => {
+      // Dungeon ready (layout + props + portals all placed) — reposition, visibility, fade in
+      terrain.setOnDungeonReady(() => {
         if (!activeCharacter) return;
-        console.log('[LayoutReady] walls/floors/doors loaded');
+        console.log('[DungeonReady] all placements done');
 
-        // Update character ground Y from actual terrain
-        const charPos = activeCharacter.getPosition();
-        const y = terrain.getTerrainY(charPos.x, charPos.z);
-        activeCharacter.mesh.position.y = y;
-        activeCharacter.groundY = y;
-        activeCharacter.visualGroundY = y;
+        // Reposition character to portal entrance/exit
+        const pos = spawnAtCapture === 'exit'
+          ? terrain.getExitPosition()
+          : terrain.getEntrancePosition();
+        if (pos) {
+          console.log(`[DungeonReady] spawn at ${spawnAtCapture} (${pos.x.toFixed(2)}, ${pos.z.toFixed(2)})`);
+          const y = terrain.getTerrainY(pos.x, pos.z);
+          activeCharacter.mesh.position.set(pos.x, y, pos.z);
+          activeCharacter.groundY = y;
+          activeCharacter.visualGroundY = y;
+          portalCooldown = 1.0;
+        } else {
+          // Fallback: use current position
+          const charPos = activeCharacter.getPosition();
+          const y = terrain.getTerrainY(charPos.x, charPos.z);
+          activeCharacter.mesh.position.y = y;
+          activeCharacter.groundY = y;
+          activeCharacter.visualGroundY = y;
+        }
+
+        // Update facing from prop system
+        if (spawnAtCapture === 'exit') {
+          const exitWallDir = terrain.getExitWallDir();
+          activeCharacter.setFacing(Math.atan2(-exitWallDir[0], -exitWallDir[1]));
+        } else {
+          const entranceFacing = terrain.getEntranceFacing();
+          if (entranceFacing) activeCharacter.setFacing(entranceFacing);
+        }
 
         // Run room visibility so only spawn room is shown
         const roomVis = terrain.getRoomVisibility();
         const doorSys = terrain.getDoorSystem();
         if (roomVis) {
-          roomVis.update(charPos.x, charPos.z, doorSys);
+          const cp = activeCharacter.getPosition();
+          roomVis.update(cp.x, cp.z, doorSys);
 
-          // Hide dynamic objects not in visible rooms (update loop is frozen during fade)
+          // Apply visibility to dynamic objects (update loop is frozen during fade)
           for (const mesh of collectibles.getMeshes()) {
             mesh.visible = roomVis.isPositionVisible(mesh.position.x, mesh.position.z);
           }
@@ -344,46 +374,20 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
           }
           if (enemySystem) {
             for (const enemy of enemySystem.getEnemies()) {
-              const pos = enemy.getPosition();
-              enemy.mesh.visible = roomVis.isPositionVisible(pos.x, pos.z);
+              const epos = enemy.getPosition();
+              enemy.mesh.visible = roomVis.isPositionVisible(epos.x, epos.z);
             }
           }
         }
 
-        // Snap camera to correct Y
+        // Show terrain (was hidden to prevent flash), show character, snap camera, release fade
+        terrain.getGroup().visible = true;
+        activeCharacter.mesh.visible = true;
         const camTarget = activeCharacter.getCameraTarget();
         cam.setTarget(camTarget.x, camTarget.y, camTarget.z);
         cam.snapToTarget();
-
-        // Release fade — dungeon layout is ready
-        console.log('[LayoutReady] releasing fade');
+        console.log('[DungeonReady] releasing fade');
         postProcess.releaseFade();
-      });
-
-      // Props ready (entrance/exit positions available) — reposition character
-      terrain.setOnPropsReady(() => {
-        if (!activeCharacter) return;
-        const pos = spawnAtCapture === 'exit'
-          ? terrain.getExitPosition()
-          : terrain.getEntrancePosition();
-        if (pos) {
-          console.log(`[PropsReady] reposition to ${spawnAtCapture} at (${pos.x.toFixed(2)}, ${pos.z.toFixed(2)})`);
-          const y = terrain.getTerrainY(pos.x, pos.z);
-          activeCharacter.mesh.position.set(pos.x, y, pos.z);
-          activeCharacter.groundY = y;
-          activeCharacter.visualGroundY = y;
-          portalSpawnPos = { x: pos.x, z: pos.z }; // update cooldown to final position
-          cam.setTarget(pos.x, y + 0.5, pos.z);
-          cam.snapToTarget();
-        }
-        // Update facing from prop system
-        if (spawnAtCapture === 'exit') {
-          const exitWallDir = terrain.getExitWallDir();
-          activeCharacter.setFacing(Math.atan2(-exitWallDir[0], -exitWallDir[1]));
-        } else {
-          const entranceFacing = terrain.getEntranceFacing();
-          if (entranceFacing) activeCharacter.setFacing(entranceFacing);
-        }
       });
     }
 
@@ -395,9 +399,17 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     }
     spawnCharacters(lastSelectedCharacter!, opts.spawnAt);
 
+    // activeCharacter is set by spawnCharacters() above (TS can't track closure mutation)
+    const spawnedChar = activeCharacter as Character | null;
+
+    // Hide character during floor transitions until dungeon is ready
+    if (usePropChestsOnlyRegen && opts.spawnAt && spawnedChar) {
+      spawnedChar.mesh.visible = false;
+    }
+
     // Snap camera instantly to new character position — no lerp from old level
-    if (activeCharacter) {
-      const p = activeCharacter.mesh.position;
+    if (spawnedChar) {
+      const p = spawnedChar.mesh.position;
       cam.setTarget(p.x, p.y, p.z);
       cam.snapToTarget();
     }
@@ -413,6 +425,9 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   /** Change floor: fade out → serialize → regenerate → fade in */
   function changeFloor(direction: 'down' | 'up'): void {
     console.log(`[Level] changeFloor(${direction}) — starting fade`);
+
+    // Dismiss any active speech bubbles before transition
+    speechSystem.dismissAll();
 
     postProcess.fadeTransition(() => {
       // This runs when screen is fully black
@@ -433,6 +448,9 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       const seed = store.getFloorSeed(newFloor);
 
       console.log(`[Level] ${direction}: floor ${currentFloor} → ${newFloor}, seed=${seed}, cached=${!!cached}`);
+
+      // Clear stale theme so new floors get a fresh random theme
+      if (!cached) store.setCurrentTheme('');
 
       regenerateScene({
         seed,
@@ -489,7 +507,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   let lastSelectedCharacter: CharacterType | null = null;
   let exitTriggered = false;
   /** Guard: track spawn cell so portals are disabled until player moves away */
-  let portalSpawnPos: { x: number; z: number } | null = null;
+  let portalCooldown = 0;
 
   // Cached input state for PlayerControl deps
   let cachedInputState = input.update();
@@ -707,6 +725,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       if (activeCharacter) {
         const pool = e.shiftKey ? VOX_ENEMIES : VOX_HEROES;
         const entry = pool[Math.floor(Math.random() * pool.length)];
+        voxRoster[activeCharacter.characterType] = entry;
         console.log(`[Game] Random ${e.shiftKey ? 'enemy' : 'hero'} skin: ${entry.name}`);
         speechSystem.onSkinChanged(activeCharacter);
         activeCharacter.applyVoxSkin(entry);
@@ -726,7 +745,15 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       }
       e.preventDefault();
     }
-    else if (e.code === 'KeyL') {
+    else if (e.code === 'KeyL' && !e.shiftKey) {
+      // Toggle player torch light via store (updateTorch reads this each frame)
+      const before = useGameStore.getState().torchEnabled;
+      useGameStore.getState().toggleTorch();
+      const after = useGameStore.getState().torchEnabled;
+      console.log(`[Game] Player torch: ${before} → ${after}`);
+      e.preventDefault();
+    }
+    else if (e.code === 'KeyL' && e.shiftKey) {
       const ladders = terrain.getLadderDefs();
       if (ladders.length === 0) return;
       debugLadderIndex++;
@@ -855,12 +882,13 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
 
       // Set portal cooldown guard when spawning via floor transition
       if (spawnAt) {
-        portalSpawnPos = { x: pos.x, z: pos.z };
+        portalCooldown = 1.0;
         console.log(`[Spawn] portalCooldown set at (${pos.x.toFixed(2)}, ${pos.z.toFixed(2)})`);
       }
     }
 
-    // Register all characters for speech bubbles
+    // Register all characters for speech bubbles and resume if paused
+    speechSystem.resume();
     speechSystem.setCharacters(characters);
 
     if (activeCharacter) {
@@ -1001,8 +1029,8 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   }
 
   function update(dt: number): void {
-    // Fade transition: freeze gameplay, only update camera
-    if (postProcess.isFading) {
+    // Fade transition: freeze gameplay while screen is black (holding or fading out)
+    if (postProcess.isFadingOut) {
       cam.updatePosition(dt);
       return;
     }
@@ -1291,20 +1319,14 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
         audioSystem.sfx('potion');
       }
 
-      // Clear portal cooldown once player has moved away from spawn cell
-      if (portalSpawnPos) {
-        const spawnDx = activePos.x - portalSpawnPos.x;
-        const spawnDz = activePos.z - portalSpawnPos.z;
-        const spawnDist = Math.sqrt(spawnDx * spawnDx + spawnDz * spawnDz);
-        if (spawnDist > useGameStore.getState().tileSize * 0.6) {
-          console.log(`[Portal] cooldown cleared, moved ${spawnDist.toFixed(2)} from spawn`);
-          portalSpawnPos = null;
-        }
+      // Portal re-entry cooldown timer
+      if (portalCooldown > 0) {
+        portalCooldown -= dt;
       }
 
       // Exit portal detection — must be close to portal wall and moving toward it
       const exitPortalPos = terrain.getExitPortalPosition();
-      if (exitPortalPos && !exitTriggered && !portalSpawnPos && activeCharacter) {
+      if (exitPortalPos && !exitTriggered && portalCooldown <= 0 && activeCharacter) {
         const dx = activePos.x - exitPortalPos.x;
         const dz = activePos.z - exitPortalPos.z;
         const portalRadius = useGameStore.getState().tileSize * 0.35;
@@ -1325,7 +1347,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
 
       // Entrance portal detection — go back up
       const entrancePortalPos = terrain.getEntrancePortalPosition();
-      if (entrancePortalPos && !exitTriggered && !portalSpawnPos && activeCharacter && useGameStore.getState().floor > 1) {
+      if (entrancePortalPos && !exitTriggered && portalCooldown <= 0 && activeCharacter && useGameStore.getState().floor > 1) {
         const edx = activePos.x - entrancePortalPos.x;
         const edz = activePos.z - entrancePortalPos.z;
         const portalRadius2 = useGameStore.getState().tileSize * 0.35;
@@ -1392,6 +1414,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
 
     update(dt);
     terrain.updateWater(dt, renderer, scene, cam.camera);
+    terrain.updateProps(dt);
 
     // Update fade animation
     postProcess.updateFade(dt);

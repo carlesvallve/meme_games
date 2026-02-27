@@ -53,6 +53,8 @@ export interface VoxelDungeonVisualResult {
   wallMeshList: THREE.Mesh[];
   groundMaterial: THREE.MeshStandardMaterial;
   wallMaterial: THREE.MeshStandardMaterial;
+  /** Average vertex color sampled from ground tiles — use for door frames etc. */
+  groundColor: THREE.Color;
 }
 
 // ── Ground mesh tracking (for live floor swaps) ──
@@ -372,7 +374,23 @@ export async function loadVoxelDungeonVisuals(
 
   // console.log(`[VoxelDungeon] ${groundCount} ground + ${wallCount} wall tiles`);
 
-  return { groundMeshList, wallMeshList, groundMaterial: voxMat, wallMaterial: wallMat };
+  // Sample average vertex color from ground tiles for door frames etc.
+  const groundColor = new THREE.Color(0xa8a0a0); // fallback
+  if (groundMeshList.length > 0) {
+    const colors = groundMeshList[0].geometry.getAttribute('color');
+    if (colors) {
+      let r = 0, g = 0, b = 0;
+      const count = colors.count;
+      for (let i = 0; i < count; i++) {
+        r += colors.getX(i);
+        g += colors.getY(i);
+        b += colors.getZ(i);
+      }
+      groundColor.setRGB(r / count, g / count, b / count);
+    }
+  }
+
+  return { groundMeshList, wallMeshList, groundMaterial: voxMat, wallMaterial: wallMat, groundColor };
 }
 
 // ── Helpers ──

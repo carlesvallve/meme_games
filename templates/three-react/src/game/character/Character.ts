@@ -316,8 +316,27 @@ export class Character implements BehaviorAgent {
 
     const oldX = this.mesh.position.x;
     const oldZ = this.mesh.position.z;
-    const newX = oldX + dx * speed * dt;
-    const newZ = oldZ + dz * speed * dt;
+
+    // Door steering: when near a doorway, blend movement toward door center
+    let effDx = dx;
+    let effDz = dz;
+    const door = this.terrain.getNearbyDoor(oldX, oldZ, dx, dz, 1.5);
+    if (door) {
+      const steerStrength = 0.35;
+      if (door.corrAxis === 'x') {
+        const offset = door.cx - oldX;
+        effDx = dx + Math.sign(offset) * Math.min(Math.abs(offset), 1) * steerStrength;
+      } else {
+        const offset = door.cz - oldZ;
+        effDz = dz + Math.sign(offset) * Math.min(Math.abs(offset), 1) * steerStrength;
+      }
+      // Re-normalize to keep same overall speed
+      const len = Math.sqrt(effDx * effDx + effDz * effDz);
+      if (len > 0.001) { effDx /= len; effDz /= len; }
+    }
+
+    const newX = oldX + effDx * speed * dt;
+    const newZ = oldZ + effDz * speed * dt;
 
     const resolved = this.terrain.resolveMovement(newX, newZ, this.groundY, stepHeight, capsuleRadius, oldX, oldZ, slopeHeight);
     this.mesh.position.x = resolved.x;
