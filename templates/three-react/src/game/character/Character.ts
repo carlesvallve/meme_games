@@ -204,7 +204,7 @@ export class Character implements BehaviorAgent {
       if (currentHopHalf !== this.lastHopHalf && this.footSfxTimer >= FOOT_SFX_COOLDOWN) {
         this.lastHopHalf = currentHopHalf;
         this.footSfxTimer = 0;
-        audioSystem.sfxAt('fly', this.mesh.position.x, this.mesh.position.z, this.isEnemy ? 0.25 : 0.5);
+        audioSystem.sfxAt('fly', this.mesh.position.x, this.mesh.position.z, this.isEnemy ? 0.4 : 0.5);
       } else if (currentHopHalf !== this.lastHopHalf) {
         this.lastHopHalf = currentHopHalf;
       }
@@ -213,7 +213,7 @@ export class Character implements BehaviorAgent {
     if (stepMode === 'walker' && currentHopHalf !== this.lastHopHalf && this.footSfxTimer >= FOOT_SFX_COOLDOWN) {
       this.lastHopHalf = currentHopHalf;
       this.footSfxTimer = 0;
-      const stepVol = this.isEnemy ? 0.35 : 0.7;
+      const stepVol = this.isEnemy ? 0.5 : 0.7;
       audioSystem.sfxAt('step', this.mesh.position.x, this.mesh.position.z, stepVol);
     } else if (currentHopHalf !== this.lastHopHalf) {
       this.lastHopHalf = currentHopHalf;
@@ -390,7 +390,7 @@ export class Character implements BehaviorAgent {
         if (stepMode === 'flyer') {
           // no step/land sounds for flyers
         } else if (impactSpeed > 1 && this.footSfxTimer >= FOOT_SFX_COOLDOWN) {
-          const vol = this.isEnemy ? 0.35 : 0.7;
+          const vol = this.isEnemy ? 0.5 : 0.7;
           if (stepMode === 'jumper') {
             if (Math.random() < 0.5) audioSystem.sfxAt('step', this.mesh.position.x, this.mesh.position.z, vol);
           } else {
@@ -409,7 +409,7 @@ export class Character implements BehaviorAgent {
     if (this.moveTime > 0) {
       if (this.footSfxTimer >= FOOT_SFX_COOLDOWN && this.getStepMode() !== 'flyer') {
         this.footSfxTimer = 0;
-        const stepVol = this.isEnemy ? 0.35 : 0.7;
+        const stepVol = this.isEnemy ? 0.5 : 0.7;
         audioSystem.sfxAt('step', this.mesh.position.x, this.mesh.position.z, stepVol);
       }
       this.moveTime = 0;

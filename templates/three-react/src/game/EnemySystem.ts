@@ -377,7 +377,7 @@ export class EnemySystem {
       if (!enemy.isAlive) {
         const pos = enemy.mesh.position;
         if (this.goreSystem) {
-          this.goreSystem.spawnGore(enemy.mesh, enemy.groundY, this.getAllCharacters(playerChar));
+          this.goreSystem.spawnGore(enemy.mesh, enemy.groundY, this.getAllCharacters(playerChar), enemy.lastHitDirX, enemy.lastHitDirZ);
         }
         this.lootSystem.spawnLoot(pos.clone());
         audioSystem.sfxAt('death', pos.x, pos.z);
