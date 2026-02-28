@@ -1101,7 +1101,9 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     deathTriggered = true;
     useGameStore.getState().setPhase('player_dead');
     const pos = playerChar.mesh.position.clone();
-    goreSystem.spawnGore(playerChar.mesh, playerChar.groundY, []);
+    const kbDirX = playerChar.lastHitDirX;
+    const kbDirZ = playerChar.lastHitDirZ;
+    goreSystem.spawnGore(playerChar.mesh, playerChar.groundY, [], kbDirX, kbDirZ);
     lootSystem.spawnLoot(pos);
     audioSystem.sfxAt('death', pos.x, pos.z);
     playerChar.hideBody();

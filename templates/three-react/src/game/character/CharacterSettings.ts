@@ -152,7 +152,7 @@ export interface MuzzleOffset {
 
 const RANGED_CONFIG: Record<string, ProjectileConfig> = {
   archer:      { kind: 'arrow',    color: 0xddbb77, speed: 12, damage: 3, lifetime: 1.2, cooldown: 0.35 },
-  mage:        { kind: 'fireball', color: 0x4466ff, speed: 10, damage: 2, lifetime: 1.0, cooldown: 0.45 },
+  mage:        { kind: 'fireball', color: 0x66aaff, speed: 10, damage: 2, lifetime: 1.0, cooldown: 0.45 },
   priestess:   { kind: 'fireball', color: 0xffee44, speed: 10, damage: 2, lifetime: 1.0, cooldown: 0.45 },
   alchemist:   { kind: 'fireball', color: 0x44ff88, speed: 10, damage: 2, lifetime: 1.0, cooldown: 0.45 },
   necromancer: { kind: 'fireball', color: 0xaa44ff, speed: 10, damage: 2, lifetime: 1.0, cooldown: 0.45 },

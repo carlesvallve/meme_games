@@ -28,8 +28,8 @@ const DEFAULTS = {
 };
 
 const PRESET_SCALES: Record<LightPreset, number> = {
-  default: 1,
-  bright: 1.6,
+  default: 1.5,
+  bright: 2.5,
   dark: 0.15,
   none: 0,
 };

@@ -164,6 +164,8 @@ export class GoreSystem {
     mesh: THREE.Mesh,
     groundY: number,
     nearbyCharacters?: Character[],
+    knockbackDirX = 0,
+    knockbackDirZ = 0,
   ): void {
     const pos = mesh.position;
     const geometry = mesh.geometry;
@@ -188,6 +190,7 @@ export class GoreSystem {
           pos.x, pos.y + (yMin + yMax) * 0.5, pos.z,
           groundY, color,
           sizeMin, sizeMax, 1.3 + Math.random() * 1.5, 3.0 + Math.random() * 1.0,
+          knockbackDirX, knockbackDirZ,
         );
       }
     }
@@ -199,18 +202,19 @@ export class GoreSystem {
         pos.x, pos.y + height * (0.1 + Math.random() * 0.5), pos.z,
         groundY, randBloodColor(),
         0.01, 0.032, 1.2 + Math.random() * 2.2, 1.0 + Math.random() * 0.8,
+        knockbackDirX, knockbackDirZ,
       );
     }
 
-    // Floor splats — smaller radial spread
+    // Floor splats — biased toward knockback direction
     const splatCount = 4 + Math.floor(Math.random() * 3);
     for (let i = 0; i < splatCount; i++) {
       const dist = Math.random() * 0.35;
       const angle = Math.random() * Math.PI * 2;
       this.spawnFloorSplat(
-        pos.x + Math.cos(angle) * dist,
+        pos.x + Math.cos(angle) * dist + knockbackDirX * dist * 0.8,
         groundY + 0.005,
-        pos.z + Math.sin(angle) * dist,
+        pos.z + Math.sin(angle) * dist + knockbackDirZ * dist * 0.8,
       );
     }
 
@@ -335,6 +339,8 @@ export class GoreSystem {
     sizeMin: number, sizeMax: number,
     ejectSpeed: number,
     _lifetimeHint: number,
+    knockbackDirX = 0,
+    knockbackDirZ = 0,
   ): void {
     while (this.chunks.length >= MAX_CHUNKS) {
       const old = this.chunks.shift()!;
@@ -361,12 +367,18 @@ export class GoreSystem {
     mesh.castShadow = true;
     this.scene.add(mesh);
 
-    // Radial ejection — random direction outward, no knockback bias
+    // Radial ejection — biased toward knockback direction
     const angle = Math.random() * Math.PI * 2;
+    let vx = Math.cos(angle) * ejectSpeed;
+    let vz = Math.sin(angle) * ejectSpeed;
+    // Gentle bias toward knockback direction
+    const kbStrength = ejectSpeed * 0.9;
+    vx += knockbackDirX * kbStrength;
+    vz += knockbackDirZ * kbStrength;
     const vel = new THREE.Vector3(
-      Math.cos(angle) * ejectSpeed,
+      vx,
       1.5 + Math.random() * 2.5,
-      Math.sin(angle) * ejectSpeed,
+      vz,
     );
 
     const avgSize = (sx + sy + sz) / 3;

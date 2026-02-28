@@ -229,7 +229,7 @@ function createTrailRibbon(isArrow: boolean, color: number): THREE.Mesh {
     : new THREE.MeshBasicMaterial({
         color,
         transparent: true,
-        opacity: 0.5,
+        opacity: 0.6,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
         side: THREE.DoubleSide,
@@ -291,15 +291,14 @@ function createFireballMesh(color: number): THREE.Group {
   const geo = new THREE.SphereGeometry(0.08, 8, 6);
   const mat = new THREE.MeshBasicMaterial({
     color,
-    transparent: true,
-    opacity: 0.9,
     blending: THREE.AdditiveBlending,
     depthWrite: false,
   });
   group.add(new THREE.Mesh(geo, mat));
 
-  // Glow light
-  const light = new THREE.PointLight(color, 1.5, 3);
+  // Point light — mostly white with a tint of the projectile color
+  const lightColor = new THREE.Color(color).lerp(new THREE.Color(0xffffff), 0.7);
+  const light = new THREE.PointLight(lightColor, 15, 10);
   light.position.set(0, 0, 0);
   group.add(light);
 
@@ -350,15 +349,13 @@ export class ProjectileSystem {
     const geo = new THREE.SphereGeometry(0.15, 12, 8);
     const mat = new THREE.MeshBasicMaterial({
       color,
-      transparent: true,
-      opacity: 0.85,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     });
     const mesh = new THREE.Mesh(geo, mat);
     mesh.scale.setScalar(0.01);
 
-    const light = new THREE.PointLight(color, IMPACT_LIGHT_INTENSITY, IMPACT_LIGHT_RADIUS);
+    const light = new THREE.PointLight(color, IMPACT_LIGHT_INTENSITY * 1.5, IMPACT_LIGHT_RADIUS);
 
     if (parent) {
       const worldPos = new THREE.Vector3(x, y, z);
