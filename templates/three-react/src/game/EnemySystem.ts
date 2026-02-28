@@ -13,7 +13,7 @@ import type { SavedEnemy } from './LevelState';
 
 // ── Character collision constants ────────────────────────────────────
 
-const CHAR_COLLISION_RADIUS = 0.3;
+// Character collision now uses actual entity radii from vox mesh bounds (see Character.applyVoxSkin)
 const CHAR_PUSH_STRENGTH = 10; // push-apart speed multiplier
 
 // ── Attack arc helper ────────────────────────────────────────────────
@@ -487,8 +487,6 @@ export class EnemySystem {
       if (enemy.isAlive) allChars.push(enemy);
     }
 
-    const r = CHAR_COLLISION_RADIUS;
-    const minDist = r * 2;
     const characterPushEnabled = useGameStore.getState().characterPushEnabled;
 
     // O(n^2) pair-wise push apart — fine for < 50 characters
@@ -500,6 +498,8 @@ export class EnemySystem {
         const dz = b.mesh.position.z - a.mesh.position.z;
         const dist = Math.sqrt(dx * dx + dz * dz);
 
+        // Use actual entity radii so small characters can get closer
+        const minDist = a.entity.radius + b.entity.radius;
         if (dist < minDist && dist > 0.001) {
           const overlap = minDist - dist;
           const nx = dx / dist;

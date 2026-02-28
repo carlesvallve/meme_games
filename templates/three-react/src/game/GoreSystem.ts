@@ -33,11 +33,21 @@ interface FloorSplat {
   startOpacity: number;
 }
 
+// ── Wall splat (blood smeared on walls) ─────────────────────────────
+
+interface WallSplat {
+  mesh: THREE.Mesh;
+  age: number;
+  lifetime: number;
+  startOpacity: number;
+}
+
 // ── Constants ───────────────────────────────────────────────────────
 
 const MAX_CHUNKS = 60;
 const MAX_STAINS = 120;
 const MAX_FLOOR_SPLATS = 50;
+const MAX_WALL_SPLATS = 40;
 
 /** Random lifetime for any gore element (chunks, splats, cubes) so nothing consistently outlasts the rest. */
 function randGoreLifetime(): number {
@@ -140,9 +150,11 @@ export class GoreSystem {
   private chunks: GoreChunk[] = [];
   private stains: BloodStain[] = [];
   private floorSplats: FloorSplat[] = [];
+  private wallSplats: WallSplat[] = [];
   private readonly scene: THREE.Scene;
   private readonly getFloorNormal: GetFloorNormal | null;
   private readonly getTerrainY: GetTerrainY | null;
+  private isOpenCell: ((wx: number, wz: number) => boolean) | null = null;
   private readonly chunkGeo = new THREE.BoxGeometry(1, 1, 1);
   private readonly splatGeo: THREE.PlaneGeometry;
 
@@ -156,6 +168,10 @@ export class GoreSystem {
     this.getTerrainY = getTerrainY ?? null;
     this.splatGeo = new THREE.PlaneGeometry(1, 1);
     this.splatGeo.rotateX(-Math.PI / 2);
+  }
+
+  setOpenCellCheck(fn: (wx: number, wz: number) => boolean): void {
+    this.isOpenCell = fn;
   }
 
   // ── Death gore (full explosion on kill) ───────────────────────────
@@ -464,12 +480,86 @@ export class GoreSystem {
     this.floorSplats.push({ mesh, age: 0, lifetime: randGoreLifetime(), startOpacity: (mat as THREE.MeshStandardMaterial).opacity });
   }
 
+  // ── Wall splats (blood stuck to walls) ───────────────────────────
+
+  private spawnWallSplat(x: number, y: number, z: number, normalX: number, normalZ: number, color: THREE.Color, size: number): void {
+    while (this.wallSplats.length >= MAX_WALL_SPLATS) {
+      const old = this.wallSplats.shift()!;
+      this.scene.remove(old.mesh);
+      (old.mesh.material as THREE.Material).dispose();
+    }
+
+    const opacity = 0.5 + Math.random() * 0.4;
+    const mat = new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+
+    const mesh = new THREE.Mesh(this.splatGeo, mat);
+    const scaleX = size * (0.5 + Math.random() * 0.8);
+    const scaleY = size * (0.8 + Math.random() * 1.2); // drip tendency
+    mesh.scale.set(scaleX, 1, scaleY);
+
+    // Position slightly off the wall surface
+    mesh.position.set(x + normalX * 0.005, y, z + normalZ * 0.005);
+
+    // Orient to face outward from wall
+    const wallNormal = new THREE.Vector3(normalX, 0, normalZ).normalize();
+    mesh.quaternion.setFromUnitVectors(WORLD_UP, wallNormal);
+    mesh.rotateOnAxis(wallNormal, Math.random() * Math.PI * 2);
+
+    this.scene.add(mesh);
+    this.wallSplats.push({ mesh, age: 0, lifetime: randGoreLifetime(), startOpacity: opacity });
+
+    // 1-2 tiny blood cubes stuck to the wall
+    const cubeCount = 1 + Math.floor(Math.random() * 2);
+    for (let c = 0; c < cubeCount; c++) {
+      this.spawnWallCube(
+        x + normalX * 0.006 + (Math.random() - 0.5) * size * 0.5,
+        y + (Math.random() - 0.5) * size * 0.8,
+        z + normalZ * 0.006 + (Math.random() - 0.5) * size * 0.5,
+      );
+    }
+  }
+
+  private spawnWallCube(x: number, y: number, z: number): void {
+    while (this.wallSplats.length >= MAX_WALL_SPLATS) {
+      const old = this.wallSplats.shift()!;
+      this.scene.remove(old.mesh);
+      (old.mesh.material as THREE.Material).dispose();
+    }
+
+    const w = 0.006 + Math.random() * 0.016;
+    const h = 0.006 + Math.random() * 0.016;
+    const d = 0.003 + Math.random() * 0.005;
+
+    const mat = new THREE.MeshStandardMaterial({
+      color: randBloodColor(),
+      roughness: 0.5,
+      metalness: 0.2,
+      transparent: true,
+      opacity: 0.7 + Math.random() * 0.3,
+    });
+
+    const mesh = new THREE.Mesh(this.chunkGeo, mat);
+    mesh.scale.set(w, h, d);
+    mesh.position.set(x, y, z);
+    mesh.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+    this.scene.add(mesh);
+
+    this.wallSplats.push({ mesh, age: 0, lifetime: randGoreLifetime(), startOpacity: (mat as THREE.MeshStandardMaterial).opacity });
+  }
+
   // ── Update ────────────────────────────────────────────────────────
 
   update(dt: number): void {
     this.updateChunks(dt);
     this.updateStains(dt);
     this.updateFloorSplats(dt);
+    this.updateWallSplats(dt);
   }
 
   private updateChunks(dt: number): void {
@@ -489,9 +579,49 @@ export class GoreSystem {
       chunk.vel.z *= dragFactor;
       chunk.vel.y -= CHUNK_GRAVITY * dt;
 
+      const oldX = chunk.mesh.position.x;
+      const oldZ = chunk.mesh.position.z;
       chunk.mesh.position.x += chunk.vel.x * dt;
       chunk.mesh.position.y += chunk.vel.y * dt;
       chunk.mesh.position.z += chunk.vel.z * dt;
+
+      // Wall collision — stick to wall as a splat
+      if (this.isOpenCell && chunk.vel.lengthSq() > 0.1) {
+        const newX = chunk.mesh.position.x;
+        const newZ = chunk.mesh.position.z;
+        if (!this.isOpenCell(newX, newZ)) {
+          // Determine which axis hit the wall for splat orientation
+          const xBlocked = !this.isOpenCell(newX, oldZ);
+          const zBlocked = !this.isOpenCell(oldX, newZ);
+
+          let normalX = 0, normalZ = 0;
+          if (xBlocked && !zBlocked) {
+            normalX = chunk.vel.x > 0 ? -1 : 1;
+            chunk.mesh.position.x = oldX;
+          } else if (zBlocked && !xBlocked) {
+            normalZ = chunk.vel.z > 0 ? -1 : 1;
+            chunk.mesh.position.z = oldZ;
+          } else {
+            normalX = chunk.vel.x > 0 ? -1 : 1;
+            chunk.mesh.position.x = oldX;
+            chunk.mesh.position.z = oldZ;
+          }
+
+          // Spawn wall splat at impact point
+          const color = ((chunk.mesh.material as THREE.MeshStandardMaterial).color ?? BLOOD_RED).clone();
+          const splatSize = 0.04 + chunk.size * 2.5;
+          this.spawnWallSplat(
+            chunk.mesh.position.x, chunk.mesh.position.y, chunk.mesh.position.z,
+            normalX, normalZ, color, splatSize,
+          );
+
+          // Remove the chunk — it became a wall splat
+          this.scene.remove(chunk.mesh);
+          (chunk.mesh.material as THREE.Material).dispose();
+          this.chunks.splice(i, 1);
+          continue;
+        }
+      }
 
       chunk.mesh.rotation.x += chunk.vel.x * dt * 4;
       chunk.mesh.rotation.z += chunk.vel.z * dt * 4;
@@ -587,6 +717,26 @@ export class GoreSystem {
     }
   }
 
+  private updateWallSplats(dt: number): void {
+    for (let i = this.wallSplats.length - 1; i >= 0; i--) {
+      const splat = this.wallSplats[i];
+      splat.age += dt;
+
+      if (splat.age >= splat.lifetime) {
+        this.scene.remove(splat.mesh);
+        (splat.mesh.material as THREE.Material).dispose();
+        this.wallSplats.splice(i, 1);
+        continue;
+      }
+
+      const fadeStart = splat.lifetime * 0.6;
+      if (splat.age > fadeStart) {
+        const fadeT = (splat.age - fadeStart) / (splat.lifetime - fadeStart);
+        (splat.mesh.material as THREE.MeshBasicMaterial).opacity = splat.startOpacity * (1 - fadeT);
+      }
+    }
+  }
+
   // ── Dispose ───────────────────────────────────────────────────────
 
   dispose(): void {
@@ -607,6 +757,12 @@ export class GoreSystem {
       (splat.mesh.material as THREE.Material).dispose();
     }
     this.floorSplats = [];
+
+    for (const splat of this.wallSplats) {
+      this.scene.remove(splat.mesh);
+      (splat.mesh.material as THREE.Material).dispose();
+    }
+    this.wallSplats = [];
 
     this.chunkGeo.dispose();
     this.splatGeo.dispose();

@@ -231,6 +231,16 @@ export class Character implements BehaviorAgent {
 
     await this.animator.applySkin(this, entry, this.footIK);
 
+    // Derive collision radius from actual mesh XZ extent
+    this.mesh.geometry.computeBoundingBox();
+    const bb = this.mesh.geometry.boundingBox;
+    if (bb) {
+      const halfX = (bb.max.x - bb.min.x) / 2;
+      const halfZ = (bb.max.z - bb.min.z) / 2;
+      // Use the larger XZ axis, with a small padding
+      this.entity.radius = Math.max(halfX, halfZ) + 0.02;
+    }
+
     // Jumpers move slower than walkers
     if (entry.stepMode === 'jumper') {
       this.params.speed *= 0.6;

@@ -2604,6 +2604,17 @@ export class Terrain {
     return maxY;
   }
 
+  /** Check if a world position is on an open dungeon cell (structural walls only, ignores props). */
+  isOpenCell(wx: number, wz: number): boolean {
+    if (!this.walkMask) return true; // no dungeon — everything is open
+    const { openGrid, gridW, gridD, cellSize } = this.walkMask;
+    const halfW = this.effectiveGroundSize / 2;
+    const gx = Math.floor((wx + halfW) / cellSize);
+    const gz = Math.floor((wz + halfW) / cellSize);
+    if (gx < 0 || gx >= gridW || gz < 0 || gz >= gridD) return false;
+    return openGrid[gz * gridW + gx];
+  }
+
   /** Get cell height at world position, including sub-cell stair steps */
   private getCellHeightAt(x: number, z: number): number {
     if (!this.cellHeights || this.dungeonCellSize <= 0) return 0;

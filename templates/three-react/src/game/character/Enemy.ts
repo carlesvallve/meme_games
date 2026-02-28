@@ -4,7 +4,7 @@ import type { Terrain } from '../Terrain';
 import type { NavGrid } from '../NavGrid';
 import type { LadderDef } from '../Ladder';
 import type { VoxCharEntry } from './VoxCharacterDB';
-import { VOX_ENEMIES } from './VoxCharacterDB';
+import { getFilteredEnemies } from './VoxCharacterDB';
 import { ChaseBehavior } from '../behaviors/ChaseBehavior';
 import type { CharacterType } from './characters';
 import { useGameStore, type EnemyParams } from '../../store';
@@ -45,8 +45,9 @@ export class Enemy extends Character {
     scene.remove(this.torchLight);
     scene.remove(this.fillLight);
 
-    // Apply random enemy VOX skin
-    const entry = VOX_ENEMIES[Math.floor(Math.random() * VOX_ENEMIES.length)];
+    // Apply random enemy VOX skin (filtered by allowed types)
+    const pool = getFilteredEnemies(ep.allowedTypes);
+    const entry = pool[Math.floor(Math.random() * pool.length)];
     this.applyVoxSkin(entry);
   }
 
