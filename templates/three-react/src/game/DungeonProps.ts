@@ -5,11 +5,11 @@ import * as THREE from 'three';
 import { loadVoxModel, buildVoxMesh } from '../utils/VoxModelLoader';
 import { Entity, Layer } from './Entity';
 import type { DungeonPropEntry, PropPlacement } from './VoxDungeonDB';
-import { getRandomProp, getPropsWhere, getRandomTile } from './VoxDungeonDB';
+import { getRandomProp, getRandomPropStyled, extractPropStyle, getPropsWhere, getRandomTile } from './VoxDungeonDB';
 import { loadTileEntry } from './VoxDungeonLoader';
 import { SeededRandom } from '../utils/SeededRandom';
 
-const MAX_ACTIVE_LIGHTS = 8;
+// Light cap removed — room visibility hides lights in non-active rooms so GPU cost is bounded.
 
 /** Module-level seeded RNG for prop placement — set at start of populate(). */
 let rng = new SeededRandom(0);
@@ -72,6 +72,40 @@ interface RoomTemplate {
 }
 
 const ROOM_TEMPLATES: RoomTemplate[] = [
+  // ── Tiny rooms (1–2 cell wide) ──
+  { name: 'nook', minSize: 1, weight: 5, props: [
+    { category: 'torch_wall', count: 1 },
+    { category: 'pot', count: 1 },
+    { category: 'barrel', count: 1 },
+  ]},
+  { name: 'closet', minSize: 1, weight: 4, props: [
+    { category: 'torch_wall', count: 1 },
+    { category: 'box', count: 1 },
+    { category: 'chest', count: 1 },
+  ]},
+  { name: 'alcove', minSize: 1, weight: 3, props: [
+    { category: 'candelabrum', count: 1 },
+    { category: 'potion', count: 1 },
+    { category: 'book', count: 1 },
+  ]},
+  // ── Small rooms (2+ cell wide) ──
+  { name: 'pantry', minSize: 2, weight: 4, props: [
+    { category: 'barrel', count: 2 },
+    { category: 'pot', count: 2 },
+    { category: 'torch_wall', count: 1 },
+    { category: 'box', count: 1 },
+  ]},
+  { name: 'cell', minSize: 2, weight: 3, props: [
+    { category: 'bench', count: 1 },
+    { category: 'torch_wall', count: 1 },
+    { category: 'pot', count: 1 },
+    { category: 'chest', count: 1 },
+  ]},
+  { name: 'vestibule', minSize: 2, weight: 3, props: [
+    { category: 'torch_wall', count: 2 },
+    { category: 'banner', count: 1 },
+    { category: 'signpost', count: 1 },
+  ]},
   // ── Library ──
   { name: 'library', minSize: 4, weight: 3, props: [
     { category: 'bookcase_large', count: 6 },
@@ -80,7 +114,7 @@ const ROOM_TEMPLATES: RoomTemplate[] = [
     { category: 'candelabrum_small', count: 2 },
     { category: 'torch_wall', count: 3 },
     { category: 'book', count: 4 },
-    { category: 'chest', count: 2 },
+    { category: 'chest', count: 1 },
   ]},
   // ── Study ──  (small library variant)
   { name: 'study', minSize: 3, weight: 2, props: [
@@ -95,12 +129,13 @@ const ROOM_TEMPLATES: RoomTemplate[] = [
   ]},
   // ── Barracks ──
   { name: 'barracks', minSize: 4, weight: 3, props: [
-    { category: 'bench', count: 3 },
+    { category: 'bench', count: 2 },
+    { category: 'bench_large', count: 1 },
     { category: 'barrel', count: 2 },
     { category: 'bookcase_small', count: 1 },
     { category: 'torch_wall', count: 3 },
     { category: 'banner', count: 3 },
-    { category: 'chest', count: 2 },
+    { category: 'chest', count: 1 },
   ]},
   // ── Crypt ──
   { name: 'crypt', minSize: 4, weight: 2, props: [
@@ -124,7 +159,7 @@ const ROOM_TEMPLATES: RoomTemplate[] = [
   ]},
   // ── Treasure Room ──
   { name: 'treasure', minSize: 3, weight: 2, props: [
-    { category: 'chest', count: 6 },
+    { category: 'chest', count: 4 },
     { category: 'candelabrum', count: 3 },
     { category: 'torch_wall', count: 3 },
     { category: 'banner', count: 2 },
@@ -148,7 +183,8 @@ const ROOM_TEMPLATES: RoomTemplate[] = [
     { category: 'altar', count: 1 },
     { category: 'candelabrum', count: 3 },
     { category: 'banner', count: 4 },
-    { category: 'bench', count: 3 },
+    { category: 'bench', count: 1 },
+    { category: 'bench_large', count: 2 },
     { category: 'torch_wall', count: 3 },
     { category: 'bookcase_small', count: 1 },
     { category: 'chest', count: 1 },
@@ -159,7 +195,7 @@ const ROOM_TEMPLATES: RoomTemplate[] = [
     { category: 'box', count: 3 },
     { category: 'pot', count: 2 },
     { category: 'torch_wall', count: 2 },
-    { category: 'chest', count: 2 },
+    { category: 'chest', count: 1 },
     { category: 'bookcase_small', count: 1 },
   ]},
   // ── Armory ──
@@ -169,7 +205,7 @@ const ROOM_TEMPLATES: RoomTemplate[] = [
     { category: 'bench', count: 2 },
     { category: 'banner', count: 3 },
     { category: 'torch_wall', count: 3 },
-    { category: 'chest', count: 2 },
+    { category: 'chest', count: 1 },
     { category: 'bookcase_small', count: 1 },
   ]},
   // ── Alchemy Lab ──
@@ -211,16 +247,17 @@ const ROOM_TEMPLATES: RoomTemplate[] = [
     { category: 'trap_spike', count: 3 },
     { category: 'pot', count: 3 },
     { category: 'torch_wall', count: 3 },
-    { category: 'chest', count: 2 },
+    { category: 'chest', count: 1 },
     { category: 'bookcase_small', count: 1 },
   ]},
   // ── Guard Post ──
   { name: 'guard', minSize: 3, weight: 3, props: [
-    { category: 'bench', count: 2 },
+    { category: 'bench', count: 1 },
+    { category: 'bench_large', count: 1 },
     { category: 'barrel', count: 2 },
     { category: 'torch_wall', count: 3 },
     { category: 'banner', count: 3 },
-    { category: 'chest', count: 2 },
+    { category: 'chest', count: 1 },
     { category: 'bookcase_small', count: 1 },
   ]},
   // ── Cellar ──
@@ -256,7 +293,7 @@ const ROOM_TEMPLATES: RoomTemplate[] = [
     { category: 'candelabrum', count: 3 },
     { category: 'torch_wall', count: 4 },
     { category: 'banner', count: 3 },
-    { category: 'chest', count: 2 },
+    { category: 'chest', count: 1 },
     { category: 'bookcase_large', count: 2 },
   ]},
   // ── Kitchen ──
@@ -276,7 +313,7 @@ const ROOM_TEMPLATES: RoomTemplate[] = [
     { category: 'candelabrum', count: 3 },
     { category: 'torch_wall', count: 3 },
     { category: 'table_small', count: 1 },
-    { category: 'chest', count: 2 },
+    { category: 'chest', count: 1 },
     { category: 'bookcase_large', count: 1 },
   ]},
 ];
@@ -290,6 +327,7 @@ const SURFACE_CATEGORIES: Record<string, number> = {
   'bookcase_small': 0.55,
   'bookcase_large': 0.85,
   'bench': 0.14,
+  'bench_large': 0.14,
   'altar': 0.6,
   'tomb': 0.25,
   'barrel': 0.22,
@@ -386,7 +424,6 @@ export class DungeonPropSystem {
   /** Attach a point light to a prop mesh if it's a light source (torch, candelabrum). */
   private attachLight(mesh: THREE.Mesh, entry: DungeonPropEntry): void {
     if (!entry.lightSource) return;
-    if (this.torchLights.length >= MAX_ACTIVE_LIGHTS) return;
     const isWallMount = entry.placement === 'wall_mount';
     // Vary color from reddish to yellow-orange
     const colors = [0xff6622, 0xff7733, 0xff8833, 0xff9944, 0xffaa44, 0xffbb55, 0xffcc66];
@@ -507,8 +544,8 @@ export class DungeonPropSystem {
         const minDim = Math.min(room.w, room.d);
         const eligible = ROOM_TEMPLATES.filter(t => t.minSize <= minDim);
         if (eligible.length === 0) continue;
-        // ~5% chance to leave a room empty (atmospheric)
-        if (rng.next() < 0.05) continue;
+        // ~2% chance to leave a room empty (atmospheric)
+        if (rng.next() < 0.02) continue;
         // Weighted pick
         const totalWeight = eligible.reduce((s, t) => s + t.weight, 0);
         let roll = rng.next() * totalWeight;
@@ -537,6 +574,12 @@ export class DungeonPropSystem {
         }
       }
 
+      // ~50% of rooms use a consistent wood style for all furniture
+      const WOOD_STYLES = ['a', 'b', 'c'];
+      const roomStyle: string | null = rng.next() < 0.5
+        ? WOOD_STYLES[Math.floor(rng.next() * WOOD_STYLES.length)]
+        : null;
+
       // Split props into 3 groups: chairs, small items, everything else
       const smallItems: { category: string; count: number }[] = [];
       const chairItems: { category: string; count: number }[] = [];
@@ -544,7 +587,7 @@ export class DungeonPropSystem {
       for (const item of propList) {
         if (SMALL_ITEM_CATEGORIES.has(item.category)) {
           smallItems.push(item);
-        } else if (item.category === 'chair' || item.category === 'bench') {
+        } else if (item.category === 'chair' || item.category === 'bench' || item.category === 'bench_large') {
           chairItems.push(item);
         } else {
           largeItems.push(item);
@@ -556,13 +599,15 @@ export class DungeonPropSystem {
       const surfaces: SurfaceSlot[] = [];
 
       // Track placed tables for chair placement
-      interface TableSlot { wx: number; wz: number; seatsUsed: number; maxSeats: number; isLarge: boolean }
+      interface TableSlot { wx: number; wz: number; seatsUsed: number; maxSeats: number; isLarge: boolean; woodStyle: string | null }
       const tables: TableSlot[] = [];
 
       // ── Pass 1: place furniture and large items ──
       for (const { category, count } of largeItems) {
         for (let i = 0; i < count; i++) {
-          const entry = getRandomProp(category, () => rng.next());
+          const entry = roomStyle
+            ? getRandomPropStyled(category, roomStyle, () => rng.next())
+            : getRandomProp(category, () => rng.next());
           if (!entry) continue;
 
           // ── Wall-mounted props (banners, wall torches) ──
@@ -683,6 +728,7 @@ export class DungeonPropSystem {
               seatsUsed: 0,
               maxSeats: entry.category === 'table_large' ? 4 : 2,
               isLarge: entry.category === 'table_large',
+              woodStyle: extractPropStyle(entry.id),
             });
           }
         }
@@ -691,18 +737,21 @@ export class DungeonPropSystem {
       // ── Pass 2: place chairs around tables (or against walls) ──
       for (const { category, count } of chairItems) {
         for (let i = 0; i < count; i++) {
-          const entry = getRandomProp(category, () => rng.next());
-          if (!entry) continue;
-
-          const geo = await loadPropGeo(entry, cellSize);
-          if (!geo) continue;
-
-          // Try to seat around a table
+          // Try to seat around a table — pick style-matched entry
           const availableTables = tables.filter(t => t.seatsUsed < t.maxSeats);
           if (availableTables.length > 0) {
             const table = availableTables[Math.floor(rng.next() * availableTables.length)];
             const seatIdx = table.seatsUsed;
             table.seatsUsed++;
+
+            // Pick chair/bench matching the table's wood style
+            const entry = table.woodStyle
+              ? getRandomPropStyled(category, table.woodStyle, () => rng.next())
+              : getRandomProp(category, () => rng.next());
+            if (!entry) continue;
+
+            const geo = await loadPropGeo(entry, cellSize);
+            if (!geo) continue;
 
             // Place at cardinal offsets around table, facing inward
             const dist = table.isLarge ? 0.45 : 0.35;
@@ -725,13 +774,21 @@ export class DungeonPropSystem {
             const dummyEntity = new Entity(mesh, { layer: Layer.Prop, radius: 0.01, weight: 0 });
             this.props.push({ mesh, entity: dummyEntity, entry, gridCell: { gx: 0, gz: 0 } });
           } else {
-            // No table — place against wall
+            // No table — place against wall (random style)
+            const entry = roomStyle
+              ? getRandomPropStyled(category, roomStyle, () => rng.next())
+              : getRandomProp(category, () => rng.next());
+            if (!entry) continue;
+
             const cell = this.findCell(
               { ...entry, placement: 'wall' } as any,
               room, occupied, openGrid, gridW,
             );
             if (!cell) continue;
             occupied.add(`${cell.gx},${cell.gz}`);
+
+            const geo = await loadPropGeo(entry, cellSize);
+            if (!geo) continue;
 
             const mesh = new THREE.Mesh(geo, voxMat.clone());
             mesh.position.set(toWorldX(cell.gx), getFloorY(cell.gx, cell.gz), toWorldZ(cell.gz));
@@ -787,7 +844,8 @@ export class DungeonPropSystem {
             const dummyEntity = new Entity(mesh, { layer: Layer.Prop, radius: 0.01, weight: 0 });
             this.props.push({ mesh, entity: dummyEntity, entry, gridCell: { gx: 0, gz: 0 } });
           } else {
-            // No surfaces available — place on floor as fallback
+            // No surfaces available — rarely place on floor (~10% chance)
+            if (rng.next() > 0.1) continue;
             const cell = this.findCell(entry, room, occupied, openGrid, gridW);
             if (!cell) continue;
 
@@ -936,21 +994,20 @@ export class DungeonPropSystem {
       }
     }
 
-    // Place wall torches/banners on ~30% of corridor wall cells
-    const corridorWallProps = ['torch_wall', 'torch_wall', 'banner']; // bias toward torches
+    // Place wall-mount props (torches, banners) on ~30% of corridor wall cells
+    const corridorMountProps = ['torch_wall', 'torch_wall', 'banner'];
     for (const cell of corridorWallCells) {
       if (occupied.has(`${cell.gx},${cell.gz}`)) continue;
       if (rng.next() > 0.3) continue;
 
-      const category = corridorWallProps[Math.floor(rng.next() * corridorWallProps.length)];
+      const category = corridorMountProps[Math.floor(rng.next() * corridorMountProps.length)];
       const entry = getRandomProp(category, () => rng.next());
       if (!entry) continue;
 
       const geo = await loadPropGeo(entry, cellSize);
       if (!geo) continue;
 
-      occupied.add(`${cell.gx},${cell.gz}`);
-
+      // wall_mount props don't occupy the floor cell
       const mesh = new THREE.Mesh(geo, voxMat.clone());
       const wx = toWorldX(cell.gx);
       const wz = toWorldZ(cell.gz);
@@ -971,6 +1028,63 @@ export class DungeonPropSystem {
 
       const dummyEntity = new Entity(mesh, { layer: Layer.Prop, radius: 0.01, weight: 0 });
       this.props.push({ mesh, entity: dummyEntity, entry, gridCell: { gx: cell.gx, gz: cell.gz } });
+    }
+
+    // Place floor-level wall props (barrels, crates, bookcases, etc.) on ~15% of corridor wall cells
+    const corridorFloorProps = [
+      'barrel', 'barrel', 'box', 'box', 'pot',
+      'bookcase_small', 'bench', 'chest',
+      'candelabrum', 'wall_grate',
+    ];
+    for (const cell of corridorWallCells) {
+      if (occupied.has(`${cell.gx},${cell.gz}`)) continue;
+      if (rng.next() > 0.15) continue;
+
+      const category = corridorFloorProps[Math.floor(rng.next() * corridorFloorProps.length)];
+      const entry = getRandomProp(category, () => rng.next());
+      if (!entry) continue;
+
+      const geo = await loadPropGeo(entry, cellSize, entry.category === 'chest');
+      if (!geo) continue;
+
+      occupied.add(`${cell.gx},${cell.gz}`);
+
+      const mesh = new THREE.Mesh(geo, voxMat.clone());
+      const wx = toWorldX(cell.gx);
+      const wz = toWorldZ(cell.gz);
+
+      // Face into corridor (away from wall)
+      mesh.rotation.y = WALL_ROT[cell.wallSide];
+      const push = WALL_PUSH[cell.wallSide];
+      const floorY = getFloorY(cell.gx, cell.gz);
+
+      if (entry.placement === 'wall_mount') {
+        // wall_grate etc — mount on wall surface
+        mesh.position.set(
+          wx + push[0] * cellSize * 0.5,
+          floorY + (entry.mountHeight ?? 0.5) * wallHeight - cellSize,
+          wz + push[1] * cellSize * 0.5,
+        );
+      } else {
+        // Floor-level: push against wall
+        mesh.position.set(
+          wx + push[0] * cellSize * 0.35,
+          floorY,
+          wz + push[1] * cellSize * 0.35,
+        );
+      }
+
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      this.parent.add(mesh);
+      this.attachLight(mesh, entry);
+
+      const propEntity = new Entity(mesh, {
+        layer: Layer.Prop,
+        radius: entry.radius * (entry.scalesWithDungeon ? cellSize : 1),
+        weight: Infinity,
+      });
+      this.props.push({ mesh, entity: propEntity, entry, gridCell: { gx: cell.gx, gz: cell.gz } });
     }
 
     // console.log(`[DungeonProps] Placed ${this.props.length} props in ${rooms.length} rooms + corridors`);
@@ -1100,8 +1214,35 @@ export class DungeonPropSystem {
       }
     }
 
-    // Fallback: any open cell — only for center/anywhere props (wall/corner/wall_mount should not float mid-room)
-    if (candidates.length === 0 && entry.placement !== 'wall' && entry.placement !== 'corner' && entry.placement !== 'wall_mount') {
+    // Fallback 1: wall props can also use corners (small rooms have mostly corners)
+    if (candidates.length === 0 && entry.placement === 'wall') {
+      for (let gz = room.z; gz < room.z + room.d; gz++) {
+        for (let gx = room.x; gx < room.x + room.w; gx++) {
+          if (!openGrid[gz * gridW + gx]) continue;
+          if (occupied.has(`${gx},${gz}`)) continue;
+          const atLeft = gx === room.x;
+          const atRight = gx === room.x + room.w - 1;
+          const atTop = gz === room.z;
+          const atBottom = gz === room.z + room.d - 1;
+          const isEdge = atLeft || atRight || atTop || atBottom;
+          if (!isEdge) continue;
+          const distN = gz - room.z;
+          const distS = (room.z + room.d - 1) - gz;
+          const distW = gx - room.x;
+          const distE = (room.x + room.w - 1) - gx;
+          const min = Math.min(distN, distS, distW, distE);
+          let wallSide: 'N' | 'S' | 'E' | 'W';
+          if (min === distN) wallSide = 'N';
+          else if (min === distS) wallSide = 'S';
+          else if (min === distW) wallSide = 'W';
+          else wallSide = 'E';
+          candidates.push({ gx, gz, wallSide });
+        }
+      }
+    }
+
+    // Fallback 2: any open cell — for center/anywhere/wall props that still couldn't find a spot
+    if (candidates.length === 0 && entry.placement !== 'corner' && entry.placement !== 'wall_mount') {
       for (let gz = room.z; gz < room.z + room.d; gz++) {
         for (let gx = room.x; gx < room.x + room.w; gx++) {
           if (!openGrid[gz * gridW + gx]) continue;

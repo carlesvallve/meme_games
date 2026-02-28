@@ -137,6 +137,123 @@ export function Toggle({ label, value, onChange }: { label: string; value: boole
   );
 }
 
+/* ── Multi-Select Dropdown ── */
+
+export function MultiSelect({ label, options, selected, allLabel = 'All', accent = '#6af', direction = 'down', onChange }: {
+  label: string;
+  options: { label: string; value: string }[];
+  selected: string[];
+  allLabel?: string;
+  accent?: string;
+  direction?: 'up' | 'down';
+  onChange: (selected: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('pointerdown', handler);
+    return () => document.removeEventListener('pointerdown', handler);
+  }, [open]);
+
+  const selectedSet = new Set(selected);
+  const allSelected = selected.length === 0;
+  const activeLabels = allSelected
+    ? [allLabel]
+    : options.filter(o => selectedSet.has(o.value)).map(o => o.label);
+  const summary = activeLabels.join(', ');
+
+  const toggle = (value: string) => {
+    if (selectedSet.has(value)) {
+      onChange(selected.filter(v => v !== value));
+    } else {
+      onChange([...selected, value]);
+    }
+  };
+
+  const toggleAll = () => {
+    onChange([]);
+  };
+
+  return (
+    <div ref={ref} style={{ position: 'relative', marginTop: 2 }}>
+      <div style={rowStyle}>
+        <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>{label}</span>
+        <button
+          onClick={() => setOpen(!open)}
+          style={{
+            flex: 1,
+            padding: '2px 6px',
+            background: 'rgba(255,255,255,0.08)',
+            color: '#ccc',
+            border: '1px solid rgba(255,255,255,0.2)',
+            borderRadius: 3,
+            cursor: 'pointer',
+            fontSize: 11,
+            textAlign: 'left',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {summary} ▾
+        </button>
+      </div>
+      {open && (
+        <div
+          style={{
+            position: 'absolute',
+            ...(direction === 'up'
+              ? { bottom: '100%', marginBottom: 2 }
+              : { top: '100%', marginTop: 2 }),
+            left: 90 + 6,
+            background: 'rgba(20,20,30,0.95)',
+            border: '1px solid rgba(255,255,255,0.2)',
+            borderRadius: 4,
+            padding: '4px 0',
+            zIndex: 10,
+            minWidth: 130,
+            maxHeight: 250,
+            overflowY: 'auto',
+          }}
+        >
+          <label
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              padding: '3px 10px', cursor: 'pointer',
+              color: allSelected ? '#fff' : '#888', fontSize: 11,
+              borderBottom: '1px solid rgba(255,255,255,0.1)', marginBottom: 2, paddingBottom: 5,
+            }}
+          >
+            <input type="checkbox" checked={allSelected} onChange={toggleAll} style={{ accentColor: accent }} />
+            {allLabel}
+          </label>
+          {options.map((opt) => {
+            const checked = selectedSet.has(opt.value);
+            return (
+              <label
+                key={opt.value}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  padding: '3px 10px', cursor: 'pointer',
+                  color: checked ? '#fff' : '#888', fontSize: 11,
+                }}
+              >
+                <input type="checkbox" checked={checked} onChange={() => toggle(opt.value)} style={{ accentColor: accent }} />
+                {opt.label}
+              </label>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ── Collision Layer Select ── */
 
 const LAYER_OPTIONS: { label: string; value: number }[] = [

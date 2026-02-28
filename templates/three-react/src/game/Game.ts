@@ -193,6 +193,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     (x, z) => terrain.getTerrainNormal(x, z),
     (x, z) => terrain.getTerrainY(x, z),
   );
+  goreSystem.setOpenCellCheck((wx, wz) => terrain.isOpenCell(wx, wz));
   if (usePropChestsOnly) {
     terrain.setPropChestRegistrar((list) => list.forEach(({ position, mesh, entity, openGeo }) => chestSystem.registerPropChest(position, mesh, entity, openGeo)));
     if (hmrReused) terrain.reregisterPropChests();
@@ -266,6 +267,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       (x, z) => terrain.getTerrainNormal(x, z),
       (x, z) => terrain.getTerrainY(x, z),
     );
+    goreSystem.setOpenCellCheck((wx, wz) => terrain.isOpenCell(wx, wz));
     chestSystem.dispose();
     lootSystem.dispose();
     collectibles.dispose();

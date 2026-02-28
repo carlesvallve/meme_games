@@ -1,5 +1,7 @@
+import { useMemo } from 'react';
 import { useGameStore, type EnemyParams } from '../../store';
-import { SettingsWindow, Section, Slider, Toggle, RangeSlider, resetBtnStyle } from './shared';
+import { SettingsWindow, Section, Slider, Toggle, RangeSlider, MultiSelect, resetBtnStyle } from './shared';
+import { getEnemyTypeGroups } from '../../game/character/VoxCharacterDB';
 
 const accent = '#f66';
 
@@ -9,11 +11,30 @@ export function EnemyPanel() {
   const setMelee = useGameStore((s) => s.setEnemyMeleeParam);
   const setRanged = useGameStore((s) => s.setEnemyRangedParam);
 
+  const enemyTypeOptions = useMemo(() => {
+    return getEnemyTypeGroups().map(g => ({ label: g.label, value: g.ids.join(',') }));
+  }, []);
+
   return (
     <SettingsWindow>
       <Section label="Spawn" accent={accent} first>
         <Slider label="Max Enemies" value={ep.maxEnemies} min={0} max={20} step={1} accent={accent} onChange={(v) => set('maxEnemies', v)} />
         <Slider label="Respawn Time" value={ep.spawnInterval} min={2} max={60} step={1} accent={accent} onChange={(v) => set('spawnInterval', v)} />
+        <MultiSelect
+          label="Types"
+          options={enemyTypeOptions}
+          selected={ep.allowedTypes.length === 0 ? [] : enemyTypeOptions.filter(o => {
+            const ids = o.value.split(',');
+            return ids.some(id => ep.allowedTypes.includes(id));
+          }).map(o => o.value)}
+          allLabel="All Types"
+          accent={accent}
+          onChange={(sel) => {
+            // Flatten selected group values (comma-separated ids) into a flat array
+            const ids = sel.flatMap(v => v.split(','));
+            set('allowedTypes', ids);
+          }}
+        />
       </Section>
 
       <Section label="Behaviour" accent={accent}>

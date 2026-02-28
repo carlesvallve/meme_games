@@ -135,28 +135,25 @@ export class LootSystem {
         item.mesh.position.y += item.vel.y * dt;
         item.mesh.position.z += item.vel.z * dt;
 
-        // Wall bounce — only check large debris boxes (walls), skip small prop colliders
-        if (item.age > 0.1) {
+        // Wall containment — reject movement into structural wall cells (ignores props)
+        {
           const newX = item.mesh.position.x;
           const newZ = item.mesh.position.z;
-          const itemY = item.mesh.position.y;
-          const debris = this.terrain.getDebris();
-          for (const box of debris) {
-            if (box.halfW < 0.15 || box.halfD < 0.15) continue; // skip prop debris
-            if (itemY > box.height) continue; // above the wall
-            const relX = newX - box.x;
-            const relZ = newZ - box.z;
-            if (Math.abs(relX) < box.halfW && Math.abs(relZ) < box.halfD) {
-              const overlapX = box.halfW - Math.abs(relX);
-              const overlapZ = box.halfD - Math.abs(relZ);
-              if (overlapX < overlapZ) {
-                item.mesh.position.x = oldX;
-                item.vel.x *= -0.4;
-              } else {
-                item.mesh.position.z = oldZ;
-                item.vel.z *= -0.4;
-              }
-              break;
+          if (!this.terrain.isOpenCell(newX, newZ)) {
+            // Try X-only and Z-only to allow sliding along walls
+            const openX = this.terrain.isOpenCell(newX, oldZ);
+            const openZ = this.terrain.isOpenCell(oldX, newZ);
+            if (openX && !openZ) {
+              item.mesh.position.z = oldZ;
+              item.vel.z *= -0.3;
+            } else if (openZ && !openX) {
+              item.mesh.position.x = oldX;
+              item.vel.x *= -0.3;
+            } else {
+              item.mesh.position.x = oldX;
+              item.mesh.position.z = oldZ;
+              item.vel.x *= -0.3;
+              item.vel.z *= -0.3;
             }
           }
         }

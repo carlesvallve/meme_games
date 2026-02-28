@@ -61,6 +61,7 @@ export function CharacterSelect() {
           width: '90%',
           maxHeight: '60vh',
           overflowY: 'auto',
+          padding: 6,
         }}
       >
         {slots.map((slot) => {

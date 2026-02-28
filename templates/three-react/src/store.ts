@@ -33,6 +33,8 @@ export interface EnemyParams {
   maxEnemies: number;
   /** Seconds between wave-spawn attempts once initial enemies are placed. */
   spawnInterval: number;
+  /** Allowed enemy type IDs (empty = all). */
+  allowedTypes: string[];
 }
 
 export const DEFAULT_ENEMY_PARAMS: EnemyParams = {
@@ -48,6 +50,7 @@ export const DEFAULT_ENEMY_PARAMS: EnemyParams = {
   playerDamage: 2,
   maxEnemies: 6,
   spawnInterval: 12,
+  allowedTypes: [],
 };
 
 export interface ParticleToggles {

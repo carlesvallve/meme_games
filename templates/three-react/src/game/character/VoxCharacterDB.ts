@@ -377,6 +377,30 @@ export const VOX_ENEMIES: VoxCharEntry[] = [
 
 export const ALL_VOX_CHARACTERS: VoxCharEntry[] = [...VOX_HEROES, ...VOX_ENEMIES];
 
+/** Get the enemy pool filtered by allowed types. Empty allowedTypes = all. */
+export function getFilteredEnemies(allowedTypes: string[]): VoxCharEntry[] {
+  if (allowedTypes.length === 0) return VOX_ENEMIES;
+  const set = new Set(allowedTypes);
+  return VOX_ENEMIES.filter(e => set.has(e.id));
+}
+
+/** Unique enemy type groups (base archetype → ids). E.g. 'blob' → ['blob_a_green','blob_b_blue',...] */
+export function getEnemyTypeGroups(): { label: string; ids: string[] }[] {
+  const groups = new Map<string, { label: string; ids: string[] }>();
+  for (const e of VOX_ENEMIES) {
+    // Use the same archetype extraction as the personality system
+    const archetype = getArchetype(e.name);
+    let group = groups.get(archetype);
+    if (!group) {
+      const label = archetype.charAt(0).toUpperCase() + archetype.slice(1);
+      group = { label, ids: [] };
+      groups.set(archetype, group);
+    }
+    group.ids.push(e.id);
+  }
+  return [...groups.values()];
+}
+
 export function getRandomVoxChar(): VoxCharEntry {
   return ALL_VOX_CHARACTERS[Math.floor(Math.random() * ALL_VOX_CHARACTERS.length)];
 }
