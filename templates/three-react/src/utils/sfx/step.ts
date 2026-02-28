@@ -48,3 +48,31 @@ export function sfxLand(ctx: AudioContext, dest: AudioNode = ctx.destination): v
   const freq = BASE_FREQ * (0.85 + Math.random() * 0.3);
   playTone(ctx, freq, 0.07, 'sine', 0.07, dest);
 }
+
+/** Wing flap — short filtered noise burst with pitch sweep */
+export function sfxFly(ctx: AudioContext, dest: AudioNode = ctx.destination): void {
+  const duration = 0.08 + Math.random() * 0.04;
+  const bufferSize = Math.floor(ctx.sampleRate * duration);
+  const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < bufferSize; i++) {
+    data[i] = (Math.random() * 2 - 1);
+  }
+  const source = ctx.createBufferSource();
+  source.buffer = buffer;
+
+  const filter = ctx.createBiquadFilter();
+  filter.type = 'bandpass';
+  filter.frequency.setValueAtTime(800 + Math.random() * 400, ctx.currentTime);
+  filter.frequency.linearRampToValueAtTime(200, ctx.currentTime + duration);
+  filter.Q.value = 1.5;
+
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.06, ctx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
+
+  source.connect(filter);
+  filter.connect(gain);
+  gain.connect(dest);
+  source.start();
+}

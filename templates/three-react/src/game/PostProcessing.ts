@@ -182,18 +182,23 @@ export class PostProcessStack {
   /**
    * Fade screen to black, call `onBlack` when fully dark, hold black until `releaseFade()`.
    * @param onBlack — called at the midpoint (screen is black). Call `releaseFade()` when ready to fade in.
-   * @param speed — fade speed (default 3.0, higher = faster)
+   * @param fadeOutSpeed — fade-out speed (default 3.0, higher = faster)
+   * @param fadeInSpeed — fade-in speed (default same as fadeOutSpeed)
    */
-  fadeTransition(onBlack: () => void, speed = 3.0): void {
-    this.fadeSpeed = speed;
+  fadeTransition(onBlack: () => void, fadeOutSpeed = 3.0, fadeInSpeed?: number): void {
+    this.fadeSpeed = fadeOutSpeed;
+    this._fadeInSpeed = fadeInSpeed ?? fadeOutSpeed;
     this.fadeTarget = 0;
     this.fadeCallback = onBlack;
     this.fadeHolding = false;
   }
 
+  private _fadeInSpeed = 3.0;
+
   /** Release the fade hold — starts the fade-in from black. */
   releaseFade(): void {
     this.fadeHolding = false;
+    this.fadeSpeed = this._fadeInSpeed;
     this.fadeTarget = 1;
   }
 
@@ -223,9 +228,9 @@ export class PostProcessStack {
       this.fadeValue = 0;
       const cb = this.fadeCallback;
       this.fadeCallback = null;
-      cb();
-      // Hold black until releaseFade() is called
+      // Hold black until releaseFade() is called (set before cb so cb can release immediately)
       this.fadeHolding = true;
+      cb();
     }
 
     // Update shader uniforms

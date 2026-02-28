@@ -165,18 +165,24 @@ export class Character implements BehaviorAgent {
   }
 
   // ── CombatOwner adapter ─────────────────────────────────────────
+  private _combatOwner: CombatOwner | null = null;
   private get combatOwner(): CombatOwner {
-    return {
-      mesh: this.mesh,
-      groundY: this.groundY,
-      isEnemy: this.isEnemy,
-      params: this.params,
-      terrain: this.terrain,
-      playActionAnim: () => this.playActionAnim(),
-      getActionFrameCount: () => this.animator.getActionFrameCount(),
-      getVoxAnimState: () => this.animator.getVoxAnimState(),
-      getVoxFrameIndex: () => this.animator.getVoxFrameIndex(),
-    };
+    if (!this._combatOwner) {
+      const self = this;
+      this._combatOwner = {
+        mesh: this.mesh,
+        get groundY() { return self.groundY; },
+        set groundY(v: number) { self.groundY = v; },
+        isEnemy: this.isEnemy,
+        params: this.params,
+        terrain: this.terrain,
+        playActionAnim: () => this.playActionAnim(),
+        getActionFrameCount: () => this.animator.getActionFrameCount(),
+        getVoxAnimState: () => this.animator.getVoxAnimState(),
+        getVoxFrameIndex: () => this.animator.getVoxFrameIndex(),
+      };
+    }
+    return this._combatOwner;
   }
 
   // ── BehaviorAgent interface ──────────────────────────────────────
@@ -195,7 +201,13 @@ export class Character implements BehaviorAgent {
     const stepMode = this.getStepMode();
 
     if (stepMode === 'flyer') {
-      if (currentHopHalf !== this.lastHopHalf) this.lastHopHalf = currentHopHalf;
+      if (currentHopHalf !== this.lastHopHalf && this.footSfxTimer >= FOOT_SFX_COOLDOWN) {
+        this.lastHopHalf = currentHopHalf;
+        this.footSfxTimer = 0;
+        audioSystem.sfxAt('fly', this.mesh.position.x, this.mesh.position.z, this.isEnemy ? 0.25 : 0.5);
+      } else if (currentHopHalf !== this.lastHopHalf) {
+        this.lastHopHalf = currentHopHalf;
+      }
       return currentHopHalf;
     }
     if (stepMode === 'walker' && currentHopHalf !== this.lastHopHalf && this.footSfxTimer >= FOOT_SFX_COOLDOWN) {
@@ -272,9 +284,9 @@ export class Character implements BehaviorAgent {
   // ── Update ───────────────────────────────────────────────────────
 
   update(dt: number): void {
-    if (!this.isAlive) return;
-
     this.updateCombat(dt);
+
+    if (!this.isAlive) return;
 
     if (this.stunTimer > 0) {
       this.updateVisualY(dt);
@@ -335,8 +347,10 @@ export class Character implements BehaviorAgent {
       if (len > 0.001) { effDx /= len; effDz /= len; }
     }
 
-    const newX = oldX + effDx * speed * dt;
-    const newZ = oldZ + effDz * speed * dt;
+    // Slow down on stairs for smoother traversal
+    const effSpeed = this.terrain.isOnStairs(oldX, oldZ) ? speed * 0.5 : speed;
+    const newX = oldX + effDx * effSpeed * dt;
+    const newZ = oldZ + effDz * effSpeed * dt;
 
     const resolved = this.terrain.resolveMovement(newX, newZ, this.groundY, stepHeight, capsuleRadius, oldX, oldZ, slopeHeight);
     this.mesh.position.x = resolved.x;
@@ -427,12 +441,12 @@ export class Character implements BehaviorAgent {
     return this.combat.consumeJustTookDamage();
   }
 
-  takeDamage(amount: number, fromX: number, fromZ: number): boolean {
-    return this.combat.takeDamage(this.combatOwner, amount, fromX, fromZ);
+  takeDamage(amount: number, fromX: number, fromZ: number, knockback: number): boolean {
+    return this.combat.takeDamage(this.combatOwner, amount, fromX, fromZ, knockback);
   }
 
-  startAttack(): boolean {
-    return this.combat.startAttack(this.combatOwner);
+  startAttack(exhaustionEnabled = false): boolean {
+    return this.combat.startAttack(this.combatOwner, exhaustionEnabled);
   }
 
   isInAttackHitWindow(): boolean {

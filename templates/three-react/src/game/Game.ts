@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { useGameStore, DEFAULT_CAMERA_PARAMS, DEFAULT_LIGHT_PRESET, DEFAULT_TORCH_PARAMS, DEFAULT_PARTICLE_TOGGLES, DEFAULT_SCENE_SETTINGS } from '../store';
+import { useGameStore, DEFAULT_CAMERA_PARAMS, DEFAULT_LIGHT_PRESET, DEFAULT_TORCH_PARAMS, DEFAULT_PARTICLE_TOGGLES, DEFAULT_SCENE_SETTINGS, DEFAULT_ENEMY_PARAMS } from '../store';
 import { DEFAULT_CHARACTER_PARAMS } from './character';
 import { Input } from './Input';
 import { Camera } from './Camera';
@@ -241,6 +241,8 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     presetOverride?: TerrainPreset;
     /** Dungeon theme override */
     themeOverride?: string;
+    /** Character type to spawn (used on restart after death) */
+    character?: CharacterType;
   }
 
   /** Wipe terrain + all dependent systems and rebuild from current store settings */
@@ -248,7 +250,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     console.log(`[Regen] start — seed=${opts.seed}, spawnAt=${opts.spawnAt}, snapshot=${!!opts.snapshot}, theme=${opts.themeOverride ?? 'auto'}`);
     activeCharacter = null;
     debugLadderIndex = -1;
-    if (!opts.spawnAt) rerollRoster(); // only randomize roster on full regen, not floor transitions
+    // Roster is rerolled in onStartGame when showing the select screen
     exitTriggered = false;
     portalCooldown = 0;
     pendingSnapshot = opts.snapshot ?? null;
@@ -320,39 +322,41 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
 
     // When props finish loading, reposition character to precise entrance/exit
     const spawnAtCapture = opts.spawnAt;
-    if (usePropChestsOnlyRegen && spawnAtCapture) {
+    if (usePropChestsOnlyRegen) {
       // Dungeon ready (layout + props + portals all placed) — reposition, visibility, fade in
       terrain.setOnDungeonReady(() => {
         if (!activeCharacter) return;
         console.log('[DungeonReady] all placements done');
 
-        // Reposition character to portal entrance/exit
-        const pos = spawnAtCapture === 'exit'
-          ? terrain.getExitPosition()
-          : terrain.getEntrancePosition();
-        if (pos) {
-          console.log(`[DungeonReady] spawn at ${spawnAtCapture} (${pos.x.toFixed(2)}, ${pos.z.toFixed(2)})`);
-          const y = terrain.getTerrainY(pos.x, pos.z);
-          activeCharacter.mesh.position.set(pos.x, y, pos.z);
-          activeCharacter.groundY = y;
-          activeCharacter.visualGroundY = y;
-          portalCooldown = 1.0;
-        } else {
-          // Fallback: use current position
-          const charPos = activeCharacter.getPosition();
-          const y = terrain.getTerrainY(charPos.x, charPos.z);
-          activeCharacter.mesh.position.y = y;
-          activeCharacter.groundY = y;
-          activeCharacter.visualGroundY = y;
-        }
+        // Reposition character to portal entrance/exit (floor transitions only)
+        if (spawnAtCapture) {
+          const pos = spawnAtCapture === 'exit'
+            ? terrain.getExitPosition()
+            : terrain.getEntrancePosition();
+          if (pos) {
+            console.log(`[DungeonReady] spawn at ${spawnAtCapture} (${pos.x.toFixed(2)}, ${pos.z.toFixed(2)})`);
+            const y = terrain.getTerrainY(pos.x, pos.z);
+            activeCharacter.mesh.position.set(pos.x, y, pos.z);
+            activeCharacter.groundY = y;
+            activeCharacter.visualGroundY = y;
+            portalCooldown = 1.0;
+          } else {
+            // Fallback: use current position
+            const charPos = activeCharacter.getPosition();
+            const y = terrain.getTerrainY(charPos.x, charPos.z);
+            activeCharacter.mesh.position.y = y;
+            activeCharacter.groundY = y;
+            activeCharacter.visualGroundY = y;
+          }
 
-        // Update facing from prop system
-        if (spawnAtCapture === 'exit') {
-          const exitWallDir = terrain.getExitWallDir();
-          activeCharacter.setFacing(Math.atan2(-exitWallDir[0], -exitWallDir[1]));
-        } else {
-          const entranceFacing = terrain.getEntranceFacing();
-          if (entranceFacing) activeCharacter.setFacing(entranceFacing);
+          // Update facing from prop system
+          if (spawnAtCapture === 'exit') {
+            const exitWallDir = terrain.getExitWallDir();
+            activeCharacter.setFacing(Math.atan2(-exitWallDir[0], -exitWallDir[1]));
+          } else {
+            const entranceFacing = terrain.getEntranceFacing();
+            if (entranceFacing) activeCharacter.setFacing(entranceFacing);
+          }
         }
 
         // Run room visibility so only spawn room is shown
@@ -391,10 +395,18 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       });
     }
 
-    // Keep current character on floor transition, randomize on full regeneration
+    // Keep current character on floor transition; on full regen use provided or previously selected character
     if (!opts.spawnAt) {
-      const slots = getSlots();
-      lastSelectedCharacter = slots[Math.floor(Math.random() * slots.length)];
+      if (opts.character) {
+        // Death restart / explicit selection: use the character the player picked
+        lastSelectedCharacter = opts.character;
+      }
+      // If no character specified and none previously selected, go to select screen
+      if (!lastSelectedCharacter) {
+        rerollRoster();
+        useGameStore.getState().setPhase('select');
+        return;
+      }
       useGameStore.getState().selectCharacter(lastSelectedCharacter);
     }
     spawnCharacters(lastSelectedCharacter!, opts.spawnAt);
@@ -402,8 +414,8 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     // activeCharacter is set by spawnCharacters() above (TS can't track closure mutation)
     const spawnedChar = activeCharacter as Character | null;
 
-    // Hide character during floor transitions until dungeon is ready
-    if (usePropChestsOnlyRegen && opts.spawnAt && spawnedChar) {
+    // Always hide character until terrain/props are ready
+    if (spawnedChar) {
       spawnedChar.mesh.visible = false;
     }
 
@@ -414,9 +426,16 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       cam.snapToTarget();
     }
 
-    // If no props to wait for (non-voxel or no floor transition), release fade immediately
-    if (!usePropChestsOnlyRegen || !opts.spawnAt) {
+    // voxelDungeon: character + fade handled by onDungeonReady callback
+    // Everything else: show character after one frame so terrain renders first
+    if (!usePropChestsOnlyRegen) {
       postProcess.releaseFade();
+      if (spawnedChar) {
+        const charToShow = spawnedChar;
+        requestAnimationFrame(() => {
+          charToShow.mesh.visible = true;
+        });
+      }
     }
 
     console.log(`[Regen] done — floor=${useGameStore.getState().floor}, preset=${opts.presetOverride ?? useGameStore.getState().terrainPreset}`);
@@ -590,7 +609,6 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       p.attackDamage = pp.attackDamage;
       p.attackCooldown = pp.attackCooldown;
       p.chaseRange = pp.chaseRange;
-      p.knockbackSpeed = pp.knockbackSpeed;
       p.knockbackDecay = pp.knockbackDecay;
       p.invulnDuration = pp.invulnDuration;
       p.flashDuration = pp.flashDuration;
@@ -644,6 +662,20 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
         if ((h.object as THREE.Mesh).isMesh && h.object.type === 'Mesh' && !h.object.userData.collisionOnly) {
           hitPoint = h.point;
           break;
+        }
+      }
+    }
+
+    // Voxel dungeon: raycast visible ground/stair meshes in terrain group
+    if (!hitPoint) {
+      const terrainGroup = terrain.getGroup();
+      if (terrainGroup.children.length > 0) {
+        const groupHits = raycaster.intersectObject(terrainGroup, true);
+        for (const h of groupHits) {
+          if ((h.object as THREE.Mesh).isMesh && h.object.visible && !h.object.userData.collisionOnly && !h.object.userData.isWall) {
+            hitPoint = h.point;
+            break;
+          }
         }
       }
     }
@@ -826,6 +858,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     for (const char of characters) char.dispose();
     characters = [];
     activeCharacter = null;
+    deathTriggered = false;
     inventories.clear();
 
     const ladderDefs = terrain.getLadderDefs();
@@ -920,7 +953,19 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     if (pendingSnapshot && pendingSnapshot.enemies.length > 0) {
       enemySystem.restoreEnemies(pendingSnapshot.enemies);
     } else {
-      enemySystem.spawnEnemies(DEFAULT_SCENE_SETTINGS.enemyCount);
+      const isDungeon = terrain.preset === 'dungeon' || terrain.preset === 'rooms' || terrain.preset === 'voxelDungeon';
+      const cap = useGameStore.getState().enemyParams.maxEnemies;
+      const maxEnemies = isDungeon
+        ? Math.min(Math.max(2, Math.floor(terrain.getRoomCount() * 0.6)), cap)
+        : cap;
+      // Spawn ~half upfront, let the rest trickle in via wave spawning
+      const initialCount = Math.max(1, Math.floor(maxEnemies * 0.5));
+      if (maxEnemies > 0) {
+        enemySystem.spawnEnemies(initialCount);
+        if (maxEnemies > initialCount) {
+          enemySystem.enableWaveSpawning(maxEnemies, useGameStore.getState().enemyParams.spawnInterval);
+        }
+      }
     }
     // Hide enemies until room visibility processes them
     if (terrain.getRoomVisibility()) {
@@ -933,8 +978,19 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   // Store callbacks
   useGameStore.setState({
     onStartGame: () => {
+      const wasPlayerDead = useGameStore.getState().phase === 'player_dead' ||
+        (activeCharacter && !activeCharacter.isAlive);
+      rerollRoster();
       useGameStore.getState().setPhase('select');
       audioSystem.init();
+      if (wasPlayerDead) {
+        // Reset so re-picking the same character triggers spawnCharacters
+        lastSelectedCharacter = null;
+        useGameStore.setState({ selectedCharacter: null });
+        useGameStore.getState().clearLevelCache();
+        useGameStore.getState().setCurrentTheme('');
+        useGameStore.getState().setFloor(1);
+      }
     },
     onPauseToggle: () => {
       const phase = useGameStore.getState().phase;
@@ -948,11 +1004,15 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       useGameStore.getState().onStartGame?.();
     },
     onRegenerateScene: () => {
-      // Full regeneration: new seed, clear all cached levels, reset to floor 1
-      useGameStore.getState().clearLevelCache();
-      useGameStore.getState().setFloor(1);
-      const seed = useGameStore.getState().getFloorSeed(1);
-      regenerateScene({ seed });
+      // Full regeneration: instant black, new seed, clear all cached levels, reset to floor 1
+      speechSystem.dismissAll();
+      postProcess.fadeTransition(() => {
+        useGameStore.getState().clearLevelCache();
+        useGameStore.getState().setCurrentTheme('');
+        useGameStore.getState().setFloor(1);
+        const seed = useGameStore.getState().getFloorSeed(1);
+        regenerateScene({ seed });
+      }, 9999, 3.0);
     },
     onRemesh: () => {
       terrain.remesh();
@@ -992,6 +1052,12 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
         store.setTorchParam(key, td[key]);
       }
     },
+    onSpawnEnemy: () => {
+      if (enemySystem) enemySystem.spawnEnemies(1);
+    },
+    onResetEnemyParams: () => {
+      useGameStore.setState({ enemyParams: { ...DEFAULT_ENEMY_PARAMS } });
+    },
     onResetSceneParams: () => {
       const d = DEFAULT_SCENE_SETTINGS;
       const store = useGameStore.getState();
@@ -1028,6 +1094,23 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     hitstopTimer = Math.max(hitstopTimer, duration);
   }
 
+  /** Fire player death effects (gore, loot, hide body) then go to character select after a delay. */
+  let deathTriggered = false;
+  function triggerPlayerDeath(playerChar: Character): void {
+    if (deathTriggered) return;
+    deathTriggered = true;
+    useGameStore.getState().setPhase('player_dead');
+    const pos = playerChar.mesh.position.clone();
+    goreSystem.spawnGore(playerChar.mesh, playerChar.groundY, []);
+    lootSystem.spawnLoot(pos);
+    audioSystem.sfxAt('death', pos.x, pos.z);
+    playerChar.hideBody();
+    // Brief pause to see the gore, then straight to character select
+    setTimeout(() => {
+      useGameStore.getState().onStartGame?.();
+    }, 1500);
+  }
+
   function update(dt: number): void {
     // Fade transition: freeze gameplay while screen is black (holding or fading out)
     if (postProcess.isFadingOut) {
@@ -1049,9 +1132,8 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
 
     // TAB: snap camera behind active character
     if (cachedInputState.cameraSnap && activeCharacter) {
-      // Character facing is the direction the mesh looks; camera should orbit to behind
-      const behindAngle = activeCharacter.facing + Math.PI;
-      cam.snapBehind(behindAngle);
+      // Character facing is the direction the mesh looks; camera orbits behind
+      cam.snapBehind(activeCharacter.facing);
     }
 
     if (cachedInputState.pause && (phase === 'playing' || phase === 'paused')) {
@@ -1059,11 +1141,19 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       return;
     }
 
-    // Check for character selection
+    // Check for character selection — regenerate scene on new game after death
     const selected = useGameStore.getState().selectedCharacter;
     if (selected && selected !== lastSelectedCharacter) {
+      const needsRegen = activeCharacter && !activeCharacter.isAlive;
       lastSelectedCharacter = selected;
-      spawnCharacters(selected);
+      if (needsRegen) {
+        postProcess.fadeTransition(() => {
+          const seed = useGameStore.getState().getFloorSeed(1);
+          regenerateScene({ seed, character: selected });
+        }, 9999, 3.0);
+      } else {
+        spawnCharacters(selected);
+      }
     }
 
     if ((phase === 'playing' || phase === 'player_dead') && activeCharacter) {
@@ -1106,7 +1196,8 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
             // Too close to architecture — block the shot
           } else {
             // Ranged: play attack anim + fire from muzzle (spawn point)
-            playerChar.startAttack();
+            const rangedP = useGameStore.getState().characterParams.ranged;
+            playerChar.startAttack(rangedP.exhaustionEnabled);
             const spawnX = pos.x + faceDirX * muzzle.forward;
             const spawnY = playerChar.groundY + muzzle.up;
             const spawnZ = pos.z + faceDirZ * muzzle.forward;
@@ -1122,19 +1213,25 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
               ],
               terrain.getOpenDoorObjects(),
               muzzle.up,
+              rangedP.autoTarget,
+              rangedP.knockback,
             );
           }
         } else {
           // Melee: auto-aim snap toward nearest enemy, then attack
-          if (enemySystem) {
+          const meleeP = useGameStore.getState().characterParams;
+          if (enemySystem && meleeP.melee.autoTarget) {
             const pos = playerChar.getPosition();
             const aimTarget = findMeleeAimTarget(pos.x, pos.z, playerChar.facing, enemySystem.getEnemies());
             if (aimTarget !== null) {
               playerChar.facing = aimTarget;
-              playerChar.mesh.rotation.y = aimTarget;
+              // Grid mode: snap visual rotation to nearest 8-direction
+              playerChar.mesh.rotation.y = meleeP.movementMode === 'grid'
+                ? Math.round(aimTarget / (Math.PI / 4)) * (Math.PI / 4)
+                : aimTarget;
             }
           }
-          playerChar.startAttack();
+          playerChar.startAttack(meleeP.melee.exhaustionEnabled);
         }
       }
 
@@ -1166,19 +1263,15 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
 
       // Enemy system
       if (enemySystem) {
-        const showSlashEffect = useGameStore.getState().characterParams.showSlashEffect;
+        const showSlashEffect = useGameStore.getState().characterParams.melee.showSlashEffect;
         enemySystem.update(dt, playerChar,
           (damage) => {
             const s = useGameStore.getState();
+            if (s.phase === 'player_dead') return; // already dead
             const newHp = Math.max(0, s.hp - damage);
             s.setHP(newHp, s.maxHp);
             if (newHp <= 0) {
-              s.setPhase('player_dead');
-              const pos = playerChar.mesh.position.clone();
-              goreSystem.spawnGore(playerChar.mesh, playerChar.groundY, []);
-              lootSystem.spawnLoot(pos);
-              audioSystem.sfxAt('death', pos.x, pos.z);
-              playerChar.hideBody();
+              triggerPlayerDeath(playerChar);
             }
           },
           () => {
@@ -1187,6 +1280,11 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
           },
           showSlashEffect,
         );
+      }
+
+      // Safety net: detect player death even if callback didn't fire
+      if (!playerChar.isAlive && phase === 'playing') {
+        triggerPlayerDeath(playerChar);
       }
 
       // Hide entities in non-visible rooms
@@ -1214,7 +1312,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
           // VFX: damage number + hit sparks
           enemySystem!.spawnDamageNumber(info.x, info.y, info.z, info.damage);
           enemySystem!.spawnHitSparks(info.x, info.y, info.z, info.dirX, info.dirZ);
-          enemySystem!.spawnBloodSplash(info.x, info.y, info.z, info.enemy.groundY);
+          enemySystem!.spawnBloodSplash(info.x, info.y, info.z, info.enemy.groundY, activeCharacter ?? undefined);
           audioSystem.sfxAt('fleshHit', info.x, info.z);
 
           // Impact feel

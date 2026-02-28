@@ -7,6 +7,26 @@
 
 export type MovementMode = 'free' | 'grid';
 
+export interface MeleeParams {
+  /** Auto-target nearest enemy (snap facing toward target). */
+  autoTarget: boolean;
+  /** Knockback impulse speed inflicted on hit. */
+  knockback: number;
+  /** Show slash arc VFX on attacks. */
+  showSlashEffect: boolean;
+  /** Whether combo exhaustion is enabled. */
+  exhaustionEnabled: boolean;
+}
+
+export interface RangedParams {
+  /** Auto-target nearest enemy in forward cone. */
+  autoTarget: boolean;
+  /** Knockback impulse speed inflicted on hit. */
+  knockback: number;
+  /** Whether combo exhaustion is enabled. */
+  exhaustionEnabled: boolean;
+}
+
 export interface MovementParams {
   speed: number;
   stepHeight: number;
@@ -26,8 +46,6 @@ export interface MovementParams {
   attackCooldown: number;
   /** Chase/aggro range for AI (units). */
   chaseRange: number;
-  /** Knockback impulse speed when hit. */
-  knockbackSpeed: number;
   /** Knockback velocity decay rate (exp(-knockbackDecay * dt)). */
   knockbackDecay: number;
   /** Invulnerability duration after hit (seconds). */
@@ -46,10 +64,10 @@ export interface MovementParams {
   magnetRadius: number;
   /** Loot/collectible magnet pull speed. */
   magnetSpeed: number;
-  /** Whether combo exhaustion is enabled. */
-  exhaustionEnabled: boolean;
-  /** Whether to show slash arc VFX on melee attacks. */
-  showSlashEffect: boolean;
+  /** Melee combat settings. */
+  melee: MeleeParams;
+  /** Ranged combat settings. */
+  ranged: RangedParams;
 }
 
 /** Default params for any character. Override only what you need (e.g. enemies). */
@@ -69,7 +87,6 @@ export const DEFAULT_CHARACTER_PARAMS: MovementParams = {
   attackDamage: 1,
   attackCooldown: 0,
   chaseRange: 0,
-  knockbackSpeed: 1.5,
   knockbackDecay: 14,
   invulnDuration: 0.8,
   flashDuration: 0.15,
@@ -80,8 +97,9 @@ export const DEFAULT_CHARACTER_PARAMS: MovementParams = {
   // loot / VFX
   magnetRadius: 1,
   magnetSpeed: 16,
-  exhaustionEnabled: false,
-  showSlashEffect: true,
+  // combat modes
+  melee: { autoTarget: true, knockback: 5, showSlashEffect: true, exhaustionEnabled: false },
+  ranged: { autoTarget: true, knockback: 2.5, exhaustionEnabled: false },
 };
 
 // ── Physics ─────────────────────────────────────────────────────────────
@@ -100,8 +118,8 @@ export const FOOT_SFX_COOLDOWN = 0.12;
 /** Frame rates per animation type */
 export const VOX_FPS: Record<string, number> = {
   idle: 2.5,
-  walk: 9,
-  action: 9,
+  walk: 8,
+  action: 8,
 };
 
 /** Default hop frequency (hops per second while walking) */

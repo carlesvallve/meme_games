@@ -4,7 +4,7 @@ import { sfxDamage } from './sfx/damage';
 import { sfxScore } from './sfx/score';
 import { sfxStart } from './sfx/start';
 import { sfxDeath } from './sfx/death';
-import { sfxStep, sfxStepStop, sfxLand } from './sfx/step';
+import { sfxStep, sfxStepStop, sfxLand, sfxFly } from './sfx/step';
 import { sfxPickup } from './sfx/pickup';
 import { sfxCoin } from './sfx/coin';
 import { sfxChest } from './sfx/chest';
@@ -119,7 +119,7 @@ class AudioSystemClass {
     if (!ctx) return;
 
     // Step and land use intensity as volume scale (e.g. enemy steps pass 0.03 for quieter)
-    const effectiveVolume = (type === 'step' || type === 'land') ? volume * intensity : volume;
+    const effectiveVolume = (type === 'step' || type === 'land' || type === 'fly') ? volume * intensity : volume;
     const dest = effectiveVolume < 0.99 ? this.createAttenuatedDest(ctx, effectiveVolume) : ctx.destination;
 
     try {
@@ -135,6 +135,7 @@ class AudioSystemClass {
         case 'chest':  sfxChest(ctx, dest); break;
         case 'thud':   sfxThud(ctx, intensity, bounceCount, dest); break;
         case 'land':     sfxLand(ctx, dest); break;
+        case 'fly':      sfxFly(ctx, dest); break;
         case 'potion':   sfxPotion(ctx, dest); break;
         case 'slash':    sfxSlash(ctx, dest); break;
         case 'fleshHit':     sfxFleshHit(ctx, dest); break;

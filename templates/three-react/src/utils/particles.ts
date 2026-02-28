@@ -98,8 +98,8 @@ const RAIN_CONFIGS: Record<string, RainConfig> = {
     windVariation: 0.25,
     columnHeight: 30,
     splashLifetime: 0.28,
-    splashScaleMin: 0.04,
-    splashScaleRange: 0.14,
+    splashScaleMin: 0.02,
+    splashScaleRange: 0.07,
     dropOpacity: 0.22,
     splashOpacity: 0.2,
     audioFreq: 3500,
@@ -114,8 +114,8 @@ const RAIN_CONFIGS: Record<string, RainConfig> = {
     windVariation: 0.08,
     columnHeight: 30,
     splashLifetime: 0.4,
-    splashScaleMin: 0.03,
-    splashScaleRange: 0.10,
+    splashScaleMin: 0.015,
+    splashScaleRange: 0.05,
     dropOpacity: 0.15,
     splashOpacity: 0.15,
     audioFreq: 2200,
@@ -138,7 +138,7 @@ export function createRainEffect(opts: ParticleOptions & {
   const group = new THREE.Group();
 
   // ── Rain drops: thin cylinders ──
-  const dropGeo = new THREE.CylinderGeometry(0.008, 0.008, 0.28, 3);
+  const dropGeo = new THREE.CylinderGeometry(0.004, 0.004, 0.14, 3);
   const dropMat = new THREE.MeshBasicMaterial({
     color: 0x99aacc,
     transparent: true,
@@ -171,7 +171,7 @@ export function createRainEffect(opts: ParticleOptions & {
   let windTimer = 0;
 
   // ── Splash rings (Ziggurat: large geometry, tiny scale, explicit rotation) ──
-  const splashGeo = new THREE.RingGeometry(0.5, 0.7, 8);
+  const splashGeo = new THREE.RingGeometry(0.25, 0.35, 8);
   const splashMat = new THREE.MeshBasicMaterial({
     color: 0xccddff,
     transparent: true,
@@ -378,9 +378,9 @@ export function createRainEffect(opts: ParticleOptions & {
 // ── Wind Debris (tumbling papers) ──
 
 const DEBRIS_COUNT = 20;
-const DEBRIS_BOUNDS = 16;
-const WIND_SPEED = 1.2;
-const WIND_TURBULENCE = 0.6;
+const DEBRIS_BOUNDS = 8;
+const WIND_SPEED = 0.6;
+const WIND_TURBULENCE = 0.3;
 
 const PAPER_COLORS = [
   0xeeeeee, 0xddddcc, 0xccccbb, 0xbbaa99,
@@ -390,7 +390,7 @@ const PAPER_COLORS = [
 export function createDebrisEffect(): ParticleSystem {
   const group = new THREE.Group();
 
-  const geo = new THREE.PlaneGeometry(0.4, 0.28);
+  const geo = new THREE.PlaneGeometry(0.2, 0.14);
   const mat = new THREE.MeshBasicMaterial({
     color: 0xffffff,
     transparent: true,
@@ -411,7 +411,7 @@ export function createDebrisEffect(): ParticleSystem {
 
   for (let i = 0; i < DEBRIS_COUNT; i++) {
     positions[i * 3] = (Math.random() - 0.5) * DEBRIS_BOUNDS * 2;
-    baseY[i] = 0.5 + Math.random() * 4;
+    baseY[i] = 0.25 + Math.random() * 2;
     positions[i * 3 + 1] = baseY[i];
     positions[i * 3 + 2] = (Math.random() - 0.5) * DEBRIS_BOUNDS * 2;
     phases[i] = Math.random() * Math.PI * 2;
@@ -498,7 +498,7 @@ export function createDebrisEffect(): ParticleSystem {
         if (positions[i * 3] > DEBRIS_BOUNDS) {
           positions[i * 3] = -DEBRIS_BOUNDS;
           positions[i * 3 + 2] = (Math.random() - 0.5) * DEBRIS_BOUNDS * 2;
-          baseY[i] = 0.5 + Math.random() * 4;
+          baseY[i] = 0.25 + Math.random() * 2;
         }
 
         // Tumble rotation

@@ -75,15 +75,15 @@ export class ChaseBehavior extends Behavior {
       return 'running';
     }
 
-    // Within attack range and cooldown expired -> attack
-    if (dist <= this.attackRange && this.attackCooldownTimer <= 0) {
-      this.state = 'attack';
+    // Within attack range -> attack when cooldown ready, otherwise hold position
+    if (dist <= this.attackRange) {
+      if (this.attackCooldownTimer <= 0) {
+        this.state = 'attack';
+        this.attackCooldownTimer = this.attackCooldown;
+      }
       this.waypoints = [];
       this.waypointIndex = 0;
-      // Face the target
       agent.updateIdle(dt);
-      this.attackCooldownTimer = this.attackCooldown;
-      // The actual attack call is delegated to the caller (EnemySystem checks agent.startAttack)
       return 'running';
     }
 

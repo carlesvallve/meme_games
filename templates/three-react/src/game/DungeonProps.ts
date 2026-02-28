@@ -9,6 +9,8 @@ import { getRandomProp, getPropsWhere, getRandomTile } from './VoxDungeonDB';
 import { loadTileEntry } from './VoxDungeonLoader';
 import { SeededRandom } from '../utils/SeededRandom';
 
+const MAX_ACTIVE_LIGHTS = 8;
+
 /** Module-level seeded RNG for prop placement — set at start of populate(). */
 let rng = new SeededRandom(0);
 
@@ -384,6 +386,7 @@ export class DungeonPropSystem {
   /** Attach a point light to a prop mesh if it's a light source (torch, candelabrum). */
   private attachLight(mesh: THREE.Mesh, entry: DungeonPropEntry): void {
     if (!entry.lightSource) return;
+    if (this.torchLights.length >= MAX_ACTIVE_LIGHTS) return;
     const isWallMount = entry.placement === 'wall_mount';
     // Vary color from reddish to yellow-orange
     const colors = [0xff6622, 0xff7733, 0xff8833, 0xff9944, 0xffaa44, 0xffbb55, 0xffcc66];
@@ -415,6 +418,7 @@ export class DungeonPropSystem {
     exitRoom = -1,
     dungeonTheme = 'a_a',
     seed?: number,
+    cellHeights?: Float32Array,
   ): Promise<void> {
     // Initialize seeded RNG for prop placement
     const actualSeed = seed ?? (Math.random() * 0xFFFFFFFF) >>> 0;
@@ -422,7 +426,16 @@ export class DungeonPropSystem {
 
     this.cellSize = cellSize;
     const halfWorld = groundSize / 2;
-    const floorY = cellSize / 15; // VOX ground tile thickness
+    const baseFloorY = cellSize / 15; // VOX ground tile thickness
+    const gridD = Math.floor(groundSize / cellSize);
+    /** Get floor Y at a grid cell, including stair height offset */
+    const getFloorY = (gx: number, gz: number): number => {
+      const ch = cellHeights && gx >= 0 && gx < gridW && gz >= 0 && gz < gridD
+        ? cellHeights[gz * gridW + gx] : 0;
+      return baseFloorY + ch;
+    };
+    // Default floorY for backward compat (entrance room, height 0)
+    const floorY = baseFloorY;
     const toWorldX = (gx: number) => -halfWorld + (gx + 0.5) * cellSize;
     const toWorldZ = (gz: number) => -halfWorld + (gz + 0.5) * cellSize;
 
@@ -507,8 +520,11 @@ export class DungeonPropSystem {
         // Place room label at center
         const centerWx = toWorldX(room.x + (room.w - 1) / 2);
         const centerWz = toWorldZ(room.z + (room.d - 1) / 2);
-        const label = createRoomLabel(template.name, centerWx, wallHeight - 1, centerWz);
+        const centerGx = Math.floor(room.x + room.w / 2);
+        const centerGz = Math.floor(room.z + room.d / 2);
+        const label = createRoomLabel(template.name, centerWx, getFloorY(centerGx, centerGz) + wallHeight - 1, centerWz);
         label.visible = showRoomLabels;
+        label.userData.labelsDisabled = !showRoomLabels;
         this.parent.add(label);
         this.labels.push(label);
 
@@ -568,7 +584,7 @@ export class DungeonPropSystem {
             const push = cell.wallSide ? WALL_PUSH[cell.wallSide] : [0, 0] as [number, number];
             mesh.position.set(
               wx + push[0] * cellSize * 0.5,
-              (entry.mountHeight ?? 0.5) * wallHeight - cellSize,
+              getFloorY(cell.gx, cell.gz) + (entry.mountHeight ?? 0.5) * wallHeight - cellSize,
               wz + push[1] * cellSize * 0.5,
             );
 
@@ -611,7 +627,7 @@ export class DungeonPropSystem {
           const mesh = new THREE.Mesh(geo, voxMat.clone());
           const wx = toWorldX(cell.gx);
           const wz = toWorldZ(cell.gz);
-          mesh.position.set(wx, floorY, wz);
+          mesh.position.set(wx, getFloorY(cell.gx, cell.gz), wz);
 
           // Rotation — use stored wallSide from findCell for deterministic wall-facing
           // Push wall-aligned props toward the wall within their cell (stay inside cell bounds)
@@ -650,7 +666,7 @@ export class DungeonPropSystem {
             surfaces.push({
               wx: mesh.position.x,
               wz: mesh.position.z,
-              surfaceY: floorY + surfaceH * surfScale,
+              surfaceY: getFloorY(cell.gx, cell.gz) + surfaceH * surfScale,
               used: 0,
               maxItems: entry.category.includes('large') ? 3
                 : (entry.category === 'barrel' || entry.category === 'box' || entry.category === 'pot') ? 1
@@ -699,7 +715,9 @@ export class DungeonPropSystem {
             const [ox, oz, rot] = SEAT_OFFSETS[seatIdx % 4];
 
             const mesh = new THREE.Mesh(geo, voxMat.clone());
-            mesh.position.set(table.wx + ox, floorY, table.wz + oz);
+            const tgx = Math.floor((table.wx + halfWorld) / cellSize);
+            const tgz = Math.floor((table.wz + halfWorld) / cellSize);
+            mesh.position.set(table.wx + ox, getFloorY(tgx, tgz), table.wz + oz);
             mesh.rotation.y = rot;
             mesh.castShadow = true;
             this.parent.add(mesh);
@@ -716,7 +734,7 @@ export class DungeonPropSystem {
             occupied.add(`${cell.gx},${cell.gz}`);
 
             const mesh = new THREE.Mesh(geo, voxMat.clone());
-            mesh.position.set(toWorldX(cell.gx), floorY, toWorldZ(cell.gz));
+            mesh.position.set(toWorldX(cell.gx), getFloorY(cell.gx, cell.gz), toWorldZ(cell.gz));
             if (cell.wallSide) {
               mesh.rotation.y = WALL_ROT[cell.wallSide];
               const push = WALL_PUSH[cell.wallSide];
@@ -777,7 +795,7 @@ export class DungeonPropSystem {
             if (!geo) continue;
 
             const mesh = new THREE.Mesh(geo, voxMat.clone());
-            mesh.position.set(toWorldX(cell.gx), floorY, toWorldZ(cell.gz));
+            mesh.position.set(toWorldX(cell.gx), getFloorY(cell.gx, cell.gz), toWorldZ(cell.gz));
             mesh.rotation.y = rng.next() * Math.PI * 2;
             mesh.castShadow = true;
             this.parent.add(mesh);
@@ -891,7 +909,7 @@ export class DungeonPropSystem {
     // ── Entrance / Exit wall props ──
     await this.placeEntranceExit(
       rooms, entranceRoom, exitRoom, occupied, openGrid, gridW, gridH,
-      cellSize, halfWorld, wallHeight, dungeonTheme,
+      cellSize, halfWorld, wallHeight, dungeonTheme, getFloorY,
     );
 
     // ── Corridor wall props (torches & banners) ──
@@ -942,7 +960,7 @@ export class DungeonPropSystem {
       const push = WALL_PUSH[cell.wallSide];
       mesh.position.set(
         wx + push[0] * cellSize * 0.5,
-        (entry.mountHeight ?? 0.5) * wallHeight - cellSize,
+        getFloorY(cell.gx, cell.gz) + (entry.mountHeight ?? 0.5) * wallHeight - cellSize,
         wz + push[1] * cellSize * 0.5,
       );
 
@@ -968,7 +986,6 @@ export class DungeonPropSystem {
     this.torchTime += dt * 12;
     const flickerAmount = 0.15;
     for (const t of this.torchLights) {
-      // Skip hidden lights (parent mesh not visible)
       if (!t.light.parent || !t.light.parent.visible) continue;
       const time = this.torchTime + t.phase;
       const flicker = 1 + (
@@ -1009,7 +1026,7 @@ export class DungeonPropSystem {
   /** Get debris boxes for physical collision (keyboard movement).
    *  Excludes wall_mount and small decorative items.
    *  Each prop occupies exactly 1 nav cell — debris box is half-cellSize on each side. */
-  getDebrisBoxes(): { x: number; z: number; halfW: number; halfD: number; height: number; exact?: boolean }[] {
+  getDebrisBoxes(): { x: number; z: number; halfW: number; halfD: number; height: number; exact?: boolean; isProp?: boolean }[] {
     return this.props
       .filter(p => p.entry.placement !== 'wall_mount' && !SMALL_ITEM_CATEGORIES.has(p.entry.category))
       .map(p => {
@@ -1035,7 +1052,10 @@ export class DungeonPropSystem {
 
   /** Toggle room name labels on/off (e.g. from voxel dungeon settings). */
   setRoomLabelsVisible(visible: boolean): void {
-    for (const label of this.labels) label.visible = visible;
+    for (const label of this.labels) {
+      label.userData.labelsDisabled = !visible;
+      if (!visible) label.visible = false;
+    }
   }
 
   private findCell(
@@ -1108,6 +1128,7 @@ export class DungeonPropSystem {
     halfWorld: number,
     wallHeight: number,
     theme: string,
+    getFloorY: (gx: number, gz: number) => number,
   ): Promise<void> {
     if (entranceRoomIdx < 0 || exitRoomIdx < 0) return;
     if (entranceRoomIdx >= rooms.length || exitRoomIdx >= rooms.length) return;
@@ -1128,31 +1149,35 @@ export class DungeonPropSystem {
       const room = rooms[roomIdx];
 
       // Find a wall-edge cell: room edge cell with a closed neighbor (wall) on one side
-      const candidates: { gx: number; gz: number; wallSide: 'N' | 'S' | 'E' | 'W' }[] = [];
-      for (let gz = room.z; gz < room.z + room.d; gz++) {
-        for (let gx = room.x; gx < room.x + room.w; gx++) {
-          if (!openGrid[gz * gridW + gx]) continue;
-          if (occupied.has(`${gx},${gz}`)) continue;
+      // First pass: unoccupied cells. Second pass: allow occupied cells as fallback.
+      let candidates: { gx: number; gz: number; wallSide: 'N' | 'S' | 'E' | 'W' }[] = [];
+      for (let pass = 0; pass < 2 && candidates.length === 0; pass++) {
+        for (let gz = room.z; gz < room.z + room.d; gz++) {
+          for (let gx = room.x; gx < room.x + room.w; gx++) {
+            if (!openGrid[gz * gridW + gx]) continue;
+            if (pass === 0 && occupied.has(`${gx},${gz}`)) continue;
 
-          const atLeft = gx === room.x;
-          const atRight = gx === room.x + room.w - 1;
-          const atTop = gz === room.z;
-          const atBottom = gz === room.z + room.d - 1;
-
-          // Must be on an edge with a wall behind it
-          if (atTop && (gz - 1 < 0 || !openGrid[(gz - 1) * gridW + gx])) {
-            candidates.push({ gx, gz, wallSide: 'N' });
-          } else if (atBottom && (gz + 1 >= gridH || !openGrid[(gz + 1) * gridW + gx])) {
-            candidates.push({ gx, gz, wallSide: 'S' });
-          } else if (atLeft && (gx - 1 < 0 || !openGrid[gz * gridW + (gx - 1)])) {
-            candidates.push({ gx, gz, wallSide: 'W' });
-          } else if (atRight && (gx + 1 >= gridW || !openGrid[gz * gridW + (gx + 1)])) {
-            candidates.push({ gx, gz, wallSide: 'E' });
+            // Check all four sides (not else-if, so corners can match multiple)
+            if (gz === room.z && (gz - 1 < 0 || !openGrid[(gz - 1) * gridW + gx])) {
+              candidates.push({ gx, gz, wallSide: 'N' });
+            }
+            if (gz === room.z + room.d - 1 && (gz + 1 >= gridH || !openGrid[(gz + 1) * gridW + gx])) {
+              candidates.push({ gx, gz, wallSide: 'S' });
+            }
+            if (gx === room.x && (gx - 1 < 0 || !openGrid[gz * gridW + (gx - 1)])) {
+              candidates.push({ gx, gz, wallSide: 'W' });
+            }
+            if (gx === room.x + room.w - 1 && (gx + 1 >= gridW || !openGrid[gz * gridW + (gx + 1)])) {
+              candidates.push({ gx, gz, wallSide: 'E' });
+            }
           }
         }
       }
 
-      if (candidates.length === 0) return;
+      if (candidates.length === 0) {
+        console.warn(`[DungeonProps] No wall-edge cell found for ${isEntrance ? 'entrance' : 'exit'} in room ${roomIdx}`);
+        return;
+      }
 
       // Pick a random candidate
       const cell = candidates[Math.floor(rng.next() * candidates.length)];
@@ -1176,7 +1201,7 @@ export class DungeonPropSystem {
       const push = WALL_PUSH[cell.wallSide];
       mesh.position.set(
         wx + push[0] * cellSize * 0.5,
-        0,
+        getFloorY(cell.gx, cell.gz),
         wz + push[1] * cellSize * 0.5,
       );
 
@@ -1195,7 +1220,7 @@ export class DungeonPropSystem {
       // Point light to make the portal visually attractive
       const lightColor = isEntrance ? 0xffcc66 : 0x88bbff;
       const light = new THREE.PointLight(lightColor, 8, cellSize * 6, 1.5);
-      light.position.set(wx, wallHeight * 0.5, wz);
+      light.position.set(wx, getFloorY(cell.gx, cell.gz) + wallHeight * 0.5, wz);
       this.parent.add(light);
 
       // Debug: visible glowing sphere so we can spot entrance/exit
@@ -1209,10 +1234,11 @@ export class DungeonPropSystem {
       this.props.push({ mesh, entity: dummyEntity, entry: { id: tileEntry.id, category: 'entrance', voxPath: tileEntry.voxPath, baseHeight: 1, radius: 0.01, placement: 'wall_mount' as PropPlacement }, gridCell: { gx: cell.gx, gz: cell.gz } });
 
       // Store positions: spawn in cell center, portal trigger at the wall
-      const spawnPos = new THREE.Vector3(wx, 0, wz);
+      const cellY = getFloorY(cell.gx, cell.gz);
+      const spawnPos = new THREE.Vector3(wx, cellY, wz);
       const portalPos = new THREE.Vector3(
         wx + push[0] * cellSize * 0.5,
-        0,
+        cellY,
         wz + push[1] * cellSize * 0.5,
       );
       if (isEntrance) {

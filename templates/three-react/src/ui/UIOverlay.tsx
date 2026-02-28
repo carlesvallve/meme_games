@@ -6,7 +6,7 @@ import { DeathOverlay } from './DeathOverlay';
 import { DialogUI } from './DialogUI';
 import { CharacterSelect } from './CharacterSelect';
 import { SpeechBubbles } from './SpeechBubbles';
-import { SettingsPanel } from './SettingsPanel';
+import { SettingsPanel } from './settings';
 
 function FPSCounter() {
   const ref = useRef<HTMLDivElement>(null);

@@ -235,7 +235,7 @@ export class GoreSystem {
   spawnBloodSplash(
     x: number, y: number, z: number,
     groundY: number,
-    attacker?: THREE.Mesh,
+    nearbyCharacters?: Character[],
   ): void {
     // Small blood droplets flying from impact point (slightly larger)
     const count = 4 + Math.floor(Math.random() * 4);
@@ -257,10 +257,17 @@ export class GoreSystem {
       );
     }
 
-    // Stain the attacker (blood splashes back on you)
-    if (attacker) {
-      const stainCount = 2 + Math.floor(Math.random() * 3);
-      this.spawnStainsOnCharacter(attacker, stainCount);
+    // Stain nearby characters
+    if (nearbyCharacters) {
+      const SPLASH_RADIUS = 1.5;
+      for (const char of nearbyCharacters) {
+        const cx = char.mesh.position.x, cz = char.mesh.position.z;
+        const dx = cx - x, dz = cz - z;
+        if (dx * dx + dz * dz < SPLASH_RADIUS * SPLASH_RADIUS) {
+          const stainCount = 1 + Math.floor(Math.random() * 2);
+          this.spawnStainsOnCharacter(char.mesh, stainCount);
+        }
+      }
     }
   }
 

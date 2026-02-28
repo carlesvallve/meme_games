@@ -25,6 +25,7 @@ import type { DebrisBox } from './Terrain';
 // Rotation is CCW around Y: +90° turns north→west, +180° turns north→south.
 // This offset flips all pieces so the code can think in "face toward open cell" terms.
 const BASE_ROT = 180;
+const USE_STACKED_WALLS = false;
 
 // ── Types ──
 
@@ -40,6 +41,12 @@ export interface VoxelDungeonConfig {
   theme?: string;         // defaults to 'a_a'
   /** Per-cell room index (-1 = corridor, >= 0 = room index) */
   roomOwnership?: number[];
+  /** Per-cell height offsets from StairSystem (Float32Array indexed by gz * gridW + gx) */
+  cellHeights?: Float32Array;
+  /** Set of cell indices that contain stairs — skip ground tile placement for these */
+  stairCells?: Set<number>;
+  /** Floor vox tile height — used to lower wall placement on elevated levels */
+  floorTileHeight?: number;
 }
 
 export interface VoxelDungeonResult {
@@ -86,7 +93,7 @@ export function buildVoxelDungeonCollision(
   config: VoxelDungeonConfig,
   group: THREE.Group,
 ): VoxelDungeonResult {
-  const { openGrid, gridW, gridD, cellSize, groundSize, gridDoors } = config;
+  const { openGrid, gridW, gridD, cellSize, groundSize, cellHeights } = config;
   const halfWorld = groundSize / 2;
   const wallHeight = config.wallHeight ?? (17 * cellSize / 15);
   const half = cellSize / 2;
@@ -101,6 +108,19 @@ export function buildVoxelDungeonCollision(
 
   const toWorldX = (gx: number) => -halfWorld + (gx + 0.5) * cellSize;
   const toWorldZ = (gz: number) => -halfWorld + (gz + 0.5) * cellSize;
+
+  // Helper: get the max cell height among open neighbors of a closed cell
+  const getWallBaseY = (gx: number, gz: number): number => {
+    if (!cellHeights) return 0;
+    let maxH = -Infinity;
+    for (const [dx, dz] of [[0, -1], [0, 1], [-1, 0], [1, 0], [-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+      const nx = gx + dx, nz = gz + dz;
+      if (nx < 0 || nx >= gridW || nz < 0 || nz >= gridD) continue;
+      if (!openGrid[nz * gridW + nx]) continue;
+      maxH = Math.max(maxH, cellHeights[nz * gridW + nx]);
+    }
+    return maxH === -Infinity ? 0 : maxH;
+  };
 
   // Place invisible full-block collision for every closed cell adjacent to an open cell
   // (cardinal OR diagonal — diagonal catches room outer corners)
@@ -118,10 +138,15 @@ export function buildVoxelDungeonCollision(
       const wx = toWorldX(gx);
       const wz = toWorldZ(gz);
 
-      const geo = new THREE.BoxGeometry(cellSize, wallHeight, cellSize);
+      // Wall collision extends from lowest neighbor down to wallHeight above highest neighbor
+      const baseY = getWallBaseY(gx, gz);
+      const minNeighborY = cellHeights ? getMinOpenNeighborY(gx, gz, gridW, gridD, openGrid, cellHeights) : 0;
+      const totalHeight = wallHeight + (baseY - minNeighborY);
+
+      const geo = new THREE.BoxGeometry(cellSize, totalHeight, cellSize);
       const mat = new THREE.MeshBasicMaterial({ visible: false });
       const mesh = new THREE.Mesh(geo, mat);
-      mesh.position.set(wx, wallHeight / 2, wz);
+      mesh.position.set(wx, minNeighborY + totalHeight / 2, wz);
       mesh.userData.collisionOnly = true;
       group.add(mesh);
 
@@ -131,11 +156,28 @@ export function buildVoxelDungeonCollision(
         weight: Infinity,
       }));
 
-      debris.push({ x: wx, z: wz, halfW: half, halfD: half, height: wallHeight });
+      debris.push({ x: wx, z: wz, halfW: half, halfD: half, height: baseY + wallHeight });
     }
   }
 
   return { debris, entities, wallHeight };
+}
+
+/** Get the minimum cell height among open neighbors of a cell */
+function getMinOpenNeighborY(
+  gx: number, gz: number,
+  gridW: number, gridD: number,
+  openGrid: boolean[],
+  cellHeights: Float32Array,
+): number {
+  let minH = Infinity;
+  for (const [dx, dz] of [[0, -1], [0, 1], [-1, 0], [1, 0], [-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+    const nx = gx + dx, nz = gz + dz;
+    if (nx < 0 || nx >= gridW || nz < 0 || nz >= gridD) continue;
+    if (!openGrid[nz * gridW + nx]) continue;
+    minH = Math.min(minH, cellHeights[nz * gridW + nx]);
+  }
+  return minH === Infinity ? 0 : minH;
 }
 
 /**
@@ -162,6 +204,7 @@ export async function loadVoxelDungeonVisuals(
     return null;
   }
 
+  const wallHeight = config.wallHeight ?? (17 * cellSize / 15);
   const toWorldX = (gx: number) => -halfWorld + (gx + 0.5) * cellSize;
   const toWorldZ = (gz: number) => -halfWorld + (gz + 0.5) * cellSize;
 
@@ -270,6 +313,10 @@ export async function loadVoxelDungeonVisuals(
 
       const mesh = placeVoxReturn(group, wx, wz, 'ground', 0, voxMat, tile, theme);
       if (mesh) {
+        // Apply cell height offset
+        if (config.cellHeights) {
+          mesh.position.y = config.cellHeights[gz * gridW + gx];
+        }
         groundMeshes.push(mesh);
         groundMeshList.push(mesh);
         // Tag with room ownership for visibility system
@@ -336,10 +383,24 @@ export async function loadVoxelDungeonVisuals(
         else         rot = BASE_ROT + 270;
       }
 
-      const wallMesh = placeVoxReturn(wallVisualGroup, wx, wz, role, rot, wallMat, tileOverride, theme);
-      if (wallMesh && ownership) {
-        // Walls belong to all adjacent rooms
-        const adjRooms = new Set<number>();
+      // Compute min/max adjacent cell height for this wall
+      let minAdjacentH = Infinity;
+      let maxAdjacentH = -Infinity;
+      if (config.cellHeights) {
+        for (const [dx, dz] of [[0, -1], [0, 1], [-1, 0], [1, 0], [-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+          const nx = gx + dx, nz = gz + dz;
+          if (nx >= 0 && nx < gridW && nz >= 0 && nz < gridD && isOpen(nx, nz)) {
+            const h = config.cellHeights[nz * gridW + nx];
+            minAdjacentH = Math.min(minAdjacentH, h);
+            maxAdjacentH = Math.max(maxAdjacentH, h);
+          }
+        }
+      }
+      if (minAdjacentH === Infinity) { minAdjacentH = 0; maxAdjacentH = 0; }
+
+      // Compute adjacent room IDs for visibility
+      const adjRooms = new Set<number>();
+      if (ownership) {
         for (const [dx, dz] of [[0, -1], [0, 1], [-1, 0], [1, 0], [-1, -1], [1, -1], [-1, 1], [1, 1]]) {
           const nx = gx + dx, nz = gz + dz;
           if (nx >= 0 && nx < gridW && nz >= 0 && nz < gridD) {
@@ -347,8 +408,21 @@ export async function loadVoxelDungeonVisuals(
             if (nid !== undefined) adjRooms.add(nid);
           }
         }
-        wallMesh.userData.roomIds = [...adjRooms];
-        wallMeshList.push(wallMesh);
+      }
+
+      // Place wall tile(s): stack down to Y=0 when USE_STACKED_WALLS is on
+      const tileH = wallHeight;
+      const stackCount = USE_STACKED_WALLS && maxAdjacentH > 0.01 ? Math.ceil(maxAdjacentH / tileH) + 1 : 1;
+      for (let si = 0; si < stackCount; si++) {
+        const wallMesh = placeVoxReturn(wallVisualGroup, wx, wz, role, rot, wallMat, tileOverride, theme);
+        if (wallMesh) {
+          wallMesh.position.y = maxAdjacentH - si * tileH;
+          wallMesh.userData.isWall = true;
+          if (ownership && adjRooms.size > 0) {
+            wallMesh.userData.roomIds = [...adjRooms];
+            wallMeshList.push(wallMesh);
+          }
+        }
       }
       wallCount++;
     }

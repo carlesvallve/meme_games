@@ -18,6 +18,8 @@ export {
 export type {
   MovementMode,
   MovementParams,
+  MeleeParams,
+  RangedParams,
   ProjectileConfig,
   MuzzleOffset,
 } from './CharacterSettings';

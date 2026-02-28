@@ -4,11 +4,51 @@ import { Layer } from './game/Entity';
 import type { TerrainPreset } from './game/Terrain';
 import type { HeightmapStyle } from './game/TerrainNoise';
 import { DEFAULT_CHARACTER_PARAMS } from './game/character';
-import type { MovementParams } from './game/character';
+import type { MovementParams, MeleeParams, RangedParams } from './game/character';
 import type { LevelSnapshot } from './game/LevelState';
 import { floorSeed } from './utils/SeededRandom';
 
-export type { MovementParams } from './game/character';
+export type { MovementParams, MeleeParams, RangedParams } from './game/character';
+
+/**
+ * Enemy params — overrides of the base MovementParams that characters share,
+ * plus a few enemy-specific AI additions (speedVariance, chaseRange, playerDamage).
+ * Field names match MovementParams where they overlap.
+ */
+export interface EnemyParams {
+  // ── Character overrides ──
+  hp: number;
+  speed: [number, number];
+  attackDamage: number;
+  attackCooldown: number;
+  invulnDuration: number;
+  stunDuration: number;
+  melee: MeleeParams;
+  ranged: RangedParams & { enabled: boolean };
+  // ── Enemy AI ──
+  chaseRange: number;
+  /** Damage the player deals to enemies (attacker-side). */
+  playerDamage: number;
+  /** Max enemies to spawn (used across all terrain presets). */
+  maxEnemies: number;
+  /** Seconds between wave-spawn attempts once initial enemies are placed. */
+  spawnInterval: number;
+}
+
+export const DEFAULT_ENEMY_PARAMS: EnemyParams = {
+  hp: 4,
+  speed: [0.5, 1.5],
+  attackDamage: 1,
+  attackCooldown: 1.2,
+  invulnDuration: 0.5,
+  stunDuration: 0.15,
+  melee: { autoTarget: true, knockback: 5, showSlashEffect: true, exhaustionEnabled: false },
+  ranged: { enabled: false, autoTarget: true, knockback: 2.5, exhaustionEnabled: false },
+  chaseRange: 8,
+  playerDamage: 2,
+  maxEnemies: 6,
+  spawnInterval: 12,
+};
 
 export interface ParticleToggles {
   dust: boolean;
@@ -101,7 +141,6 @@ export const DEFAULT_SCENE_SETTINGS = {
   hmrCacheEnabled: false,
   dungeonVariant: 'random',
   dungeonSize: 40,
-  enemyCount: 0,
 };
 
 // ── localStorage persistence ──────────────────────────────────────────
@@ -136,6 +175,7 @@ interface SavedSettings {
   postProcess?: PostProcessSettings;
   characterPushEnabled?: boolean;
   particleToggles?: ParticleToggles;
+  enemyParams?: EnemyParams;
   /** @deprecated Renamed to characterParams; kept for migration. */
   playerParams?: MovementParams;
 }
@@ -178,6 +218,7 @@ function saveSettings(): void {
     postProcess: s.postProcess,
     characterPushEnabled: s.characterPushEnabled,
     particleToggles: s.particleToggles,
+    enemyParams: s.enemyParams,
   };
   try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(data)); } catch { /* ignore */ }
 }
@@ -245,6 +286,11 @@ interface GameStore {
   setPostProcess: (settings: PostProcessSettings) => void;
   setPostProcessParam: <K extends keyof PostProcessSettings>(key: K, value: PostProcessSettings[K]) => void;
 
+  enemyParams: EnemyParams;
+  setEnemyParam: <K extends keyof EnemyParams>(key: K, value: EnemyParams[K]) => void;
+  setEnemyMeleeParam: <K extends keyof MeleeParams>(key: K, value: MeleeParams[K]) => void;
+  setEnemyRangedParam: <K extends keyof (RangedParams & { enabled: boolean })>(key: K, value: (RangedParams & { enabled: boolean })[K]) => void;
+
   /** If true, characters push each other apart when overlapping; if false, only the non-player is pushed (player stays put). */
   characterPushEnabled: boolean;
   setCharacterPushEnabled: (v: boolean) => void;
@@ -278,6 +324,8 @@ interface GameStore {
   setSpeechBubbles: (bubbles: SpeechBubbleData[]) => void;
   toggleParticle: (key: keyof ParticleToggles) => void;
   setCharacterParam: <K extends keyof MovementParams>(key: K, value: MovementParams[K]) => void;
+  setMeleeParam: <K extends keyof MeleeParams>(key: K, value: MeleeParams[K]) => void;
+  setRangedParam: <K extends keyof RangedParams>(key: K, value: RangedParams[K]) => void;
   setCameraParam: <K extends keyof CameraParams>(key: K, value: CameraParams[K]) => void;
   setLightPreset: (preset: LightPreset) => void;
   toggleTorch: () => void;
@@ -313,6 +361,8 @@ interface GameStore {
   onResetCameraParams: (() => void) | null;
   onResetLightParams: (() => void) | null;
   onResetSceneParams: (() => void) | null;
+  onSpawnEnemy: (() => void) | null;
+  onResetEnemyParams: (() => void) | null;
 }
 
 const saved = loadSettings();
@@ -382,6 +432,26 @@ export const useGameStore = create<GameStore>((set, get) => ({
   setPostProcessParam: (key, value) =>
     set((s) => ({ postProcess: { ...s.postProcess, [key]: value } })),
 
+  enemyParams: (() => {
+    const def = { ...DEFAULT_ENEMY_PARAMS };
+    const se = saved.enemyParams;
+    if (!se) return def;
+    const merged = {
+      ...def,
+      ...se,
+      speed: Array.isArray(se.speed) ? se.speed as [number, number] : def.speed,
+      melee: { ...def.melee, ...se.melee },
+      ranged: { ...def.ranged, ...se.ranged },
+    };
+    return merged;
+  })(),
+  setEnemyParam: (key, value) =>
+    set((s) => ({ enemyParams: { ...s.enemyParams, [key]: value } })),
+  setEnemyMeleeParam: (key, value) =>
+    set((s) => ({ enemyParams: { ...s.enemyParams, melee: { ...s.enemyParams.melee, [key]: value } as any } })),
+  setEnemyRangedParam: (key, value) =>
+    set((s) => ({ enemyParams: { ...s.enemyParams, ranged: { ...s.enemyParams.ranged, [key]: value } as any } })),
+
   characterPushEnabled: saved.characterPushEnabled ?? true,
   setCharacterPushEnabled: (characterPushEnabled) => set({ characterPushEnabled }),
 
@@ -420,6 +490,14 @@ export const useGameStore = create<GameStore>((set, get) => ({
   setCharacterParam: (key, value) =>
     set((s) => ({
       characterParams: { ...s.characterParams, [key]: value },
+    })),
+  setMeleeParam: (key, value) =>
+    set((s) => ({
+      characterParams: { ...s.characterParams, melee: { ...s.characterParams.melee, [key]: value } },
+    })),
+  setRangedParam: (key, value) =>
+    set((s) => ({
+      characterParams: { ...s.characterParams, ranged: { ...s.characterParams.ranged, [key]: value } },
     })),
   setCameraParam: (key, value) =>
     set((s) => ({
@@ -462,6 +540,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
   onResetCameraParams: null,
   onResetLightParams: null,
   onResetSceneParams: null,
+  onSpawnEnemy: null,
+  onResetEnemyParams: null,
 }));
 
 // Auto-save settings to localStorage on any change

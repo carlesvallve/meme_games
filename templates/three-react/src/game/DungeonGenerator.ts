@@ -43,6 +43,8 @@ export interface DungeonOutput {
   rooms: { x: number; z: number; w: number; d: number }[];
   /** Per-cell room index (-1 = corridor, >= 0 = room index) */
   roomOwnership: number[];
+  /** Corridor cell arrays — each corridor is a list of grid cells */
+  corridors: { cells: { gx: number; gz: number }[] }[];
   /** Index into rooms[] for the entrance room (player spawn) */
   entranceRoom: number;
   /** Index into rooms[] for the exit room (next level trigger) */
@@ -157,6 +159,7 @@ export function generateDungeon(
     gridDoors: shiftedGridDoors,
     rooms: roomRects,
     roomOwnership: result.roomOwnership ?? new Array(gridW * gridD).fill(-1),
+    corridors: result.corridors,
     entranceRoom,
     exitRoom,
     seed: actualSeed,
