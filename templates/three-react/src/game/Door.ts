@@ -153,8 +153,8 @@ export class DoorSystem {
     pivot.position.set(-openingW / 2, 0, 0);
     group.add(pivot);
 
-    // Try to load VOX door panel at the correct opening height
-    const doorEntry = getRandomTile('door');
+    // Try to load VOX door panel — randomly pick from doors and gates
+    const doorEntry = getRandomTile(Math.random() < 0.7 ? 'door' : 'gate');
     if (doorEntry) {
       // Queue async load — door will pop in once ready
       this.loadVoxDoorPanel(pivot, doorEntry, doorPanelW, doorPanelH, openingW);

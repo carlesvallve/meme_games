@@ -14,7 +14,8 @@ export type TileRole =
   | 'inner_wall_ending'
   | 'inner_wall_solo'
   | 'entrance'
-  | 'door';
+  | 'door'
+  | 'gate';
 
 export interface DungeonTileEntry {
   id: string;
@@ -133,10 +134,23 @@ function buildThemeTiles(theme: string): DungeonTileEntry[] {
   tiles.push({ id: `${theme}:entrance_b_flip`, role: 'entrance', theme, voxPath: `${BASE}/Entrance/VOX/dungeon_${prefix}_entrance_b_flipped.vox`, flipped: true });
   tiles.push({ id: `${theme}:entrance_c`, role: 'entrance', theme, voxPath: `${BASE}/Entrance/VOX/dungeon_${prefix}_entrance_c.vox` });
 
-  // Door props (shared across themes — wooden door panels)
+  // Door props (shared across themes)
+  // Door A (Wood)
   tiles.push({ id: `${theme}:door_a_a`, role: 'door', theme, voxPath: `${P}/Door/Door%20A%20(Wood)/VOX/door_a_a.vox` });
   tiles.push({ id: `${theme}:door_a_b`, role: 'door', theme, voxPath: `${P}/Door/Door%20A%20(Wood)/VOX/door_a_b.vox` });
   tiles.push({ id: `${theme}:door_a_c`, role: 'door', theme, voxPath: `${P}/Door/Door%20A%20(Wood)/VOX/door_a_c.vox` });
+  // Door B (Dark Wood)
+  tiles.push({ id: `${theme}:door_b_a`, role: 'door', theme, voxPath: `${P}/Door/Door%20B%20(Dark%20Wood)/VOX/door_b_a.vox` });
+  tiles.push({ id: `${theme}:door_b_b`, role: 'door', theme, voxPath: `${P}/Door/Door%20B%20(Dark%20Wood)/VOX/door_b_b.vox` });
+  tiles.push({ id: `${theme}:door_b_c`, role: 'door', theme, voxPath: `${P}/Door/Door%20B%20(Dark%20Wood)/VOX/door_b_c.vox` });
+  // Door C (Darkest Wood)
+  tiles.push({ id: `${theme}:door_c_a`, role: 'door', theme, voxPath: `${P}/Door/Door%20C%20(Darkest%20Wood)/VOX/door_c_a.vox` });
+  tiles.push({ id: `${theme}:door_c_b`, role: 'door', theme, voxPath: `${P}/Door/Door%20C%20(Darkest%20Wood)/VOX/door_c_b.vox` });
+  tiles.push({ id: `${theme}:door_c_c`, role: 'door', theme, voxPath: `${P}/Door/Door%20C%20(Darkest%20Wood)/VOX/door_c_c.vox` });
+  // Gate A (Metal)
+  tiles.push({ id: `${theme}:gate_a`, role: 'gate', theme, voxPath: `${P}/Gate/Gate%20A%20(Metal)/VOX/gate_a.vox` });
+  // Gate B (Dark Metal)
+  tiles.push({ id: `${theme}:gate_b`, role: 'gate', theme, voxPath: `${P}/Gate/Gate%20B%20(Dark%20Metal)/VOX/gate_b.vox` });
 
   return tiles;
 }
