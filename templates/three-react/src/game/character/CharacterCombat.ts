@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { useGameStore } from '../../store';
 import type { Terrain } from '../Terrain';
 import type { MovementParams } from './CharacterSettings';
 
@@ -51,7 +50,7 @@ export class CharacterCombat {
     return v;
   }
 
-  takeDamage(owner: CombatOwner, amount: number, fromX: number, fromZ: number): boolean {
+  takeDamage(owner: CombatOwner, amount: number, fromX: number, fromZ: number, knockback: number): boolean {
     if (!this.isAlive || this.invulnTimer > 0) return false;
 
     this.hp -= amount;
@@ -66,14 +65,13 @@ export class CharacterCombat {
     const dist = Math.sqrt(dx * dx + dz * dz);
     this.lastHitDirX = dist > 0.001 ? dx / dist : 0;
     this.lastHitDirZ = dist > 0.001 ? dz / dist : 0;
-    const knockbackSpeed = owner.params.knockbackSpeed;
     if (dist > 0.001) {
-      this.knockbackVX = (dx / dist) * knockbackSpeed;
-      this.knockbackVZ = (dz / dist) * knockbackSpeed;
+      this.knockbackVX = (dx / dist) * knockback;
+      this.knockbackVZ = (dz / dist) * knockback;
     } else {
       const angle = Math.random() * Math.PI * 2;
-      this.knockbackVX = Math.cos(angle) * knockbackSpeed;
-      this.knockbackVZ = Math.sin(angle) * knockbackSpeed;
+      this.knockbackVX = Math.cos(angle) * knockback;
+      this.knockbackVZ = Math.sin(angle) * knockback;
     }
 
     this.invulnTimer = owner.params.invulnDuration;
@@ -89,7 +87,7 @@ export class CharacterCombat {
     return true;
   }
 
-  startAttack(owner: CombatOwner): boolean {
+  startAttack(owner: CombatOwner, exhaustionEnabled = false): boolean {
     if (!this.isAlive || this.isAttacking || this.exhaustTimer > 0 || this.stunTimer > 0) return false;
 
     if (this.timeSinceLastAttack > 1.0) {
@@ -102,7 +100,7 @@ export class CharacterCombat {
     this.timeSinceLastAttack = 0;
     this.attackCount++;
 
-    if (useGameStore.getState().characterParams.exhaustionEnabled && this.attackCount >= 7) {
+    if (exhaustionEnabled && this.attackCount >= 7) {
       this.exhaustTimer = owner.params.exhaustDuration;
       this.attackCount = 0;
     }
@@ -155,12 +153,14 @@ export class CharacterCombat {
       this.knockbackVZ *= decay;
     }
 
-    // Invuln blink
+    // Invuln blink (skip if dead — hideBody() controls visibility after death)
     if (this.invulnTimer > 0) {
       this.invulnTimer -= dt;
-      owner.mesh.visible = Math.floor(this.invulnTimer * 10) % 2 === 0;
+      if (this.isAlive) {
+        owner.mesh.visible = Math.floor(this.invulnTimer * 10) % 2 === 0;
+      }
       if (this.invulnTimer <= 0) {
-        owner.mesh.visible = true;
+        if (this.isAlive) owner.mesh.visible = true;
         this.invulnTimer = 0;
       }
     }

@@ -46,6 +46,12 @@ export class DoorSystem {
   private doors: DoorObj[] = [];
   private readonly terrain: Terrain;
   private readonly parent: THREE.Object3D;
+  /** Per-cell height offsets from stair system */
+  private cellHeights: Float32Array | null = null;
+  private gridW = 0;
+  private gridD = 0;
+  private doorCellSize = 0;
+  private groundSize = 0;
 
   constructor(
     parent: THREE.Object3D,
@@ -54,9 +60,18 @@ export class DoorSystem {
     cellSize: number,
     useVoxDoors = false,
     frameMaterial?: THREE.Material,
+    cellHeights?: Float32Array,
+    gridW = 0,
+    gridD = 0,
+    groundSize = 0,
   ) {
     this.parent = parent;
     this.terrain = terrain;
+    this.cellHeights = cellHeights ?? null;
+    this.gridW = gridW;
+    this.gridD = gridD;
+    this.doorCellSize = cellSize;
+    this.groundSize = groundSize;
 
     if (useVoxDoors) {
       for (const def of doorDefs) {
@@ -99,7 +114,8 @@ export class DoorSystem {
     const doorPanelH = openingH * 0.99;
 
     const group = new THREE.Group();
-    group.position.set(def.x, 0, def.z);
+    const doorY = this.getDoorCellHeight(def.x, def.z);
+    group.position.set(def.x, doorY, def.z);
     if (isNS) group.rotation.y = Math.PI / 2;
 
     // Frame material — use dungeon ground material if provided, else fallback grey
@@ -397,7 +413,7 @@ export class DoorSystem {
       for (const pos of characterPositions) {
         const dx = pos.x - door.worldX;
         const dz = pos.z - door.worldZ;
-        const dy = Math.abs(pos.y - 0);
+        const dy = Math.abs(pos.y - door.group.position.y);
         if (dy > stepHeight) continue;
 
         // Perpendicular = distance along the axis the door faces
@@ -494,6 +510,16 @@ export class DoorSystem {
   /** Return all door groups (for room visibility registration). */
   getDoorGroups(): THREE.Group[] {
     return this.doors.map(d => d.group);
+  }
+
+  /** Look up the cell height at a world-space door position. */
+  private getDoorCellHeight(wx: number, wz: number): number {
+    if (!this.cellHeights || this.doorCellSize <= 0) return 0;
+    const halfW = this.groundSize / 2;
+    const gx = Math.floor((wx + halfW) / this.doorCellSize);
+    const gz = Math.floor((wz + halfW) / this.doorCellSize);
+    if (gx < 0 || gx >= this.gridW || gz < 0 || gz >= this.gridD) return 0;
+    return this.cellHeights[gz * this.gridW + gx];
   }
 
   dispose(): void {

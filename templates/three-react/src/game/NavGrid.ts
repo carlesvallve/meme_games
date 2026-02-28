@@ -4,6 +4,7 @@
  */
 
 import type { NavLink } from './Ladder';
+import type { StairDef } from './StairSystem';
 
 /** Slope direction: which edge of the box is the HIGH side.
  *  0 = +Z, 1 = +X, 2 = -Z, 3 = -X */
@@ -249,7 +250,6 @@ export class NavGrid {
    * Recomputes passability after blocking.
    */
   applyWalkMask(openGrid: boolean[], maskGridW: number, maskGridD: number, maskCellSize: number, worldSize: number): void {
-    const { width, height } = this;
     const halfWorld = worldSize / 2;
 
     // Block nav cells outside the open mask
@@ -263,7 +263,62 @@ export class NavGrid {
       }
     }
 
-    // Recompute passability for non-blocked cells (neighbors may now be blocked)
+    this.recomputePassability();
+  }
+
+  /**
+   * Apply dungeon cell heights to nav cells.
+   * Maps each nav cell to its dungeon grid cell and sets surfaceHeight accordingly.
+   * Then recomputes passability based on the new heights.
+   */
+  applyCellHeights(
+    cellHeights: Float32Array,
+    dungeonGridW: number,
+    dungeonGridD: number,
+    dungeonCellSize: number,
+    worldSize: number,
+    baseFloorY: number,
+    stairMap?: Map<number, StairDef>,
+  ): void {
+    const halfWorld = worldSize / 2;
+    const STEPS = 6;
+
+    for (const cell of this.cells) {
+      if (cell.blocked) continue;
+      const mgx = Math.floor((cell.worldX + halfWorld) / dungeonCellSize);
+      const mgz = Math.floor((cell.worldZ + halfWorld) / dungeonCellSize);
+      if (mgx < 0 || mgx >= dungeonGridW || mgz < 0 || mgz >= dungeonGridD) continue;
+      const idx = mgz * dungeonGridW + mgx;
+      const ch = cellHeights[idx];
+
+      // Sub-cell stair height: match Terrain.getCellHeightAt logic
+      const stair = stairMap?.get(idx);
+      if (stair) {
+        const cellCenterX = -halfWorld + (mgx + 0.5) * dungeonCellSize;
+        const cellCenterZ = -halfWorld + (mgz + 0.5) * dungeonCellSize;
+        const halfCell = dungeonCellSize / 2;
+        let localT: number;
+        if (stair.axis === 'x') {
+          const localX = cell.worldX - cellCenterX;
+          localT = stair.direction > 0 ? (localX + halfCell) / dungeonCellSize : (halfCell - localX) / dungeonCellSize;
+        } else {
+          const localZ = cell.worldZ - cellCenterZ;
+          localT = stair.direction > 0 ? (localZ + halfCell) / dungeonCellSize : (halfCell - localZ) / dungeonCellSize;
+        }
+        localT = Math.max(0, Math.min(1, localT));
+        const step = Math.min(STEPS - 1, Math.floor(localT * STEPS));
+        cell.surfaceHeight = baseFloorY + ch + (step + 1) * (stair.totalHeight / STEPS);
+      } else {
+        cell.surfaceHeight = baseFloorY + ch;
+      }
+    }
+
+    this.recomputePassability();
+  }
+
+  /** Recompute per-edge passability for all non-blocked cells. */
+  private recomputePassability(): void {
+    const { width, height } = this;
     for (let gz = 0; gz < height; gz++) {
       for (let gx = 0; gx < width; gx++) {
         const cell = this.cells[gz * width + gx];
@@ -310,37 +365,7 @@ export class NavGrid {
       }
     }
 
-    // Recompute passability (neighbors may have lost a direction)
-    for (let gz = 0; gz < height; gz++) {
-      for (let gx = 0; gx < width; gx++) {
-        const cell = this.cells[gz * width + gx];
-        if (cell.blocked) continue;
-        let mask = 0;
-        for (let dir = 0; dir < 8; dir++) {
-          const ngx = gx + DIR_DGX[dir];
-          const ngz = gz + DIR_DGZ[dir];
-          if (ngx < 0 || ngx >= width || ngz < 0 || ngz >= height) continue;
-          const neighbor = this.cells[ngz * width + ngx];
-          if (neighbor.blocked) continue;
-          if (Math.abs(cell.surfaceHeight - neighbor.surfaceHeight) > this.stepHeight) continue;
-          if (dir % 2 === 1) {
-            const [c1, c2] = DIAGONAL_CARDINALS[dir];
-            const n1gx = gx + DIR_DGX[c1], n1gz = gz + DIR_DGZ[c1];
-            const n2gx = gx + DIR_DGX[c2], n2gz = gz + DIR_DGZ[c2];
-            if (n1gx < 0 || n1gx >= width || n1gz < 0 || n1gz >= height) continue;
-            if (n2gx < 0 || n2gx >= width || n2gz < 0 || n2gz >= height) continue;
-            const adj1 = this.cells[n1gz * width + n1gx];
-            const adj2 = this.cells[n2gz * width + n2gx];
-            if (adj1.blocked || adj2.blocked) continue;
-            if (Math.abs(cell.surfaceHeight - adj1.surfaceHeight) > this.stepHeight) continue;
-            if (Math.abs(cell.surfaceHeight - adj2.surfaceHeight) > this.stepHeight) continue;
-          }
-          mask |= 1 << dir;
-        }
-        cell.passable = mask;
-      }
-    }
-
+    this.recomputePassability();
     this.bakeSpawnRegion();
   }
 

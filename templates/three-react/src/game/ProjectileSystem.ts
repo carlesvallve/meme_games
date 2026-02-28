@@ -165,6 +165,8 @@ interface Projectile {
   trailPositions: THREE.Vector3[];
   /** Height above ground for terrain-follow (derived from muzzle.up) */
   flyYOffset: number;
+  /** Knockback impulse speed to apply on hit (attacker's rangedKnockback). */
+  knockback: number;
 }
 
 // ── Mesh factories ───────────────────────────────────────────────────
@@ -424,6 +426,8 @@ export class ProjectileSystem {
     terrainColliders?: THREE.Object3D[],
     excludeObjects?: THREE.Object3D[],
     muzzleUp?: number,
+    autoTarget = true,
+    knockback = 2.5,
   ): boolean {
     // Cooldown check
     const cd = this.cooldowns.get(ownerKey) ?? 0;
@@ -455,7 +459,7 @@ export class ProjectileSystem {
       : allObstacles.filter(o => !isCollisionOnly(o));
 
     let bestDist = AUTO_TARGET_RANGE;
-    for (const enemy of enemies) {
+    for (const enemy of (autoTarget ? enemies : [])) {
       if (!enemy.isAlive) continue;
       const ex = enemy.mesh.position.x;
       const ey = enemy.mesh.position.y;
@@ -560,6 +564,7 @@ export class ProjectileSystem {
       trailMesh,
       trailPositions,
       flyYOffset: muzzleUp ?? FLY_Y_OFFSET,
+      knockback,
     });
 
     // SFX — spatial, type-specific
@@ -1108,7 +1113,7 @@ export class ProjectileSystem {
             const hitDirY = cdy / cDist;
             const hitDirZ = cdz / cDist;
 
-            const wasHit = enemy.takeDamage(p.damage, p.mesh.position.x - p.vx * 0.1, p.mesh.position.z - p.vz * 0.1);
+            const wasHit = enemy.takeDamage(p.damage, p.mesh.position.x - p.vx * 0.1, p.mesh.position.z - p.vz * 0.1, p.knockback);
             if (wasHit) {
               onHit({
                 enemy,

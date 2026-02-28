@@ -7,6 +7,7 @@ import type { VoxCharEntry } from './VoxCharacterDB';
 import { VOX_ENEMIES } from './VoxCharacterDB';
 import { ChaseBehavior } from '../behaviors/ChaseBehavior';
 import type { CharacterType } from './characters';
+import { useGameStore, type EnemyParams } from '../../store';
 
 export class Enemy extends Character {
   private chaseBehavior: ChaseBehavior | null = null;
@@ -20,19 +21,22 @@ export class Enemy extends Character {
   ) {
     super(scene, terrain, navGrid, 'slot0' as CharacterType, position, ladderDefs, true);
 
+    const ep = useGameStore.getState().enemyParams;
     this.isEnemy = true;
-    this.hp = 4;
-    this.maxHp = 4;
+    this.hp = ep.hp;
+    this.maxHp = ep.hp;
 
-    // Override only what differs from DEFAULT_CHARACTER_PARAMS (from CharacterParams via super)
+    // Override character params with enemy-specific values from the store
     Object.assign(this.params, {
-      speed: 0.5 + Math.random() * 1,
+      speed: ep.speed[0] + Math.random() * (ep.speed[1] - ep.speed[0]),
       hopHeight: 0.03,
-      attackCooldown: 1.2,
-      chaseRange: 8,
-      knockbackSpeed: 2,
-      invulnDuration: 0.5,
-      stunDuration: 0.15,
+      attackDamage: Math.floor(Math.random() * 4) + 1,
+      attackCooldown: ep.attackCooldown,
+      chaseRange: ep.chaseRange,
+      invulnDuration: ep.invulnDuration,
+      stunDuration: ep.stunDuration,
+      melee: { ...ep.melee },
+      ranged: { ...ep.ranged },
     });
 
     // Remove torch lights (enemies don't carry torches)

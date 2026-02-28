@@ -12,6 +12,7 @@ import { DoorSystem } from './Door';
 import { generateNature, type NatureGeneratorResult } from './NatureGenerator';
 import { paletteBiome } from './ColorPalettes';
 import { buildVoxelDungeonCollision, loadVoxelDungeonVisuals } from './VoxelDungeon';
+import { findStairCandidates, computeCellHeights, buildStairMeshes, getStairCellSet, type StairDef } from './StairSystem';
 import { DUNGEON_VARIANTS } from './VoxDungeonDB';
 import { RoomVisibility } from './RoomVisibility';
 import { DungeonPropSystem, clearPropCache } from './DungeonProps';
@@ -159,6 +160,13 @@ export class Terrain {
   private walkMask: WalkMask | null = null;
   private effectiveGroundSize: number = 0; // may differ from groundSize for voxel dungeons
   private baseFloorY: number = 0; // minimum floor height (e.g. VOX ground tile thickness)
+
+  // Stair system cell heights (only for voxelDungeon preset)
+  private cellHeights: Float32Array | null = null;
+  private dungeonCellSize = 0;
+  private dungeonGridW = 0;
+  private dungeonGridD = 0;
+  private stairMap: Map<number, StairDef> = new Map();
 
   // Dynamic debris (e.g. doors) — checked by resolveMovement alongside static debris
   private dynamicDebris: DebrisBox[] = [];
@@ -1517,6 +1525,7 @@ export class Terrain {
 
     // Compute entrance/exit room centers for character spawn/exit detection
     const halfWorld = this.groundSize / 2;
+    // NOTE: cellHeightsArr not computed yet here — room Y updated after stair computation below
     if (output.rooms.length > 0) {
       const computeRoomCenter = (roomIdx: number): THREE.Vector3 => {
         const r = output.rooms[roomIdx];
@@ -1574,6 +1583,42 @@ export class Terrain {
     // Store the resolved theme so it can be saved in level snapshots
     useGameStore.getState().setCurrentTheme(theme);
 
+    // ── Stair system: compute height variation ──
+    const voxScale = cellSize / 15;
+    const wallVoxH = 17 * voxScale;   // wall vox model height
+    const floorVoxH = 1 * voxScale;   // floor tile thickness
+    const stepH = wallVoxH + floorVoxH; // total stair rise — top step flush with next floor surface
+    const stairRng = new SeededRandom(this.dungeonSeed ?? 0);
+    const stairs = findStairCandidates(
+      output.roomOwnership, output.corridors, gridW, gridD, stepH, wallVoxH, stairRng,
+      output.entranceRoom, output.rooms.length,
+    );
+    const cellHeightsArr = computeCellHeights(
+      stairs, output.roomOwnership, visualOpenGrid,
+      output.entranceRoom, output.rooms, gridW, gridD,
+      output.corridors,
+    );
+    this.cellHeights = cellHeightsArr;
+    this.dungeonCellSize = cellSize;
+    this.dungeonGridW = gridW;
+    this.dungeonGridD = gridD;
+    this.stairMap.clear();
+    for (const s of stairs) this.stairMap.set(s.gz * gridW + s.gx, s);
+
+    // Update entrance/exit room center Y with cell heights
+    if (this.entranceRoomCenter && output.rooms.length > 0) {
+      const er = output.rooms[output.entranceRoom];
+      const egx = Math.floor(er.x + er.w / 2);
+      const egz = Math.floor(er.z + er.d / 2);
+      this.entranceRoomCenter.y = cellHeightsArr[egz * gridW + egx];
+    }
+    if (this.exitRoomCenter && output.rooms.length > 0) {
+      const xr = output.rooms[output.exitRoom];
+      const xgx = Math.floor(xr.x + xr.w / 2);
+      const xgz = Math.floor(xr.z + xr.d / 2);
+      this.exitRoomCenter.y = cellHeightsArr[xgz * gridW + xgx];
+    }
+
     const voxConfig = {
       openGrid: visualOpenGrid,
       gridW: output.walkMask.gridW,
@@ -1584,6 +1629,8 @@ export class Terrain {
       gridDoors: output.gridDoors,
       roomOwnership: output.roomOwnership,
       theme,
+      cellHeights: cellHeightsArr,
+      stairCells: getStairCellSet(stairs, gridW),
     };
 
     const vdResult = buildVoxelDungeonCollision(voxConfig, this.boxGroup);
@@ -1624,6 +1671,10 @@ export class Terrain {
           cellSize,
           true, // useVoxDoors
           frameMat,
+          cellHeightsArr,
+          gridW,
+          gridD,
+          this.groundSize,
         );
       }
 
@@ -1658,6 +1709,45 @@ export class Terrain {
         }
       }
 
+      // Build stair riser meshes and register with room visibility
+      if (stairs.length > 0 && visualResult) {
+        const stairGroup = buildStairMeshes(
+          stairs, cellHeightsArr, cellSize, gridW, this.groundSize, visualResult.groundColor,
+        );
+        this.group.add(stairGroup);
+
+        // Register stair meshes with the room visibility system
+        // Each stairGroup child is a Group (per stair cell) containing step Meshes
+        if (this.roomVisibility) {
+          for (const stairCell of stairGroup.children) {
+            if (!(stairCell instanceof THREE.Group)) continue;
+            const wx = stairCell.position.x;
+            const wz = stairCell.position.z;
+            const mgx = Math.floor((wx + halfW) / cellSize);
+            const mgz = Math.floor((wz + halfW) / cellSize);
+            if (mgx >= 0 && mgx < gridW && mgz >= 0 && mgz < gridD) {
+              const rid = output.roomOwnership[mgz * gridW + mgx];
+              const adjRooms = new Set<number>();
+              if (rid !== -1) adjRooms.add(rid);
+              for (const [dx, dz] of [[0, -1], [0, 1], [-1, 0], [1, 0]]) {
+                const nx = mgx + dx, nz = mgz + dz;
+                if (nx >= 0 && nx < gridW && nz >= 0 && nz < gridD) {
+                  const nrid = output.roomOwnership[nz * gridW + nx];
+                  if (nrid !== -1) adjRooms.add(nrid);
+                }
+              }
+              const roomIds = adjRooms.size > 0 ? [...adjRooms] : undefined;
+              // Register each step mesh within this stair cell
+              for (const stepMesh of stairCell.children) {
+                if (stepMesh instanceof THREE.Mesh && roomIds) {
+                  this.roomVisibility.registerMesh(stepMesh, roomIds);
+                }
+              }
+            }
+          }
+        }
+      }
+
       // Place all props (room props, portals, corridor props) — meshes start hidden
       clearPropCache();
       this.propSystem = new DungeonPropSystem(this.group);
@@ -1674,6 +1764,7 @@ export class Terrain {
         output.exitRoom,
         theme,
         this.dungeonSeed,
+        cellHeightsArr,
       );
 
       // Register prop meshes + labels with room visibility
@@ -2023,6 +2114,14 @@ export class Terrain {
       // then let walkMask define exactly which cells are open/blocked.
       grid.build([], stepHeight, 0);
       grid.applyWalkMask(this.walkMask.openGrid, this.walkMask.gridW, this.walkMask.gridD, this.walkMask.cellSize, navGroundSize);
+      // Apply stair cell heights to nav grid surface heights
+      if (this.cellHeights) {
+        grid.applyCellHeights(
+          this.cellHeights, this.dungeonGridW, this.dungeonGridD,
+          this.dungeonCellSize, navGroundSize, this.baseFloorY,
+          this.stairMap,
+        );
+      }
     } else {
       // Free-form terrain (scattered, terraced): use debris boxes for blocking
       grid.build(this.debris, stepHeight, capsuleRadius);
@@ -2486,7 +2585,7 @@ export class Terrain {
     if (this.heightmapData) {
       return sampleHeightmap(this.heightmapData, this.heightmapRes, this.heightmapGroundSize, x, z);
     }
-    return this.baseFloorY;
+    return this.baseFloorY + this.getCellHeightAt(x, z);
   }
 
   /** Like getTerrainY but ignores prop debris (tables, chairs). Used for projectile terrain-follow. */
@@ -2494,7 +2593,7 @@ export class Terrain {
     if (this.heightmapData) {
       return sampleHeightmap(this.heightmapData, this.heightmapRes, this.heightmapGroundSize, x, z);
     }
-    let maxY = this.baseFloorY;
+    let maxY = this.baseFloorY + this.getCellHeightAt(x, z);
     for (const box of this.debris) {
       if (box.isProp) continue;
       if (Math.abs(x - box.x) < box.halfW && Math.abs(z - box.z) < box.halfD) {
@@ -2503,6 +2602,50 @@ export class Terrain {
       }
     }
     return maxY;
+  }
+
+  /** Get cell height at world position, including sub-cell stair steps */
+  private getCellHeightAt(x: number, z: number): number {
+    if (!this.cellHeights || this.dungeonCellSize <= 0) return 0;
+    const halfW = this.groundSize / 2;
+    const cs = this.dungeonCellSize;
+    const mgx = Math.floor((x + halfW) / cs);
+    const mgz = Math.floor((z + halfW) / cs);
+    if (mgx < 0 || mgx >= this.dungeonGridW || mgz < 0 || mgz >= this.dungeonGridD) return 0;
+    const idx = mgz * this.dungeonGridW + mgx;
+    const cellH = this.cellHeights[idx];
+    const stair = this.stairMap.get(idx);
+    if (!stair) return cellH;
+    // Sub-cell stair: localT = 0..1 from low side to high side
+    const cellCenterX = -halfW + (mgx + 0.5) * cs;
+    const cellCenterZ = -halfW + (mgz + 0.5) * cs;
+    const halfCell = cs / 2;
+    let localT: number;
+    if (stair.axis === 'x') {
+      const localX = x - cellCenterX;
+      localT = stair.direction > 0 ? (localX + halfCell) / cs : (halfCell - localX) / cs;
+    } else {
+      const localZ = z - cellCenterZ;
+      localT = stair.direction > 0 ? (localZ + halfCell) / cs : (halfCell - localZ) / cs;
+    }
+    localT = Math.max(0, Math.min(1, localT));
+    // Smooth ramp offset to step tops — character walks ON the geometry
+    // At localT=0: first step top (totalHeight/STEPS)
+    // At localT=1: last step top (totalHeight)
+    const STEPS = 6;
+    const oneStep = stair.totalHeight / STEPS;
+    return cellH + oneStep + localT * (stair.totalHeight - oneStep);
+  }
+
+  /** Returns true if the world position is on a stair cell */
+  isOnStairs(x: number, z: number): boolean {
+    if (!this.cellHeights || this.dungeonCellSize <= 0) return false;
+    const halfW = this.groundSize / 2;
+    const cs = this.dungeonCellSize;
+    const mgx = Math.floor((x + halfW) / cs);
+    const mgz = Math.floor((z + halfW) / cs);
+    if (mgx < 0 || mgx >= this.dungeonGridW || mgz < 0 || mgz >= this.dungeonGridD) return false;
+    return this.stairMap.has(mgz * this.dungeonGridW + mgx);
   }
 
   getTerrainY(x: number, z: number, radius = 0): number {
@@ -2523,6 +2666,10 @@ export class Terrain {
 
     // Box-based: O(n) iteration
     let maxY = this.baseFloorY;
+
+    // Add cell height offset from stair system (includes sub-cell stair steps)
+    maxY += this.getCellHeightAt(x, z);
+
     for (const box of this.debris) {
       if (
         Math.abs(x - box.x) < box.halfW + radius &&

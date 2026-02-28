@@ -203,6 +203,8 @@ export class RoomVisibility {
     }
 
     for (const [obj, state] of objState) {
+      // Respect per-object disable flags (e.g. room labels toggled off in settings)
+      if (obj.userData.labelsDisabled) { obj.visible = false; continue; }
       if (state === 'active') {
         obj.visible = true;
         this.setMeshMaterial(obj, false);
