@@ -82,7 +82,7 @@ export class ChestSystem {
   private readonly terrain: Terrain;
   private readonly lootSystem: LootSystem;
   private readonly count: number;
-  private readonly interactDist = 1.2;
+  private readonly interactDist = 0.7;
   private readonly openSpeed = 3; // 1/seconds to fully open
 
   private bodyGeo: THREE.BufferGeometry;
@@ -112,6 +112,7 @@ export class ChestSystem {
 
   /** Register a chest placed by DungeonPropSystem (voxel dungeon). Closed mesh → swap to openGeo on interact, spawn loot. */
   registerPropChest(position: THREE.Vector3, mesh: THREE.Mesh, entity: Entity, openGeo?: THREE.BufferGeometry): void {
+    if (!openGeo) console.warn('[ChestSystem] Registered prop chest without openGeo at', position.x.toFixed(2), position.z.toFixed(2));
     const group = new THREE.Group();
     group.position.copy(position);
     const lidPivot = new THREE.Object3D();
@@ -193,9 +194,9 @@ export class ChestSystem {
 
       // Animate lid if opening
       if (chest.opened) {
-        // Prop chests (voxel dungeon): geometry already swapped on open, just stay there
+        // Prop chests (voxel dungeon): geometry swapped on open, just mark done (keep visible)
         if (chest.propRef) {
-          chest.removed = true;
+          chest.removed = true; // no further updates needed, chest stays visible as opened
           continue;
         }
 
@@ -252,10 +253,18 @@ export class ChestSystem {
         this.lootSystem.spawnLoot(lootPos);
 
         // Prop chest (voxel dungeon): swap to open geometry immediately
-        if (chest.propRef?.openGeo) {
+        if (chest.propRef) {
           const { mesh, openGeo } = chest.propRef;
-          if (mesh.geometry) mesh.geometry.dispose();
-          mesh.geometry = openGeo;
+          if (openGeo) {
+            if (mesh.geometry) mesh.geometry.dispose();
+            mesh.geometry = openGeo;
+          } else {
+            // Fallback: darken the chest to indicate it's opened
+            const mat = mesh.material as THREE.MeshStandardMaterial;
+            mat.emissive.setHex(0x000000);
+            mat.emissiveIntensity = 0;
+            mat.color.multiplyScalar(0.5);
+          }
         }
       }
     }

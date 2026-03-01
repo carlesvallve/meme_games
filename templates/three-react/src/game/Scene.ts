@@ -34,13 +34,14 @@ const PRESET_SCALES: Record<LightPreset, number> = {
   none: 0,
 };
 
-export function applyLightPreset(lights: SceneLights, preset: LightPreset): void {
+export function applyLightPreset(lights: SceneLights, preset: LightPreset, isExterior = false): void {
   const s = PRESET_SCALES[preset];
-  lights.ambient.intensity = DEFAULTS.ambient * s;
-  lights.dirPrimary.intensity = DEFAULTS.dirPrimary * s;
-  lights.dirFill.intensity = DEFAULTS.dirFill * s;
-  lights.dirRim.intensity = DEFAULTS.dirRim * s;
-  lights.hemi.intensity = DEFAULTS.hemi * s;
+  const ext = isExterior ? 1.6 : 1;
+  lights.ambient.intensity = DEFAULTS.ambient * s * ext;
+  lights.dirPrimary.intensity = DEFAULTS.dirPrimary * s * ext;
+  lights.dirFill.intensity = DEFAULTS.dirFill * s * ext;
+  lights.dirRim.intensity = DEFAULTS.dirRim * s * ext;
+  lights.hemi.intensity = DEFAULTS.hemi * s * ext;
 }
 
 export function createScene(paletteName = 'meadow'): { scene: THREE.Scene; lights: SceneLights; sceneSky: SceneSky } {

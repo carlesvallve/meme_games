@@ -16,6 +16,9 @@ import { sfxHurt } from './sfx/hurt';
 import { sfxShoot } from './sfx/shoot';
 import { sfxArrow } from './sfx/arrow';
 import { sfxFireball } from './sfx/fireball';
+import { sfxWoodBreak } from './sfx/woodBreak';
+import { sfxCeramicBreak } from './sfx/ceramicBreak';
+import { sfxDrink } from './sfx/drink';
 
 /**
  * Spatial audio attenuation
@@ -143,8 +146,11 @@ class AudioSystemClass {
         case 'hurt':     sfxHurt(ctx, dest); break;
         case 'shoot':    sfxShoot(ctx, dest); break;
         case 'arrow':    sfxArrow(ctx, dest); break;
-        case 'fireball': sfxFireball(ctx, dest); break;
-        default:         playTone(ctx, 440, 0.1, 'sine', 0.08); break;
+        case 'fireball':     sfxFireball(ctx, dest); break;
+        case 'woodBreak':    sfxWoodBreak(ctx, dest); break;
+        case 'ceramicBreak': sfxCeramicBreak(ctx, dest); break;
+        case 'drink':        sfxDrink(ctx, dest); break;
+        default:             playTone(ctx, 440, 0.1, 'sine', 0.08); break;
       }
     } catch {
       // ignore

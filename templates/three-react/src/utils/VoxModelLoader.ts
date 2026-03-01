@@ -139,6 +139,45 @@ export function buildVoxMesh(
   return geo;
 }
 
+// ── Geometry tinting ──
+
+/**
+ * Clone a geometry and shift the hue of all vertex colors.
+ * Returns a new geometry — the original is untouched for reuse.
+ *
+ * @param geo Source geometry with a 'color' attribute (RGB, float 0-1)
+ * @param hueShift Amount to shift hue by (0-1 wraps around)
+ * @param satBoost Optional saturation multiplier (default 1.0)
+ */
+export function tintGeometry(
+  geo: THREE.BufferGeometry,
+  hueShift: number,
+  satBoost = 1.0,
+): THREE.BufferGeometry {
+  const cloned = geo.clone();
+  const colorAttr = cloned.getAttribute('color');
+  if (!colorAttr) return cloned;
+
+  const arr = (colorAttr as THREE.BufferAttribute).array as Float32Array;
+  const tmpColor = new THREE.Color();
+  const hsl = { h: 0, s: 0, l: 0 };
+
+  for (let i = 0; i < arr.length; i += 3) {
+    tmpColor.setRGB(arr[i], arr[i + 1], arr[i + 2]);
+    tmpColor.getHSL(hsl);
+    hsl.h = (hsl.h + hueShift) % 1;
+    if (hsl.h < 0) hsl.h += 1;
+    hsl.s = Math.min(1, hsl.s * satBoost);
+    tmpColor.setHSL(hsl.h, hsl.s, hsl.l);
+    arr[i] = tmpColor.r;
+    arr[i + 1] = tmpColor.g;
+    arr[i + 2] = tmpColor.b;
+  }
+
+  colorAttr.needsUpdate = true;
+  return cloned;
+}
+
 // ── Character loader ──
 
 const FRAME_PATTERNS = {

@@ -95,7 +95,7 @@ export const DEFAULT_CHARACTER_PARAMS: MovementParams = {
   exhaustDuration: 1.0,
   footIKEnabled: false,
   // loot / VFX
-  magnetRadius: 1,
+  magnetRadius: 0.7,
   magnetSpeed: 16,
   // combat modes
   melee: { autoTarget: true, knockback: 5, showSlashEffect: true, exhaustionEnabled: false },

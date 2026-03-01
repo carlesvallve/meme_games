@@ -975,7 +975,7 @@ function ensureConnectivity(
       }
     }
 
-    console.log(`[Ramp ${iter + 1}] ${heightDiff.toFixed(1)}m, ${slopeLen} slope cells at (${bestLowX},${bestLowZ}) dir=(${bestDirX},${bestDirZ})`);
+    // console.log(`[Ramp ${iter + 1}] ${heightDiff.toFixed(1)}m, ${slopeLen} slope cells at (${bestLowX},${bestLowZ}) dir=(${bestDirX},${bestDirZ})`);
   }
 
   return allRampCells;

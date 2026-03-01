@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { ProjectileConfig } from './character';
 import type { Enemy } from './character';
-import { entityRegistry, Layer } from './Entity';
+import { Entity, entityRegistry, Layer } from './Entity';
 import { audioSystem } from '../utils/AudioSystem';
 
 // ── Constants ────────────────────────────────────────────────────────
@@ -323,6 +323,12 @@ export interface ProjectileUpdateOptions {
   terrainColliders?: THREE.Object3D[];
   /** Exclude from raycast (e.g. open doors) — object or any descendant is skipped */
   excludeObjects?: THREE.Object3D[];
+  /** Called when a projectile hits a prop entity — return true if the prop was destroyed */
+  onPropHit?: (entity: Entity, position: THREE.Vector3) => boolean;
+  /** Destroyable prop collision data for proximity-based hit detection */
+  propTargets?: ReadonlyArray<{ x: number; y: number; z: number; radius: number; height: number; entity: Entity }>;
+  /** Meshes to exclude from stick raycasts (destroyable props — handled by proximity instead) */
+  destroyableMeshes?: Set<THREE.Object3D>;
 }
 
 // ── ProjectileSystem ─────────────────────────────────────────────────
@@ -452,8 +458,8 @@ export class ProjectileSystem {
     const archAndProps = entityRegistry ? entityRegistry.getByLayer(Layer.Architecture | Layer.Prop).map(e => e.object3D) : [];
     const allObstacles = [...archAndProps, ...(terrainColliders ?? [])];
     const obstacles = excludeObjects?.length
-      ? allObstacles.filter(o => !isExcludedFromRaycast(o, excludeObjects) && !isCollisionOnly(o))
-      : allObstacles.filter(o => !isCollisionOnly(o));
+      ? allObstacles.filter(o => o.parent && !isExcludedFromRaycast(o, excludeObjects) && !isCollisionOnly(o))
+      : allObstacles.filter(o => o.parent && !isCollisionOnly(o));
 
     let bestDist = AUTO_TARGET_RANGE;
     for (const enemy of (autoTarget ? enemies : [])) {
@@ -510,7 +516,39 @@ export class ProjectileSystem {
     dirY /= dirLen;
     dirZ /= dirLen;
 
-    // Create mesh and place at muzzle (spawn) position
+    // Wall check: raycast from player body toward muzzle spawn point.
+    // If a wall is in the way, pull the spawn point back so the arrow
+    // starts just before the wall and the normal collision handles the rest.
+    const bodyOrigin = new THREE.Vector3(
+      spawnX - faceDirX * 0.6,
+      spawnY,
+      spawnZ - faceDirZ * 0.6,
+    );
+    const toMuzzle = new THREE.Vector3(spawnX - bodyOrigin.x, 0, spawnZ - bodyOrigin.z);
+    const muzzleDist = toMuzzle.length();
+    if (muzzleDist > 0.01 && obstacles.length > 0) {
+      toMuzzle.normalize();
+      raycaster.set(bodyOrigin, toMuzzle);
+      raycaster.far = muzzleDist + 0.1;
+      raycaster.near = 0;
+      const wallHits = raycaster.intersectObjects(obstacles, true);
+      for (const h of wallHits) {
+        if (!(h.object as THREE.Mesh).isMesh || !h.object.visible) continue;
+        const m = h.object as THREE.Mesh;
+        if (m.geometry) {
+          m.geometry.computeBoundingBox();
+          const bb = m.geometry.boundingBox;
+          if (bb && (bb.max.y - bb.min.y) < 0.3) continue;
+        }
+        // Pull spawn back to just before the wall hit
+        const pullback = 0.15;
+        spawnX = h.point.x - faceDirX * pullback;
+        spawnZ = h.point.z - faceDirZ * pullback;
+        break;
+      }
+    }
+
+    // Create mesh and place at (possibly adjusted) spawn position
     const isArrow = config.kind === 'arrow';
     const mesh = isArrow ? createArrowMesh(config.color) : createFireballMesh(config.color);
     const px = spawnX;
@@ -743,14 +781,24 @@ export class ProjectileSystem {
     options?: ProjectileUpdateOptions,
   ): void {
     const getGroundY = options?.getGroundY;
+    const onPropHit = options?.onPropHit;
+    const propTargets = options?.propTargets;
     const archAndProps =
       entityRegistry ? entityRegistry.getByLayer(Layer.Architecture | Layer.Prop).map(e => e.object3D) : [];
     const terrainColliders = options?.terrainColliders ?? [];
     const excludeObjects = options?.excludeObjects ?? [];
     // Stick raycast: only architecture + props that are visible (no invisible colliders). Terrain (ground) causes arrows to stick immediately in front of the player; ground hits are already handled by getGroundY/slope above.
-    const stickColliders = excludeObjects.length
-      ? archAndProps.filter(o => !isExcludedFromRaycast(o, excludeObjects) && !isCollisionOnly(o) && isVisibleForStick(o))
-      : archAndProps.filter(o => !isCollisionOnly(o) && isVisibleForStick(o));
+    // Destroyable props are excluded — they're handled by proximity detection instead.
+    const destroyableMeshes = options?.destroyableMeshes;
+    const stickColliders = archAndProps.filter(o => {
+      if (!o.parent) return false; // detached from scene
+      if (isCollisionOnly(o)) return false;
+      if (isNoProjectileStick(o)) return false;
+      if (!isVisibleForStick(o)) return false;
+      if (destroyableMeshes?.has(o)) return false;
+      if (excludeObjects.length && isExcludedFromRaycast(o, excludeObjects)) return false;
+      return true;
+    });
     const raycaster = new THREE.Raycaster();
     const rayOrigin = new THREE.Vector3();
     const rayDir = new THREE.Vector3();
@@ -897,6 +945,49 @@ export class ProjectileSystem {
       let hit = false;
       let staticHitPoint: THREE.Vector3 | null = null; // for energy impact on doors/walls/props
 
+      // Proximity-based destroyable prop hit — checked FIRST so props catch projectiles
+      // that would otherwise fly over them. Uses closest-point-on-segment (lastPos→curPos)
+      // in XZ, with vertical hit area from prop base to muzzle spawn height.
+      if (onPropHit && propTargets && !p.stuck) {
+        const cx = p.mesh.position.x;
+        const cz = p.mesh.position.z;
+        // Segment in XZ: A=last, B=current
+        const segDx = cx - lastX;
+        const segDz = cz - lastZ;
+        const segLenSq = segDx * segDx + segDz * segDz;
+        for (const pt of propTargets) {
+          // Closest point on segment to prop center (XZ only)
+          let closestX: number, closestZ: number;
+          if (segLenSq < 0.0001) {
+            closestX = cx; closestZ = cz;
+          } else {
+            const t = Math.max(0, Math.min(1,
+              ((pt.x - lastX) * segDx + (pt.z - lastZ) * segDz) / segLenSq));
+            closestX = lastX + t * segDx;
+            closestZ = lastZ + t * segDz;
+          }
+          const dx = closestX - pt.x;
+          const dz = closestZ - pt.z;
+          const distXZSq = dx * dx + dz * dz;
+          const hitRadius = pt.radius + 0.2;
+          if (distXZSq > hitRadius * hitRadius) continue;
+          // Y: interpolate projectile Y at closest point
+          const tY = segLenSq > 0.0001
+            ? Math.max(0, Math.min(1, ((pt.x - lastX) * segDx + (pt.z - lastZ) * segDz) / segLenSq))
+            : 0;
+          const closestY = lastY + tY * (p.mesh.position.y - lastY);
+          // Hit area: from prop base to projectile muzzle spawn height
+          if (closestY < pt.y - 0.1 || closestY > p.startY + 0.1) continue;
+          if (onPropHit(pt.entity, new THREE.Vector3(closestX, closestY, closestZ))) {
+            this.spawnEnergyImpact(closestX, closestY, closestZ, this.getProjectileColor(p), p.vx, p.vy, p.vz);
+            this.removeProjectile(i);
+            hit = true;
+            break;
+          }
+        }
+        if (hit) continue;
+      }
+
       // Raycast vs architecture/props FIRST — use actual hit point on walls/cubes. If we did terrain first, getGroundY would return top-of-cube and we'd stick there instead of on the hit face.
       if (!hit && stickColliders.length > 0) {
         this.scene.updateMatrixWorld(true);
@@ -1026,6 +1117,18 @@ export class ProjectileSystem {
                 dbgSphere.geometry.dispose(); tex.dispose();
               }, 5000);
             }
+            // Check if hit object is a destroyable prop
+            const hitEntity = h.object.userData?.entity as Entity | undefined;
+            if (onPropHit && hitEntity && hitEntity.layer & Layer.Prop) {
+              if (onPropHit(hitEntity, stickPoint)) {
+                // Prop was destroyed — remove projectile
+                this.spawnEnergyImpact(stickPoint.x, stickPoint.y, stickPoint.z, this.getProjectileColor(p), p.vx, p.vy, p.vz);
+                this.removeProjectile(i);
+                hit = true;
+                break;
+              }
+            }
+
             audioSystem.sfxAt('fleshHitHigh', h.point.x, h.point.z);
             if (p.isArrow) {
               this.stickArrow(p, stickPoint);

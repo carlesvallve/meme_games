@@ -2,12 +2,14 @@
 // Places VOX prop meshes inside dungeon rooms using the VoxDungeonDB registry.
 
 import * as THREE from 'three';
-import { loadVoxModel, buildVoxMesh } from '../utils/VoxModelLoader';
+import { loadVoxModel, buildVoxMesh, tintGeometry } from '../utils/VoxModelLoader';
 import { Entity, Layer } from './Entity';
 import type { DungeonPropEntry, PropPlacement } from './VoxDungeonDB';
 import { getRandomProp, getRandomPropStyled, extractPropStyle, getPropsWhere, getRandomTile } from './VoxDungeonDB';
 import { loadTileEntry } from './VoxDungeonLoader';
 import { SeededRandom } from '../utils/SeededRandom';
+import { POTION_HUES } from './PotionEffectSystem';
+import type { PotionEffectSystem } from './PotionEffectSystem';
 
 // Light cap removed — room visibility hides lights in non-active rooms so GPU cost is bounded.
 
@@ -163,7 +165,7 @@ const ROOM_TEMPLATES: RoomTemplate[] = [
     { category: 'candelabrum', count: 3 },
     { category: 'torch_wall', count: 3 },
     { category: 'banner', count: 2 },
-    { category: 'potion', count: 2 },
+    { category: 'potion', count: 1 },
     { category: 'bookcase_small', count: 1 },
   ]},
   // ── Bar / Tavern ──
@@ -173,7 +175,7 @@ const ROOM_TEMPLATES: RoomTemplate[] = [
     { category: 'chair', count: 4 },
     { category: 'mug', count: 3 },
     { category: 'barrel', count: 3 },
-    { category: 'bottle', count: 3 },
+    { category: 'bottle', count: 2 },
     { category: 'torch_wall', count: 3 },
     { category: 'banner', count: 2 },
     { category: 'chest', count: 1 },
@@ -211,8 +213,8 @@ const ROOM_TEMPLATES: RoomTemplate[] = [
   // ── Alchemy Lab ──
   { name: 'alchemy', minSize: 3, weight: 2, props: [
     { category: 'table_small', count: 1 },
-    { category: 'potion', count: 4 },
-    { category: 'bottle', count: 3 },
+    { category: 'potion', count: 2 },
+    { category: 'bottle', count: 2 },
     { category: 'candelabrum_small', count: 2 },
     { category: 'bookcase_small', count: 3 },
     { category: 'bookcase_large', count: 1 },
@@ -238,7 +240,7 @@ const ROOM_TEMPLATES: RoomTemplate[] = [
     { category: 'candelabrum', count: 3 },
     { category: 'banner', count: 4 },
     { category: 'torch_wall', count: 3 },
-    { category: 'potion', count: 2 },
+    { category: 'potion', count: 1 },
     { category: 'bookcase_small', count: 1 },
     { category: 'chest', count: 1 },
   ]},
@@ -266,7 +268,7 @@ const ROOM_TEMPLATES: RoomTemplate[] = [
     { category: 'box', count: 2 },
     { category: 'pot', count: 3 },
     { category: 'torch_wall', count: 2 },
-    { category: 'bottle', count: 2 },
+    { category: 'bottle', count: 1 },
     { category: 'bookcase_small', count: 1 },
     { category: 'chest', count: 1 },
   ]},
@@ -283,7 +285,7 @@ const ROOM_TEMPLATES: RoomTemplate[] = [
     { category: 'box', count: 2 },
     { category: 'torch_wall', count: 2 },
     { category: 'book', count: 2 },
-    { category: 'bottle', count: 2 },
+    { category: 'bottle', count: 1 },
     { category: 'bookcase_small', count: 1 },
     { category: 'chest', count: 1 },
   ]},
@@ -303,7 +305,7 @@ const ROOM_TEMPLATES: RoomTemplate[] = [
     { category: 'pot', count: 3 },
     { category: 'torch_wall', count: 2 },
     { category: 'mug', count: 2 },
-    { category: 'bottle', count: 2 },
+    { category: 'bottle', count: 1 },
     { category: 'bookcase_small', count: 1 },
     { category: 'chest', count: 1 },
   ]},
@@ -391,7 +393,7 @@ interface RoomRect {
   x: number; z: number; w: number; d: number;
 }
 
-interface PlacedProp {
+export interface PlacedProp {
   mesh: THREE.Mesh;
   entity: Entity;
   entry: DungeonPropEntry;
@@ -399,6 +401,65 @@ interface PlacedProp {
   gridCell: { gx: number; gz: number };
   /** For chests: open-state geometry to swap when player opens */
   openGeo?: THREE.BufferGeometry;
+  /** If this is a small item placed on a surface, points to the surface prop */
+  surfaceOf?: PlacedProp;
+  /** Potion color index (0-7) for potion/bottle props */
+  colorIndex?: number;
+  /** Floating label sprite for potion/bottle props */
+  potionLabel?: THREE.Sprite;
+}
+
+/** Create a small floating label sprite for a potion/bottle prop */
+function createPropPotionLabel(text: string, color: string): THREE.Sprite {
+  const canvas = document.createElement('canvas');
+  canvas.width = 128;
+  canvas.height = 32;
+  const ctx = canvas.getContext('2d')!;
+  ctx.font = 'bold 16px monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const metrics = ctx.measureText(text);
+  const pw = Math.min(metrics.width + 12, 120);
+  const px = (128 - pw) / 2;
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+  ctx.roundRect(px, 2, pw, 28, 6);
+  ctx.fill();
+  ctx.fillStyle = color;
+  ctx.fillText(text, 64, 17);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.minFilter = THREE.LinearFilter;
+  const mat = new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false });
+  const sprite = new THREE.Sprite(mat);
+  sprite.scale.set(0.3, 0.075, 1);
+  sprite.renderOrder = 2;
+  sprite.raycast = () => {}; // exclude from raycaster
+  return sprite;
+}
+
+/** Update text/color on a prop potion label */
+function updatePropPotionLabel(sprite: THREE.Sprite, text: string, color: string): void {
+  const mat = sprite.material as THREE.SpriteMaterial;
+  const oldTex = mat.map;
+  const canvas = document.createElement('canvas');
+  canvas.width = 128;
+  canvas.height = 32;
+  const ctx = canvas.getContext('2d')!;
+  ctx.font = 'bold 16px monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const metrics = ctx.measureText(text);
+  const pw = Math.min(metrics.width + 12, 120);
+  const px = (128 - pw) / 2;
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+  ctx.roundRect(px, 2, pw, 28, 6);
+  ctx.fill();
+  ctx.fillStyle = color;
+  ctx.fillText(text, 64, 17);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.minFilter = THREE.LinearFilter;
+  mat.map = texture;
+  mat.needsUpdate = true;
+  if (oldTex) oldTex.dispose();
 }
 
 export class DungeonPropSystem {
@@ -408,6 +469,9 @@ export class DungeonPropSystem {
   private cellSize = 0.75;
   private torchLights: { light: THREE.PointLight; baseIntensity: number; phase: number }[] = [];
   private torchTime = 0;
+  private potionSystem: PotionEffectSystem | null = null;
+  /** Positions of destroyed props — tracked for serialization */
+  private destroyedPositions: Array<{ x: number; z: number }> = [];
 
   // Entrance/exit: spawn positions (cell center) and portal trigger positions (at wall)
   private entrancePos: THREE.Vector3 | null = null;
@@ -419,6 +483,24 @@ export class DungeonPropSystem {
 
   constructor(parent: THREE.Object3D) {
     this.parent = parent;
+  }
+
+  /** Set the potion effect system for tinting and label updates */
+  setPotionSystem(system: PotionEffectSystem): void {
+    this.potionSystem = system;
+    system.onLabelUpdate((colorIndex, label, positive) => {
+      this.updatePotionLabelsForColor(colorIndex, label, positive);
+    });
+  }
+
+  /** Update all potion/bottle prop labels of a given colorIndex when identified */
+  private updatePotionLabelsForColor(colorIndex: number, labelText: string, positive: boolean): void {
+    const color = positive ? '#44ff66' : '#ff4444';
+    for (const prop of this.props) {
+      if (prop.colorIndex === colorIndex && prop.potionLabel) {
+        updatePropPotionLabel(prop.potionLabel, labelText, color);
+      }
+    }
   }
 
   /** Attach a point light to a prop mesh if it's a light source (torch, candelabrum). */
@@ -456,6 +538,7 @@ export class DungeonPropSystem {
     dungeonTheme = 'a_a',
     seed?: number,
     cellHeights?: Float32Array,
+    roomOwnership?: number[],
   ): Promise<void> {
     // Initialize seeded RNG for prop placement
     const actualSeed = seed ?? (Math.random() * 0xFFFFFFFF) >>> 0;
@@ -595,7 +678,7 @@ export class DungeonPropSystem {
       }
 
       // Track placed surfaces in this room for small item placement
-      interface SurfaceSlot { wx: number; wz: number; surfaceY: number; used: number; maxItems: number; rotation: number }
+      interface SurfaceSlot { wx: number; wz: number; surfaceY: number; used: number; maxItems: number; rotation: number; parentProp?: PlacedProp }
       const surfaces: SurfaceSlot[] = [];
 
       // Track placed tables for chair placement
@@ -653,8 +736,16 @@ export class DungeonPropSystem {
           // Chests: place closed mesh, keep open geometry for swap on interact.
           // Both variants use the closed model's voxel scale so they match in size.
           const isChest = entry.category === 'chest';
-          const geo = await loadPropGeo(entry, cellSize, isChest);
+          const isPotion = entry.category === 'potion' || entry.category === 'bottle';
+          let geo = await loadPropGeo(entry, cellSize, isChest);
           if (!geo) continue;
+
+          // Assign random potion color index and tint geometry
+          let potionColorIndex: number | undefined;
+          if (isPotion) {
+            potionColorIndex = rng.int(0, 8);
+            geo = tintGeometry(geo, POTION_HUES[potionColorIndex], 1.2);
+          }
 
           let openGeo: THREE.BufferGeometry | undefined;
           if (isChest && entry.voxPathClosed) {
@@ -702,7 +793,25 @@ export class DungeonPropSystem {
             weight: entry.destroyable ? 3 : 5,
           });
 
-          this.props.push({ mesh, entity, entry, gridCell: { gx: cell.gx, gz: cell.gz }, openGeo });
+          const placedProp: PlacedProp = { mesh, entity, entry, gridCell: { gx: cell.gx, gz: cell.gz }, openGeo };
+
+          // Add floating label + store colorIndex for potion/bottle props
+          if (isPotion && potionColorIndex !== undefined) {
+            placedProp.colorIndex = potionColorIndex;
+            mesh.userData.colorIndex = potionColorIndex;
+            const ps = this.potionSystem;
+            const identified = ps ? ps.isIdentified(potionColorIndex) : false;
+            const text = identified ? (ps?.getLabel(potionColorIndex) ?? '???') : '???';
+            const positive = ps ? ps.isPositive(potionColorIndex) : true;
+            const color = identified ? (positive ? '#44ff66' : '#ff4444') : '#ffffff';
+            const propHeight = entry.baseHeight * propScale;
+            const label = createPropPotionLabel(text, color);
+            label.position.set(0, propHeight + 0.06, 0);
+            mesh.add(label);
+            placedProp.potionLabel = label;
+          }
+
+          this.props.push(placedProp);
 
           // Track as surface for small item placement
           const surfaceH = SURFACE_CATEGORIES[entry.category];
@@ -717,6 +826,7 @@ export class DungeonPropSystem {
                 : (entry.category === 'barrel' || entry.category === 'box' || entry.category === 'pot') ? 1
                 : 2,
               rotation: mesh.rotation.y,
+              parentProp: placedProp,
             });
           }
 
@@ -772,7 +882,7 @@ export class DungeonPropSystem {
             this.parent.add(mesh);
 
             const dummyEntity = new Entity(mesh, { layer: Layer.Prop, radius: 0.01, weight: 0 });
-            this.props.push({ mesh, entity: dummyEntity, entry, gridCell: { gx: 0, gz: 0 } });
+            this.props.push({ mesh, entity: dummyEntity, entry, gridCell: { gx: tgx, gz: tgz } });
           } else {
             // No table — place against wall (random style)
             const entry = roomStyle
@@ -813,14 +923,23 @@ export class DungeonPropSystem {
           const entry = getRandomProp(category, () => rng.next());
           if (!entry) continue;
 
+          const isSmallPotion = entry.category === 'potion' || entry.category === 'bottle';
+          let smallPotionColorIndex: number | undefined;
+
           // Try to find an available surface
           const available = surfaces.filter(s => s.used < s.maxItems);
           if (available.length > 0) {
             const surface = available[Math.floor(rng.next() * available.length)];
             surface.used++;
 
-            const geo = await loadPropGeo(entry, cellSize);
+            let geo = await loadPropGeo(entry, cellSize);
             if (!geo) continue;
+
+            // Tint potion/bottle geometry
+            if (isSmallPotion) {
+              smallPotionColorIndex = rng.int(0, 8);
+              geo = tintGeometry(geo, POTION_HUES[smallPotionColorIndex], 1.2);
+            }
 
             const mesh = new THREE.Mesh(geo, voxMat.clone());
             // Use deterministic slot positions so items never overlap
@@ -840,17 +959,44 @@ export class DungeonPropSystem {
             mesh.castShadow = true;
             this.parent.add(mesh);
 
-            // Small items are decorative — no collision entity
+            // Small items are decorative — no collision, projectiles pass through
+            mesh.userData.noProjectileStick = true;
             const dummyEntity = new Entity(mesh, { layer: Layer.Prop, radius: 0.01, weight: 0 });
-            this.props.push({ mesh, entity: dummyEntity, entry, gridCell: { gx: 0, gz: 0 } });
+            const surfaceCell = surface.parentProp ? surface.parentProp.gridCell : { gx: 0, gz: 0 };
+            const smallProp: PlacedProp = { mesh, entity: dummyEntity, entry, gridCell: surfaceCell, surfaceOf: surface.parentProp };
+
+            // Add label + colorIndex for potion/bottle
+            if (isSmallPotion && smallPotionColorIndex !== undefined) {
+              smallProp.colorIndex = smallPotionColorIndex;
+              mesh.userData.colorIndex = smallPotionColorIndex;
+              const ps = this.potionSystem;
+              const identified = ps ? ps.isIdentified(smallPotionColorIndex) : false;
+              const text = identified ? (ps?.getLabel(smallPotionColorIndex) ?? '???') : '???';
+              const positive = ps ? ps.isPositive(smallPotionColorIndex) : true;
+              const color = identified ? (positive ? '#44ff66' : '#ff4444') : '#ffffff';
+              const propScale = entry.scalesWithDungeon ? cellSize : 1;
+              const propHeight = entry.baseHeight * propScale;
+              const label = createPropPotionLabel(text, color);
+              label.position.set(0, propHeight + 0.06, 0);
+              mesh.add(label);
+              smallProp.potionLabel = label;
+            }
+
+            this.props.push(smallProp);
           } else {
             // No surfaces available — rarely place on floor (~10% chance)
             if (rng.next() > 0.1) continue;
             const cell = this.findCell(entry, room, occupied, openGrid, gridW);
             if (!cell) continue;
 
-            const geo = await loadPropGeo(entry, cellSize);
+            let geo = await loadPropGeo(entry, cellSize);
             if (!geo) continue;
+
+            // Tint potion/bottle geometry
+            if (isSmallPotion) {
+              smallPotionColorIndex = rng.int(0, 8);
+              geo = tintGeometry(geo, POTION_HUES[smallPotionColorIndex], 1.2);
+            }
 
             const mesh = new THREE.Mesh(geo, voxMat.clone());
             mesh.position.set(toWorldX(cell.gx), getFloorY(cell.gx, cell.gz), toWorldZ(cell.gz));
@@ -859,7 +1005,26 @@ export class DungeonPropSystem {
             this.parent.add(mesh);
 
             const dummyEntity = new Entity(mesh, { layer: Layer.Prop, radius: 0.01, weight: 0 });
-            this.props.push({ mesh, entity: dummyEntity, entry, gridCell: { gx: cell.gx, gz: cell.gz } });
+            const floorProp: PlacedProp = { mesh, entity: dummyEntity, entry, gridCell: { gx: cell.gx, gz: cell.gz } };
+
+            // Add label + colorIndex for potion/bottle
+            if (isSmallPotion && smallPotionColorIndex !== undefined) {
+              floorProp.colorIndex = smallPotionColorIndex;
+              mesh.userData.colorIndex = smallPotionColorIndex;
+              const ps = this.potionSystem;
+              const identified = ps ? ps.isIdentified(smallPotionColorIndex) : false;
+              const text = identified ? (ps?.getLabel(smallPotionColorIndex) ?? '???') : '???';
+              const positive = ps ? ps.isPositive(smallPotionColorIndex) : true;
+              const color = identified ? (positive ? '#44ff66' : '#ff4444') : '#ffffff';
+              const propScale = entry.scalesWithDungeon ? cellSize : 1;
+              const propHeight = entry.baseHeight * propScale;
+              const label = createPropPotionLabel(text, color);
+              label.position.set(0, propHeight + 0.06, 0);
+              mesh.add(label);
+              floorProp.potionLabel = label;
+            }
+
+            this.props.push(floorProp);
           }
         }
       }
@@ -1087,7 +1252,8 @@ export class DungeonPropSystem {
       this.props.push({ mesh, entity: propEntity, entry, gridCell: { gx: cell.gx, gz: cell.gz } });
     }
 
-    // console.log(`[DungeonProps] Placed ${this.props.length} props in ${rooms.length} rooms + corridors`);
+    // Balance lights per flood-fill region: cull excess, seed missing
+    await this.balanceRegionLights(openGrid, gridW, gridH, gridDoors, cellSize, wallHeight, voxMat, toWorldX, toWorldZ, getFloorY);
 
     // Start hidden — room visibility will show props in visible rooms
     for (const p of this.props) p.mesh.visible = false;
@@ -1169,6 +1335,225 @@ export class DungeonPropSystem {
     for (const label of this.labels) {
       label.userData.labelsDisabled = !visible;
       if (!visible) label.visible = false;
+    }
+  }
+
+  /** Balance lights per flood-fill region: enforce both a minimum and maximum.
+   *  Min = 2 (or 1 for tiny ≤4-cell regions). Max = 4 + floor(cells/12).
+   *  Removes most-clustered lights when over max, seeds wall torches when under min. */
+  private async balanceRegionLights(
+    openGrid: boolean[],
+    gridW: number,
+    gridH: number,
+    gridDoors: { x: number; z: number; orientation: 'NS' | 'EW' }[] | undefined,
+    cellSize: number,
+    wallHeight: number,
+    voxMat: THREE.MeshStandardMaterial,
+    toWorldX: (gx: number) => number,
+    toWorldZ: (gz: number) => number,
+    getFloorY: (gx: number, gz: number) => number,
+  ): Promise<void> {
+    // Build set of door cell indices (these block flood fill)
+    const doorCells = new Set<number>();
+    if (gridDoors) {
+      for (const door of gridDoors) {
+        const gx = Math.round(door.x);
+        const gz = Math.round(door.z);
+        if (gx >= 0 && gx < gridW && gz >= 0 && gz < gridH) {
+          doorCells.add(gz * gridW + gx);
+        }
+      }
+    }
+
+    // BFS flood-fill to partition open cells into connected regions (stopping at doors)
+    const regionOf = new Int32Array(gridW * gridH).fill(-1);
+    const regionSizes: number[] = [];
+    const regionCells: number[][] = []; // cell indices per region
+    let regionCount = 0;
+    for (let idx = 0; idx < gridW * gridH; idx++) {
+      if (!openGrid[idx] || regionOf[idx] >= 0 || doorCells.has(idx)) continue;
+      const rid = regionCount++;
+      const cells: number[] = [];
+      const queue = [idx];
+      regionOf[idx] = rid;
+      while (queue.length > 0) {
+        const cur = queue.pop()!;
+        cells.push(cur);
+        const cx = cur % gridW;
+        const cz = (cur - cx) / gridW;
+        for (const [dx, dz] of [[0, -1], [0, 1], [-1, 0], [1, 0]] as [number, number][]) {
+          const nx = cx + dx;
+          const nz = cz + dz;
+          if (nx < 0 || nx >= gridW || nz < 0 || nz >= gridH) continue;
+          const ni = nz * gridW + nx;
+          if (!openGrid[ni] || regionOf[ni] >= 0 || doorCells.has(ni)) continue;
+          regionOf[ni] = rid;
+          queue.push(ni);
+        }
+      }
+      regionSizes.push(cells.length);
+      regionCells.push(cells);
+    }
+
+    // Group light-source props by region
+    const regionLights: Map<number, number[]> = new Map();
+    for (let i = 0; i < this.props.length; i++) {
+      const p = this.props[i];
+      if (!p.entry.lightSource) continue;
+      const { gx, gz } = p.gridCell;
+      if (gx < 0 || gx >= gridW || gz < 0 || gz >= gridH) continue;
+      const rid = regionOf[gz * gridW + gx];
+      if (rid < 0) continue;
+      let arr = regionLights.get(rid);
+      if (!arr) { arr = []; regionLights.set(rid, arr); }
+      arr.push(i);
+    }
+
+    // ── Phase 1: Remove excess lights ──
+    const toRemove: Set<number> = new Set();
+    for (const [rid, indices] of regionLights) {
+      const cap = 4 + Math.floor((regionSizes[rid] || 0) / 12);
+      if (indices.length <= cap) continue;
+
+      // Priority: wall torches are cheapest to lose, then floor candelabra, then surface candelabra (never remove)
+      // 0 = wall_mount torch (remove first), 1 = floor candelabra, 2 = surface-mounted (protect)
+      const lights = indices.map(i => {
+        const p = this.props[i];
+        let priority: number;
+        if (p.surfaceOf) priority = 2;             // on a table/surface — protect
+        else if (p.entry.placement === 'wall_mount') priority = 0; // wall torch — remove first
+        else priority = 1;                          // floor candelabra
+        return { idx: i, wx: p.mesh.position.x, wz: p.mesh.position.z, minDistSq: Infinity, priority };
+      });
+      for (let a = 0; a < lights.length; a++) {
+        for (let b = a + 1; b < lights.length; b++) {
+          const dx = lights[a].wx - lights[b].wx;
+          const dz = lights[a].wz - lights[b].wz;
+          const dist = dx * dx + dz * dz;
+          if (dist < lights[a].minDistSq) lights[a].minDistSq = dist;
+          if (dist < lights[b].minDistSq) lights[b].minDistSq = dist;
+        }
+      }
+      // Sort: lowest priority first (wall torches), then most-clustered first
+      lights.sort((a, b) => a.priority - b.priority || a.minDistSq - b.minDistSq);
+      const removeCount = lights.length - cap;
+      for (let r = 0; r < removeCount; r++) {
+        // Never remove surface-mounted lights
+        if (lights[r].priority >= 2) break;
+        toRemove.add(lights[r].idx);
+      }
+    }
+
+    // Apply removals
+    if (toRemove.size > 0) {
+      const sortedRemove = [...toRemove].sort((a, b) => b - a);
+      for (const idx of sortedRemove) {
+        const p = this.props[idx];
+        const light = p.mesh.children.find(c => c instanceof THREE.PointLight) as THREE.PointLight | undefined;
+        if (light) {
+          const tlIdx = this.torchLights.findIndex(t => t.light === light);
+          if (tlIdx >= 0) this.torchLights.splice(tlIdx, 1);
+          p.mesh.remove(light);
+          light.dispose();
+        }
+        this.parent.remove(p.mesh);
+        if (p.mesh.material instanceof THREE.Material) p.mesh.material.dispose();
+        this.props.splice(idx, 1);
+      }
+    }
+
+    // ── Phase 2: Seed lights in under-lit regions ──
+    // Collect existing light world positions per region after removals
+    const regionExistingLights: Map<number, { wx: number; wz: number }[]> = new Map();
+    for (const p of this.props) {
+      if (!p.entry.lightSource) continue;
+      const { gx, gz } = p.gridCell;
+      if (gx < 0 || gx >= gridW || gz < 0 || gz >= gridH) continue;
+      const rid = regionOf[gz * gridW + gx];
+      if (rid < 0) continue;
+      let arr = regionExistingLights.get(rid);
+      if (!arr) { arr = []; regionExistingLights.set(rid, arr); }
+      arr.push({ wx: p.mesh.position.x, wz: p.mesh.position.z });
+    }
+
+    for (let rid = 0; rid < regionCount; rid++) {
+      const size = regionSizes[rid];
+      const cap = 4 + Math.floor(size / 12);
+      const minLights = Math.max(1, Math.min(cap, 1 + Math.floor(size / 10)));
+      const existing = regionExistingLights.get(rid) || [];
+      const needed = minLights - existing.length;
+      if (needed <= 0) continue;
+
+      // Find wall-adjacent cells in this region to place torches
+      const wallCandidates: { gx: number; gz: number; wallSide: 'N' | 'S' | 'E' | 'W'; wx: number; wz: number }[] = [];
+      for (const idx of regionCells[rid]) {
+        const gx = idx % gridW;
+        const gz = (idx - gx) / gridW;
+        for (const [side, dx, dz] of [['N', 0, -1], ['S', 0, 1], ['W', -1, 0], ['E', 1, 0]] as ['N' | 'S' | 'E' | 'W', number, number][]) {
+          const nx = gx + dx;
+          const nz = gz + dz;
+          if (nx < 0 || nx >= gridW || nz < 0 || nz >= gridH || !openGrid[nz * gridW + nx]) {
+            wallCandidates.push({ gx, gz, wallSide: side, wx: toWorldX(gx), wz: toWorldZ(gz) });
+            break;
+          }
+        }
+      }
+
+      if (wallCandidates.length === 0) continue;
+
+      // Greedy farthest-point seeding: each new torch placed at the candidate
+      // farthest from all existing + already-seeded lights
+      const placedLights: { wx: number; wz: number }[] = [...existing];
+
+      for (let n = 0; n < needed; n++) {
+        // Score each candidate by its min distance to any placed light
+        let bestIdx = -1;
+        let bestDist = -1;
+        for (let ci = 0; ci < wallCandidates.length; ci++) {
+          const c = wallCandidates[ci];
+          let minDist = Infinity;
+          for (const l of placedLights) {
+            const dx = c.wx - l.wx;
+            const dz = c.wz - l.wz;
+            const dist = dx * dx + dz * dz;
+            if (dist < minDist) minDist = dist;
+          }
+          // If no existing lights, use distance from region centroid to spread out
+          if (placedLights.length === 0) minDist = 0;
+          if (minDist > bestDist) {
+            bestDist = minDist;
+            bestIdx = ci;
+          }
+        }
+
+        if (bestIdx < 0) break;
+        const cell = wallCandidates[bestIdx];
+        // Remove chosen candidate so it's not picked again
+        wallCandidates.splice(bestIdx, 1);
+
+        const entry = getRandomProp('torch_wall', () => rng.next());
+        if (!entry) continue;
+
+        const geo = await loadPropGeo(entry, cellSize);
+        if (!geo) continue;
+
+        const mesh = new THREE.Mesh(geo, voxMat.clone());
+        mesh.rotation.y = WALL_ROT[cell.wallSide];
+        const push = WALL_PUSH[cell.wallSide];
+        mesh.position.set(
+          cell.wx + push[0] * cellSize * 0.5,
+          getFloorY(cell.gx, cell.gz) + (entry.mountHeight ?? 0.5) * wallHeight - cellSize,
+          cell.wz + push[1] * cellSize * 0.5,
+        );
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        this.parent.add(mesh);
+        this.attachLight(mesh, entry);
+
+        const dummyEntity = new Entity(mesh, { layer: Layer.Prop, radius: 0.01, weight: 0 });
+        this.props.push({ mesh, entity: dummyEntity, entry, gridCell: { gx: cell.gx, gz: cell.gz } });
+        placedLights.push({ wx: cell.wx, wz: cell.wz });
+      }
     }
   }
 
@@ -1430,6 +1815,97 @@ export class DungeonPropSystem {
   /** Return all prop entities (for HMR re-registration). */
   getEntities(): Entity[] {
     return this.props.map(p => p.entity);
+  }
+
+  /** Get all collectible props (potions, bottles) — can be picked up by player */
+  getCollectibleProps(): PlacedProp[] {
+    return this.props.filter(p => p.entry.category === 'potion' || p.entry.category === 'bottle');
+  }
+
+  /** Silently remove a prop (for collectible pickup — no debris/orphans) */
+  removeProp(prop: PlacedProp): void {
+    const idx = this.props.indexOf(prop);
+    if (idx < 0) return;
+    // Clean up potion label
+    if (prop.potionLabel) {
+      prop.mesh.remove(prop.potionLabel);
+      (prop.potionLabel.material as THREE.SpriteMaterial).map?.dispose();
+      (prop.potionLabel.material as THREE.SpriteMaterial).dispose();
+    }
+    prop.entity.destroy();
+    this.parent.remove(prop.mesh);
+    (prop.mesh.material as THREE.Material).dispose();
+    this.props.splice(idx, 1);
+  }
+
+  /** Get all destroyable props (barrels, crates, pots) */
+  getDestroyableProps(): PlacedProp[] {
+    return this.props.filter(p => p.entry.destroyable);
+  }
+
+  /** Destroy a single prop — removes mesh, entity, cleans up.
+   *  Returns position, category, and any orphaned tabletop items that were sitting on it. */
+  destroyProp(prop: PlacedProp): { position: THREE.Vector3; category: string; orphans: PlacedProp[] } | null {
+    const idx = this.props.indexOf(prop);
+    if (idx < 0) return null;
+    const pos = prop.mesh.position.clone();
+    const category = prop.entry.category;
+
+    // Find small items that were sitting on this surface
+    const orphans = this.props.filter(p => p.surfaceOf === prop);
+    for (const orphan of orphans) {
+      orphan.surfaceOf = undefined; // unlink
+    }
+
+    // Track destroyed position for serialization
+    this.destroyedPositions.push({ x: pos.x, z: pos.z });
+
+    prop.entity.destroy();
+    this.parent.remove(prop.mesh);
+    (prop.mesh.material as THREE.Material).dispose();
+    // Don't dispose geometry — it's shared via geoCache
+    this.props.splice(idx, 1);
+
+    return { position: pos, category, orphans };
+  }
+
+  /** Serialize destroyed prop positions */
+  serializeDestroyed(): Array<{ x: number; z: number }> {
+    return [...this.destroyedPositions];
+  }
+
+  /** Remove props that were destroyed in a previous visit */
+  restoreDestroyed(saved: Array<{ x: number; z: number }>): void {
+    for (const s of saved) {
+      // Find closest matching destroyable prop
+      let bestDist = Infinity;
+      let bestProp: PlacedProp | null = null;
+      for (const p of this.props) {
+        if (!p.entry.destroyable) continue;
+        const dx = p.mesh.position.x - s.x;
+        const dz = p.mesh.position.z - s.z;
+        const dist = dx * dx + dz * dz;
+        if (dist < bestDist) { bestDist = dist; bestProp = p; }
+      }
+      if (bestProp && bestDist < 0.5) {
+        // Also remove orphaned surface items (tabletop items on this prop)
+        const orphans = this.props.filter(p => p.surfaceOf === bestProp);
+        for (const orphan of orphans) {
+          orphan.entity.destroy();
+          this.parent.remove(orphan.mesh);
+          (orphan.mesh.material as THREE.Material).dispose();
+          const oi = this.props.indexOf(orphan);
+          if (oi >= 0) this.props.splice(oi, 1);
+        }
+        // Track as destroyed
+        this.destroyedPositions.push({ x: s.x, z: s.z });
+        bestProp.entity.destroy();
+        this.parent.remove(bestProp.mesh);
+        (bestProp.mesh.material as THREE.Material).dispose();
+        const idx = this.props.indexOf(bestProp);
+        if (idx >= 0) this.props.splice(idx, 1);
+      }
+    }
   }
 
   dispose(): void {

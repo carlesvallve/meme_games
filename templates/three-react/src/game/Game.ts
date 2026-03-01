@@ -16,6 +16,7 @@ import { Character, CHARACTER_TEAM_COLORS, getSlots, getCharacterName, rerollRos
 import { EnemySystem, type HitImpactCallbacks } from './EnemySystem';
 import { ProjectileSystem, setDebugProjectileStick } from './ProjectileSystem';
 import { GoreSystem } from './GoreSystem';
+import { PropDestructionSystem } from './PropDestructionSystem';
 import { PostProcessStack } from './PostProcessing';
 import { createDustMotes, createRainEffect, createDebrisEffect } from '../utils/particles';
 import type { ParticleToggles } from '../store';
@@ -25,6 +26,8 @@ import { updateReveal, patchSceneArchitecture } from './RevealShader';
 import { entityRegistry } from './Entity';
 import type { GameInstance } from '../types';
 import type { LevelSnapshot } from './LevelState';
+import { PotionEffectSystem } from './PotionEffectSystem';
+import { PotionVFX } from './PotionVFX';
 
 /** Nav cell size: 0.25m for all presets. */
 function navCellForPreset(_preset: string): number {
@@ -114,9 +117,11 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   // Scene
   const { scene, lights: sceneLights, sceneSky } = createScene();
   let currentLightPreset: LightPreset = useGameStore.getState().lightPreset;
+  let lastIsExterior = false;
   let currentGridOpacity = useGameStore.getState().gridOpacity;
   let currentRoomLabels = useGameStore.getState().roomLabels;
-  applyLightPreset(sceneLights, currentLightPreset);
+  lastIsExterior = useGameStore.getState().terrainPreset === 'heightmap';
+  applyLightPreset(sceneLights, currentLightPreset, lastIsExterior);
 
   // Camera (initial distance from store so zoom syncs with settings)
   const initialCamParams = useGameStore.getState().cameraParams;
@@ -173,6 +178,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     terrain = new Terrain(scene, initPreset, initStyle, initPalette, initSeed);
     const { characterParams: initParams } = useGameStore.getState();
     navGrid = terrain.buildNavGrid(initParams.stepHeight, initParams.capsuleRadius, navCellForPreset(initPreset), initParams.slopeHeight);
+    useGameStore.getState().setWalkableCells(navGrid.getWalkableCellCount());
   }
 
   cam.terrainHeightAt = (x, z) => terrain.getFloorY(x, z);
@@ -184,10 +190,17 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   const initGemCount = initPreset === 'voxelDungeon' ? Math.max(2, Math.ceil(terrain.getRoomCount() / 2)) : undefined;
   let collectibles = new CollectibleSystem(scene, terrain, initSpawn ? { x: initSpawn.x, z: initSpawn.z } : undefined, initGemCount);
   let lootSystem = new LootSystem(scene, terrain);
+  let potionSystem = new PotionEffectSystem(useGameStore.getState().dungeonBaseSeed);
+  let potionVFX = new PotionVFX(scene);
+  let potionHudTimer = 0;
+  // Expose potionSystem on window so PotionHotbar can check identification
+  (window as any).__potionEffectSystem = potionSystem;
+  lootSystem.setPotionSystem(potionSystem);
   const usePropChestsOnly = initPreset === 'voxelDungeon';
   let chestSystem = new ChestSystem(scene, terrain, lootSystem, usePropChestsOnly);
   let enemySystem: EnemySystem | null = null;
   let projectileSystem: ProjectileSystem | null = null;
+  let propDestructionSystem: PropDestructionSystem | null = null;
   let goreSystem = new GoreSystem(
     scene,
     (x, z) => terrain.getTerrainNormal(x, z),
@@ -217,6 +230,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   /** Serialize current level state into a snapshot */
   function serializeLevel(): LevelSnapshot {
     const store = useGameStore.getState();
+    const propSystem = terrain.getPropSystem();
     return {
       seed: store.getFloorSeed(store.floor),
       floor: store.floor,
@@ -225,6 +239,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       chests: chestSystem.serialize(),
       collectibles: collectibles.serialize(),
       loot: lootSystem.serialize(),
+      destroyedProps: propSystem ? propSystem.serializeDestroyed() : [],
     };
   }
 
@@ -248,9 +263,10 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
 
   /** Wipe terrain + all dependent systems and rebuild from current store settings */
   function regenerateScene(opts: RegenerateOpts = {}): void {
-    console.log(`[Regen] start — seed=${opts.seed}, spawnAt=${opts.spawnAt}, snapshot=${!!opts.snapshot}, theme=${opts.themeOverride ?? 'auto'}`);
+    console.log(`[Game] regen — seed=${opts.seed}, spawnAt=${opts.spawnAt}, snapshot=${!!opts.snapshot}, theme=${opts.themeOverride ?? 'auto'}, preset=${opts.presetOverride ?? useGameStore.getState().terrainPreset}`);
     activeCharacter = null;
     debugLadderIndex = -1;
+    needsFullRegen = false;
     // Roster is rerolled in onStartGame when showing the select screen
     exitTriggered = false;
     portalCooldown = 0;
@@ -270,6 +286,11 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     goreSystem.setOpenCellCheck((wx, wz) => terrain.isOpenCell(wx, wz));
     chestSystem.dispose();
     lootSystem.dispose();
+    const isFloorTransition = !!opts.spawnAt;
+    if (!isFloorTransition) {
+      potionSystem.dispose();
+    }
+    potionVFX.dispose();
     collectibles.dispose();
     terrain.dispose();
     scene.remove(terrain.group);
@@ -291,6 +312,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     useGameStore.getState().setPaletteActive(terrain.getPaletteName());
     sceneSky.setPalette(terrain.getPaletteName());
     navGrid = terrain.buildNavGrid(pp.stepHeight, pp.capsuleRadius, navCellForPreset(terrainPreset), pp.slopeHeight);
+    useGameStore.getState().setWalkableCells(navGrid.getWalkableCellCount());
     terrain.setGridOpacity(useGameStore.getState().gridOpacity);
     // Get player spawn position for exclusion zone (avoid spawning collectibles inside magnet radius)
     const spawnExclude = opts.spawnAt === 'exit'
@@ -299,6 +321,12 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     const gemCount = terrainPreset === 'voxelDungeon' ? Math.max(2, Math.ceil(terrain.getRoomCount() / 2)) : undefined;
     collectibles = new CollectibleSystem(scene, terrain, spawnExclude ? { x: spawnExclude.x, z: spawnExclude.z } : undefined, gemCount);
     lootSystem = new LootSystem(scene, terrain);
+    if (!isFloorTransition) {
+      potionSystem = new PotionEffectSystem(useGameStore.getState().dungeonBaseSeed);
+    }
+    potionVFX = new PotionVFX(scene);
+    (window as any).__potionEffectSystem = potionSystem;
+    lootSystem.setPotionSystem(potionSystem);
     const usePropChestsOnlyRegen = terrainPreset === 'voxelDungeon';
     chestSystem = new ChestSystem(scene, terrain, lootSystem, usePropChestsOnlyRegen);
 
@@ -313,10 +341,21 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
         list.forEach(({ position, mesh, entity, openGeo }) => chestSystem.registerPropChest(position, mesh, entity, openGeo));
         // Once prop chests are registered, apply pending snapshot restoration
         if (pendingSnapshot) {
-          console.log(`[Restore] applying snapshot: ${pendingSnapshot.chests.length} chests, ${pendingSnapshot.collectibles.length} collectibles, ${pendingSnapshot.loot.length} loot`);
+          console.log(`[Game] restore snapshot: ${pendingSnapshot.chests.length} chests, ${pendingSnapshot.collectibles.length} collectibles, ${pendingSnapshot.loot.length} loot, ${pendingSnapshot.destroyedProps?.length ?? 0} destroyedProps`);
           chestSystem.restoreState(pendingSnapshot.chests);
           collectibles.restoreState(pendingSnapshot.collectibles);
           lootSystem.restoreLoot(pendingSnapshot.loot);
+          // Restore destroyed props (remove them + unblock nav cells)
+          if (pendingSnapshot.destroyedProps?.length) {
+            const ps = terrain.getPropSystem();
+            if (ps) {
+              ps.restoreDestroyed(pendingSnapshot.destroyedProps);
+              // Unblock nav cells for destroyed props
+              for (const dp of pendingSnapshot.destroyedProps) {
+                terrain.unblockPropAt(dp.x, dp.z);
+              }
+            }
+          }
           pendingSnapshot = null;
         }
       });
@@ -328,7 +367,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       // Dungeon ready (layout + props + portals all placed) — reposition, visibility, fade in
       terrain.setOnDungeonReady(() => {
         if (!activeCharacter) return;
-        console.log('[DungeonReady] all placements done');
+        console.log('[Game] dungeonReady');
 
         // Reposition character to portal entrance/exit (floor transitions only)
         if (spawnAtCapture) {
@@ -336,7 +375,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
             ? terrain.getExitPosition()
             : terrain.getEntrancePosition();
           if (pos) {
-            console.log(`[DungeonReady] spawn at ${spawnAtCapture} (${pos.x.toFixed(2)}, ${pos.z.toFixed(2)})`);
+            console.log(`[Game] dungeonReady spawn at ${spawnAtCapture} (${pos.x.toFixed(2)}, ${pos.z.toFixed(2)})`);
             const y = terrain.getTerrainY(pos.x, pos.z);
             activeCharacter.mesh.position.set(pos.x, y, pos.z);
             activeCharacter.groundY = y;
@@ -386,13 +425,21 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
           }
         }
 
+        // Restore potion VFX icons on floor transition (effects persist, but sprites were disposed with old scene)
+        if (isFloorTransition) {
+          const activeEffects = potionSystem.getActiveEffects();
+          if (activeEffects.length > 0) {
+            potionVFX.restoreActiveEffects(activeEffects, activeCharacter, potionSystem.armorHitsRemaining);
+          }
+        }
+
         // Show terrain (was hidden to prevent flash), show character, snap camera, release fade
         terrain.getGroup().visible = true;
         activeCharacter.mesh.visible = true;
         const camTarget = activeCharacter.getCameraTarget();
         cam.setTarget(camTarget.x, camTarget.y, camTarget.z);
         cam.snapToTarget();
-        console.log('[DungeonReady] releasing fade');
+        console.log('[Game] dungeonReady releasing fade');
         postProcess.releaseFade();
       });
     }
@@ -440,12 +487,12 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       }
     }
 
-    console.log(`[Regen] done — floor=${useGameStore.getState().floor}, preset=${opts.presetOverride ?? useGameStore.getState().terrainPreset}`);
+    console.log(`[Game] regen done — floor=${useGameStore.getState().floor}, palette=${terrain.getPaletteName()}`);
   }
 
   /** Change floor: fade out → serialize → regenerate → fade in */
   function changeFloor(direction: 'down' | 'up'): void {
-    console.log(`[Level] changeFloor(${direction}) — starting fade`);
+    console.log(`[Game] changeFloor ${direction}`);
 
     // Dismiss any active speech bubbles before transition
     speechSystem.dismissAll();
@@ -457,7 +504,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
 
       // Serialize and cache current level
       const snapshot = serializeLevel();
-      console.log(`[Level] serialize floor ${currentFloor}: ${snapshot.enemies.length} enemies, ${snapshot.chests.length} chests, ${snapshot.collectibles.length} collectibles, ${snapshot.loot.length} loot`);
+      console.log(`[Game] serialize floor ${currentFloor}: ${snapshot.enemies.length} enemies, ${snapshot.chests.length} chests, ${snapshot.collectibles.length} collectibles, ${snapshot.loot.length} loot, ${snapshot.destroyedProps.length} destroyedProps`);
       store.saveLevelSnapshot(currentFloor, snapshot);
 
       // Compute new floor
@@ -468,7 +515,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       const cached = store.getLevelSnapshot(newFloor);
       const seed = store.getFloorSeed(newFloor);
 
-      console.log(`[Level] ${direction}: floor ${currentFloor} → ${newFloor}, seed=${seed}, cached=${!!cached}`);
+      console.log(`[Game] floor ${currentFloor} → ${newFloor}, seed=${seed}, cached=${!!cached}`);
 
       // Clear stale theme so new floors get a fresh random theme
       if (!cached) store.setCurrentTheme('');
@@ -526,6 +573,8 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   let characters: Character[] = [];
   let activeCharacter: Character | null = null;
   let lastSelectedCharacter: CharacterType | null = null;
+  /** Set after death so next character selection triggers full scene regeneration */
+  let needsFullRegen = false;
   let exitTriggered = false;
   /** Guard: track spawn cell so portals are disabled until player moves away */
   let portalCooldown = 0;
@@ -534,7 +583,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   let cachedInputState = input.update();
 
   // Per-character inventory
-  interface CharInventory { collectibles: number; coins: number; potions: number; }
+  interface CharInventory { collectibles: number; coins: number; potionInventory: Array<{ colorIndex: number; count: number }>; }
   const inventories = new Map<string, CharInventory>();
 
   function getInventoryKey(): string {
@@ -543,7 +592,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
 
   function getInventory(): CharInventory {
     const key = getInventoryKey();
-    if (!inventories.has(key)) inventories.set(key, { collectibles: 0, coins: 0, potions: 0 });
+    if (!inventories.has(key)) inventories.set(key, { collectibles: 0, coins: 0, potionInventory: [] });
     return inventories.get(key)!;
   }
 
@@ -552,13 +601,13 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     const s = useGameStore.getState();
     inv.collectibles = s.collectibles;
     inv.coins = s.coins;
-    inv.potions = s.potions;
+    inv.potionInventory = [...s.potionInventory];
   }
 
   function loadActiveInventory(): void {
     const inv = getInventory();
     useGameStore.getState().setCollectibles(inv.collectibles);
-    useGameStore.setState({ coins: inv.coins, potions: inv.potions });
+    useGameStore.setState({ coins: inv.coins, potionInventory: [...inv.potionInventory] });
   }
 
   function updateActiveCharacterUI(): void {
@@ -610,7 +659,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       p.attackArcHalf = pp.attackArcHalf;
       p.attackDamage = pp.attackDamage;
       p.attackCooldown = pp.attackCooldown;
-      p.chaseRange = pp.chaseRange;
+      p.chaseRange = pp.chaseRange * 0.25;
       p.knockbackDecay = pp.knockbackDecay;
       p.invulnDuration = pp.invulnDuration;
       p.flashDuration = pp.flashDuration;
@@ -913,12 +962,12 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       }
       characters.push(char);
       activeCharacter = char;
-      console.log(`[Spawn] type=${controlledType}, spawnAt=${spawnAt ?? 'default'}, pos=(${pos.x.toFixed(2)}, ${pos.z.toFixed(2)})`);
+      console.log(`[Game] spawn ${controlledType} at (${pos.x.toFixed(2)}, ${pos.z.toFixed(2)})${spawnAt ? ` [${spawnAt}]` : ''}`);
 
       // Set portal cooldown guard when spawning via floor transition
       if (spawnAt) {
         portalCooldown = 1.0;
-        console.log(`[Spawn] portalCooldown set at (${pos.x.toFixed(2)}, ${pos.z.toFixed(2)})`);
+        // console.log(`[Game] portalCooldown set at (${pos.x.toFixed(2)}, ${pos.z.toFixed(2)})`);
       }
     }
 
@@ -945,21 +994,32 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     if (projectileSystem) projectileSystem.dispose();
     enemySystem = new EnemySystem(scene, terrain, navGrid, lootSystem, ladderDefs);
     enemySystem.setGoreSystem(goreSystem);
+    enemySystem.setPotionSystem(potionSystem);
     projectileSystem = new ProjectileSystem(scene);
     enemySystem.setAllyCharacters(characters);
     enemySystem.impactCallbacks = {
       onHitstop: (duration) => triggerHitstop(duration),
       onCameraShake: (intensity, duration, dirX, dirZ) => cam.shake(intensity, duration, dirX, dirZ),
     };
+
+    // Prop destruction system — initialized lazily when props are ready (async for voxelDungeon).
+    // On first frame where propSystem exists but propDestructionSystem doesn't, we wire it up.
+    propDestructionSystem = null;
+
+    // On exterior maps, set exclusion zone around player spawn so enemies don't spawn within chase range
+    if (!terrain.getRoomVisibility() && activeCharacter) {
+      const cp = activeCharacter.getPosition();
+      const chaseRange = useGameStore.getState().enemyParams.chaseRange * 0.25;
+      enemySystem.setPlayerExclusionZone(cp.x, cp.z, chaseRange);
+    }
+
     // Restore enemies from snapshot or spawn fresh ones
     if (pendingSnapshot && pendingSnapshot.enemies.length > 0) {
       enemySystem.restoreEnemies(pendingSnapshot.enemies);
     } else {
-      const isDungeon = terrain.preset === 'dungeon' || terrain.preset === 'rooms' || terrain.preset === 'voxelDungeon';
-      const cap = useGameStore.getState().enemyParams.maxEnemies;
-      const maxEnemies = isDungeon
-        ? Math.min(Math.max(2, Math.floor(terrain.getRoomCount() * 0.6)), cap)
-        : cap;
+      const ep = useGameStore.getState().enemyParams;
+      const walkableCells = navGrid.getWalkableCellCount();
+      const maxEnemies = Math.min(ep.maxEnemies, Math.max(1, Math.round(walkableCells * ep.enemyDensity)));
       // Spawn ~half upfront, let the rest trickle in via wave spawning
       const initialCount = Math.max(1, Math.floor(maxEnemies * 0.5));
       if (maxEnemies > 0) {
@@ -982,16 +1042,22 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     onStartGame: () => {
       const wasPlayerDead = useGameStore.getState().phase === 'player_dead' ||
         (activeCharacter && !activeCharacter.isAlive);
+      console.log(`[Game] startGame — wasPlayerDead=${wasPlayerDead}`);
       rerollRoster();
       useGameStore.getState().setPhase('select');
       audioSystem.init();
       if (wasPlayerDead) {
         // Reset so re-picking the same character triggers spawnCharacters
         lastSelectedCharacter = null;
+        needsFullRegen = true;
         useGameStore.setState({ selectedCharacter: null });
         useGameStore.getState().clearLevelCache();
         useGameStore.getState().setCurrentTheme('');
         useGameStore.getState().setFloor(1);
+        useGameStore.getState().setScore(0);
+        useGameStore.getState().setCollectibles(0);
+        useGameStore.setState({ coins: 0 });
+        useGameStore.getState().clearPotionInventory();
       }
     },
     onPauseToggle: () => {
@@ -1004,6 +1070,23 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     },
     onRestart: () => {
       useGameStore.getState().onStartGame?.();
+    },
+    onDrinkPotion: (colorIndex: number) => {
+      if (!activeCharacter || !activeCharacter.isAlive) return;
+      const result = potionSystem.drink(colorIndex);
+      audioSystem.sfx('drink');
+      useGameStore.getState().removePotionFromInventory(colorIndex);
+
+      // Apply instant effects
+      if (result.effect === 'heal') {
+        const s = useGameStore.getState();
+        const healAmount = 1 + Math.floor(Math.random() * 4); // 1-4 HP
+        s.setHP(Math.min(s.hp + healAmount, s.maxHp), s.maxHp);
+        potionVFX.spawnHealNumber(activeCharacter, healAmount);
+      }
+
+      // Spawn VFX for all timed effects
+      potionVFX.onDrink(result.effect, activeCharacter, result.effect === 'armor' ? potionSystem.armorHitsRemaining : undefined);
     },
     onRegenerateScene: () => {
       // Full regeneration: instant black, new seed, clear all cached levels, reset to floor 1
@@ -1101,6 +1184,11 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   function triggerPlayerDeath(playerChar: Character): void {
     if (deathTriggered) return;
     deathTriggered = true;
+    console.log('[Game] playerDeath');
+    potionSystem.clearEffects();
+    potionVFX.clearAll();
+    useGameStore.getState().setActivePotionEffects([]);
+    useGameStore.getState().clearPotionInventory();
     useGameStore.getState().setPhase('player_dead');
     const pos = playerChar.mesh.position.clone();
     const kbDirX = playerChar.lastHitDirX;
@@ -1148,14 +1236,15 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     // Check for character selection — regenerate scene on new game after death
     const selected = useGameStore.getState().selectedCharacter;
     if (selected && selected !== lastSelectedCharacter) {
-      const needsRegen = activeCharacter && !activeCharacter.isAlive;
       lastSelectedCharacter = selected;
-      if (needsRegen) {
+      if (needsFullRegen) {
+        needsFullRegen = false;
+        console.log(`[Game] selectCharacter=${selected} → fullRegen`);
         postProcess.fadeTransition(() => {
-          const seed = useGameStore.getState().getFloorSeed(1);
-          regenerateScene({ seed, character: selected });
+          regenerateScene({ character: selected });
         }, 9999, 3.0);
       } else {
+        console.log(`[Game] selectCharacter=${selected} → spawn`);
         spawnCharacters(selected);
       }
     }
@@ -1165,68 +1254,78 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       // Sync active character's movement params from settings sliders
       syncAllCharacterParams();
 
+      // Apply potion speed multiplier to player character (non-destructive — restore after update)
+      const baseSpeed = playerChar.params.speed;
+      if (potionSystem.speedMultiplier !== 1) {
+        playerChar.params.speed = baseSpeed * potionSystem.speedMultiplier;
+      }
+
+      // Update potion effects (timed buffs, poison ticks)
+      if (phase === 'playing') {
+        const potionEvents = potionSystem.update(dt);
+        for (const ev of potionEvents) {
+          if (ev.effect === 'poison' && ev.type === 'tick') {
+            const s = useGameStore.getState();
+            if (s.phase === 'player_dead') continue;
+            const newHp = Math.max(0, s.hp - 1);
+            s.setHP(newHp, s.maxHp);
+            potionVFX.spawnPoisonTick(playerChar);
+            if (newHp <= 0) triggerPlayerDeath(playerChar);
+          }
+          if (ev.type === 'expired') {
+            potionVFX.onExpire(ev.effect);
+          }
+        }
+      }
+
+      // Update potion VFX (floating numbers, status icons, shadow opacity)
+      potionVFX.update(dt, playerChar, potionSystem.isShadow);
+
+      // Push active potion effects to store for HUD display (~4 updates/sec)
+      potionHudTimer -= dt;
+      if (potionHudTimer <= 0) {
+        potionHudTimer = 0.25;
+        useGameStore.getState().setActivePotionEffects(potionSystem.getActiveEffects());
+      }
+
       // Player attack on Space only while alive (before character update so attack state is set for this frame)
       if (phase === 'playing' && cachedInputState.action) {
         const heroId = playerChar.voxEntry?.id ?? '';
         const projConfig = getProjectileConfig(heroId);
         if (projConfig && projectileSystem) {
-          // Ranged: check if architecture is blocking the muzzle
+          // Ranged: fire from muzzle (spawn point)
+          // NOTE: wall-proximity check was here but disabled — too frustrating blocking shots near walls
           const pos = playerChar.getPosition();
           const facing = playerChar.facing;
           const muzzle = getMuzzleOffset(heroId);
           const faceDirX = -Math.sin(facing);
           const faceDirZ = -Math.cos(facing);
-          const muzzleCheckOrigin = new THREE.Vector3(pos.x, playerChar.groundY + muzzle.up, pos.z);
-          const muzzleCheckDir = new THREE.Vector3(faceDirX, 0, faceDirZ);
-          raycaster.set(muzzleCheckOrigin, muzzleCheckDir);
-          raycaster.far = muzzle.forward;
-          raycaster.near = 0;
-          raycaster.camera = cam.camera; // needed for Sprite children in terrain group
-          const muzzleHits = raycaster.intersectObject(terrain.getGroup(), true);
-          let archBlocked = false;
-          for (const h of muzzleHits) {
-            if (!(h.object as THREE.Mesh).isMesh) continue;
-            if (h.object.userData.collisionOnly) continue;
-            const mesh = h.object as THREE.Mesh;
-            if (!mesh.geometry) continue;
-            mesh.geometry.computeBoundingBox();
-            const bb = mesh.geometry.boundingBox;
-            if (bb && (bb.max.y - bb.min.y) > 0.3) { archBlocked = true; break; }
-          }
-          // Reset raycaster far for other uses
-          raycaster.far = Infinity;
-
-          if (archBlocked) {
-            // Too close to architecture — block the shot
-          } else {
-            // Ranged: play attack anim + fire from muzzle (spawn point)
-            const rangedP = useGameStore.getState().characterParams.ranged;
-            playerChar.startAttack(rangedP.exhaustionEnabled);
-            const spawnX = pos.x + faceDirX * muzzle.forward;
-            const spawnY = playerChar.groundY + muzzle.up;
-            const spawnZ = pos.z + faceDirZ * muzzle.forward;
-            projectileSystem.fireProjectile(
-              heroId,
-              projConfig,
-              spawnX, spawnY, spawnZ,
-              facing,
-              enemySystem ? enemySystem.getEnemies() : [],
-              [
-                terrain.getBoxGroup(),
-                ...(terrain.getTerrainMesh() ? [terrain.getTerrainMesh()!] : []),
-              ],
-              terrain.getOpenDoorObjects(),
-              muzzle.up,
-              rangedP.autoTarget,
-              rangedP.knockback,
-            );
-          }
+          const rangedP = useGameStore.getState().characterParams.ranged;
+          playerChar.startAttack(rangedP.exhaustionEnabled);
+          const spawnX = pos.x + faceDirX * muzzle.forward;
+          const spawnY = playerChar.groundY + muzzle.up;
+          const spawnZ = pos.z + faceDirZ * muzzle.forward;
+          projectileSystem.fireProjectile(
+            heroId,
+            projConfig,
+            spawnX, spawnY, spawnZ,
+            facing,
+            enemySystem ? enemySystem.getVisibleEnemies() : [],
+            [
+              terrain.getBoxGroup(),
+              ...(terrain.getTerrainMesh() ? [terrain.getTerrainMesh()!] : []),
+            ],
+            terrain.getOpenDoorObjects(),
+            muzzle.up,
+            rangedP.autoTarget,
+            rangedP.knockback,
+          );
         } else {
           // Melee: auto-aim snap toward nearest enemy, then attack
           const meleeP = useGameStore.getState().characterParams;
           if (enemySystem && meleeP.melee.autoTarget) {
             const pos = playerChar.getPosition();
-            const aimTarget = findMeleeAimTarget(pos.x, pos.z, playerChar.facing, enemySystem.getEnemies());
+            const aimTarget = findMeleeAimTarget(pos.x, pos.z, playerChar.facing, enemySystem.getVisibleEnemies());
             if (aimTarget !== null) {
               playerChar.facing = aimTarget;
               // Grid mode: snap visual rotation to nearest 8-direction
@@ -1243,6 +1342,8 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       for (const char of characters) {
         char.update(dt);
       }
+      // Restore player speed after update so the multiplier doesn't accumulate
+      playerChar.params.speed = baseSpeed;
 
       // Doors — update before projectiles so open doors are excluded from raycasts this frame
       const doorSystem = terrain.getDoorSystem();
@@ -1265,6 +1366,22 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       // Gore system (body chunks + blood decals)
       goreSystem.update(dt);
 
+      // Lazy-init prop destruction system once props are loaded (async for voxelDungeon)
+      if (!propDestructionSystem) {
+        const propSystem = terrain.getPropSystem();
+        if (propSystem) {
+          propSystem.setPotionSystem(potionSystem);
+          propDestructionSystem = new PropDestructionSystem(propSystem, lootSystem, goreSystem);
+          propDestructionSystem.setFloorY((x, z) => terrain.getFloorY(x, z));
+          propDestructionSystem.setUnblockCallback((wx, wz) => terrain.unblockPropAt(wx, wz));
+          propDestructionSystem.setIsOpenCell((wx, wz) => terrain.isOpenCell(wx, wz));
+          if (enemySystem) enemySystem.setPropDestructionSystem(propDestructionSystem);
+        }
+      }
+
+      // Prop destruction (falling tabletop items)
+      if (propDestructionSystem) propDestructionSystem.update(dt);
+
       // Enemy system
       if (enemySystem) {
         const showSlashEffect = useGameStore.getState().characterParams.melee.showSlashEffect;
@@ -1272,7 +1389,17 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
           (damage) => {
             const s = useGameStore.getState();
             if (s.phase === 'player_dead') return; // already dead
-            const newHp = Math.max(0, s.hp - damage);
+            // Armor absorbs hit completely
+            if (potionSystem.absorbHit()) {
+              audioSystem.sfx('thud');
+              potionVFX.onArmorAbsorb(potionSystem.armorHitsRemaining);
+              return;
+            }
+            // Fragile doubles damage
+            const finalDamage = Math.round(damage * potionSystem.damageTakenMultiplier);
+            // Shadow breaks on taking damage
+            if (potionSystem.isShadow) potionSystem.breakShadow();
+            const newHp = Math.max(0, s.hp - finalDamage);
             s.setHP(newHp, s.maxHp);
             if (newHp <= 0) {
               triggerPlayerDeath(playerChar);
@@ -1312,9 +1439,11 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
 
       // Projectile system
       if (projectileSystem && enemySystem) {
-        projectileSystem.update(dt, enemySystem.getEnemies(), (info) => {
+        projectileSystem.update(dt, enemySystem.getVisibleEnemies(), (info) => {
+          // Hit-aggro: enemy chases back regardless of range
+          enemySystem!.aggroEnemy(info.enemy);
           // VFX: damage number + hit sparks
-          enemySystem!.spawnDamageNumber(info.x, info.y, info.z, info.damage);
+          enemySystem!.spawnDamageNumber(info.x, info.y, info.z, info.damage, info.dirX, info.dirZ);
           enemySystem!.spawnHitSparks(info.x, info.y, info.z, info.dirX, info.dirZ);
           enemySystem!.spawnBloodSplash(info.x, info.y, info.z, info.enemy.groundY, activeCharacter ?? undefined);
           audioSystem.sfxAt('fleshHit', info.x, info.z);
@@ -1340,6 +1469,15 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
             ...(terrain.getTerrainMesh() ? [terrain.getTerrainMesh()!] : []),
           ],
           excludeObjects: terrain.getOpenDoorObjects(),
+          onPropHit: propDestructionSystem
+            ? (entity, pos) => propDestructionSystem!.handleProjectileHit(entity)
+            : undefined,
+          propTargets: propDestructionSystem
+            ? propDestructionSystem.getPropColliders()
+            : undefined,
+          destroyableMeshes: propDestructionSystem
+            ? propDestructionSystem.getDestroyableMeshes()
+            : undefined,
         });
       }
 
@@ -1355,11 +1493,13 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       const isDungeonPreset = terrain.preset === 'dungeon' || terrain.preset === 'rooms' || terrain.preset === 'voxelDungeon';
       updateReveal(playerWorldPos, cam.camera.position, isDungeonPreset, terrain.preset);
 
-      // Sync light preset
+      // Sync light preset (exteriors get a brightness boost to counter vignette)
       const preset = useGameStore.getState().lightPreset;
-      if (preset !== currentLightPreset) {
+      const isExterior = terrain.preset === 'heightmap';
+      if (preset !== currentLightPreset || isExterior !== lastIsExterior) {
         currentLightPreset = preset;
-        applyLightPreset(sceneLights, preset);
+        lastIsExterior = isExterior;
+        applyLightPreset(sceneLights, preset, isExterior);
       }
 
       // Sync grid opacity
@@ -1417,8 +1557,41 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
         audioSystem.sfx('coin');
       }
       if (loot.potions > 0) {
-        useGameStore.getState().addPotions(loot.potions);
-        audioSystem.sfx('potion');
+        // Add collected potions to inventory (not drunk yet)
+        for (const colorIndex of loot.potionColorIndices) {
+          useGameStore.getState().addPotionToInventory(colorIndex);
+          audioSystem.sfx('potion');
+        }
+      }
+
+      // Collectible prop potions/bottles — magnet pickup from dungeon props
+      const propSystem = terrain.getPropSystem();
+      if (propSystem) {
+        const { magnetRadius, magnetSpeed } = params;
+        const collectibles = propSystem.getCollectibleProps();
+        for (let ci = collectibles.length - 1; ci >= 0; ci--) {
+          const prop = collectibles[ci];
+          const px = prop.mesh.position.x;
+          const pz = prop.mesh.position.z;
+          const dx = activePos.x - px;
+          const dz = activePos.z - pz;
+          const dist = Math.sqrt(dx * dx + dz * dz);
+
+          if (dist < 0.2) {
+            // Add prop potion to inventory (not drunk yet)
+            const colorIndex = prop.colorIndex ?? 0;
+            useGameStore.getState().addPotionToInventory(colorIndex);
+            audioSystem.sfx('potion');
+            propSystem.removeProp(prop);
+          } else if (dist < magnetRadius) {
+            // Magnet attraction — slide toward player
+            const speed = (1 - dist / magnetRadius) * magnetSpeed * dt;
+            prop.mesh.position.x += (dx / dist) * speed;
+            prop.mesh.position.z += (dz / dist) * speed;
+            const dy = activePos.y + 0.15 - prop.mesh.position.y;
+            prop.mesh.position.y += dy * 4 * dt;
+          }
+        }
       }
 
       // Portal re-entry cooldown timer
@@ -1575,6 +1748,9 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       collectibles.dispose();
       chestSystem.dispose();
       lootSystem.dispose();
+      potionSystem.dispose();
+      potionVFX.dispose();
+      (window as any).__potionEffectSystem = null;
       speechSystem.dispose();
       renderer.dispose();
     },

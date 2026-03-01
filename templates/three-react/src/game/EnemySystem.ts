@@ -8,8 +8,10 @@ import { Enemy } from './character';
 import { audioSystem } from '../utils/AudioSystem';
 import { isRangedHeroId, VOX_ENEMIES } from './character';
 import type { GoreSystem } from './GoreSystem';
+import type { PropDestructionSystem } from './PropDestructionSystem';
 import { useGameStore } from '../store';
 import type { SavedEnemy } from './LevelState';
+import type { PotionEffectSystem } from './PotionEffectSystem';
 
 // ── Character collision constants ────────────────────────────────────
 
@@ -120,9 +122,15 @@ interface DamageNumber {
   age: number;
   lifetime: number;
   startY: number;
+  startX: number;
+  startZ: number;
+  dirX: number;
+  dirZ: number;
+  baseScaleX: number;
+  baseScaleY: number;
 }
 
-function createDamageNumber(scene: THREE.Scene, x: number, y: number, z: number, amount: number): DamageNumber {
+function createDamageNumber(scene: THREE.Scene, x: number, y: number, z: number, amount: number, dirX = 0, dirZ = 0): DamageNumber {
   const canvas = document.createElement('canvas');
   canvas.width = 64;
   canvas.height = 32;
@@ -141,9 +149,10 @@ function createDamageNumber(scene: THREE.Scene, x: number, y: number, z: number,
   const sprite = new THREE.Sprite(mat);
   sprite.position.set(x, y + 0.5, z);
   sprite.scale.set(0.4, 0.2, 1);
+  sprite.renderOrder = 1002;
   scene.add(sprite);
 
-  return { sprite, age: 0, lifetime: 1.0, startY: y + 0.5 };
+  return { sprite, age: 0, lifetime: 1.6, startY: y + 0.5, startX: x, startZ: z, dirX, dirZ, baseScaleX: 0.4, baseScaleY: 0.2 };
 }
 
 // ── Hit spark particles ──────────────────────────────────────────────
@@ -209,6 +218,7 @@ export class EnemySystem {
   private readonly lootSystem: LootSystem;
   private readonly ladderDefs: ReadonlyArray<LadderDef>;
   private goreSystem: GoreSystem | null = null;
+  private propDestructionSystem: PropDestructionSystem | null = null;
 
   // Player attack damage (read from store each frame)
   private get playerDamage(): number {
@@ -221,9 +231,10 @@ export class EnemySystem {
   /** Impact callbacks for hitstop + camera shake */
   impactCallbacks: HitImpactCallbacks | null = null;
 
-  /** Per-enemy chase memory: how long to keep chasing after losing visibility */
-  private chaseMemory = new Map<Enemy, number>();
-  private static readonly CHASE_MEMORY_DURATION = 4.0; // seconds
+
+  /** Enemies that have been hit — chase regardless of range, with countdown */
+  private aggroTimers = new Map<Enemy, number>();
+  private static readonly AGGRO_DURATION = 8.0; // seconds
 
   /** Wave spawning: periodically spawn new enemies up to a cap */
   private spawnTimer = 0;
@@ -254,6 +265,18 @@ export class EnemySystem {
     this.goreSystem = gore;
   }
 
+  /** Set the prop destruction system for melee hits on destroyable props */
+  setPropDestructionSystem(pds: PropDestructionSystem): void {
+    this.propDestructionSystem = pds;
+  }
+
+  private potionSystem: PotionEffectSystem | null = null;
+
+  /** Set the potion effect system for shadow/frenzy overrides */
+  setPotionSystem(ps: PotionEffectSystem): void {
+    this.potionSystem = ps;
+  }
+
   spawnEnemies(count: number): void {
     for (let i = 0; i < count; i++) {
       this.spawnOneEnemy();
@@ -268,6 +291,16 @@ export class EnemySystem {
   }
 
   private static readonly MIN_ENTRANCE_DIST_SQ = 5 * 5; // min distance from entrance
+  private playerExcludeX = 0;
+  private playerExcludeZ = 0;
+  private playerExcludeDistSq = 0;
+
+  /** Set an exclusion zone around the player spawn so enemies don't appear within chase range */
+  setPlayerExclusionZone(x: number, z: number, radius: number): void {
+    this.playerExcludeX = x;
+    this.playerExcludeZ = z;
+    this.playerExcludeDistSq = radius * radius;
+  }
 
   private spawnOneEnemy(): void {
     const roomVis = this.terrain.getRoomVisibility();
@@ -283,8 +316,13 @@ export class EnemySystem {
         const dx = pos.x - ex, dz = pos.z - ez;
         if (dx * dx + dz * dz < EnemySystem.MIN_ENTRANCE_DIST_SQ) continue;
       }
+      // Non-dungeon: keep enemies outside chase range of player spawn
+      if (this.playerExcludeDistSq > 0) {
+        const dx = pos.x - this.playerExcludeX, dz = pos.z - this.playerExcludeZ;
+        if (dx * dx + dz * dz < this.playerExcludeDistSq) continue;
+      }
       const enemy = new Enemy(this.scene, this.terrain, this.navGrid, pos, this.ladderDefs);
-      enemy.initChaseBehavior(this.navGrid, this.ladderDefs);
+      enemy.initChaseBehavior(this.navGrid, this.ladderDefs, !!roomVis);
       if (roomVis) enemy.mesh.visible = false; // hidden until room visibility processes it
       this.enemies.push(enemy);
       return;
@@ -292,7 +330,7 @@ export class EnemySystem {
     // Fallback: spawn anywhere (but still respect entrance distance if possible)
     const pos = this.terrain.getRandomPosition(5);
     const enemy = new Enemy(this.scene, this.terrain, this.navGrid, pos, this.ladderDefs);
-    enemy.initChaseBehavior(this.navGrid, this.ladderDefs);
+    enemy.initChaseBehavior(this.navGrid, this.ladderDefs, !!roomVis);
     if (roomVis) enemy.mesh.visible = false;
     this.enemies.push(enemy);
   }
@@ -335,22 +373,24 @@ export class EnemySystem {
 
       // Melee hit only during climax (second half of attack), one hit per attack
       if (playerChar.canApplyAttackHit()) {
+        let hitEnemy = false;
         for (const enemy of this.enemies) {
-          if (!enemy.isAlive || hitThisFrame.has(enemy)) continue;
+          if (!enemy.isAlive || !enemy.mesh.visible || hitThisFrame.has(enemy)) continue;
           if (isInAttackArc(px, playerChar.groundY, pz, playerChar.facing, enemy.mesh.position.x, enemy.groundY, enemy.mesh.position.z, playerChar.params.attackReach, playerChar.params.attackArcHalf)) {
             const hit = enemy.takeDamage(this.playerDamage, px, pz, playerChar.params.melee.knockback);
             if (hit) {
+              hitEnemy = true;
+              this.aggroTimers.set(enemy, EnemySystem.AGGRO_DURATION);
               playerChar.markAttackHitApplied();
               hitThisFrame.add(enemy);
               const ex = enemy.mesh.position.x;
               const ey = enemy.mesh.position.y;
               const ez = enemy.mesh.position.z;
-              this.damageNumbers.push(createDamageNumber(this.scene, ex, ey + 0.3, ez, this.playerDamage));
-              audioSystem.sfxAt('fleshHit', ex, ez);
-
               const hdx = ex - px, hdz = ez - pz;
               const hdist = Math.sqrt(hdx * hdx + hdz * hdz) || 1;
               const hitDirX = hdx / hdist, hitDirZ = hdz / hdist;
+              this.damageNumbers.push(createDamageNumber(this.scene, ex, ey + 0.3, ez, this.playerDamage, hitDirX, hitDirZ));
+              audioSystem.sfxAt('fleshHit', ex, ez);
 
               this.hitSparks.push(createHitSparks(this.scene, ex, ey, ez, hitDirX, hitDirZ));
 
@@ -363,6 +403,37 @@ export class EnemySystem {
                 const isKill = !enemy.isAlive;
                 this.impactCallbacks.onHitstop(isKill ? 0.1 : 0.06);
                 this.impactCallbacks.onCameraShake(isKill ? 0.2 : 0.12, isKill ? 0.2 : 0.12, hitDirX, hitDirZ);
+                // Shadow breaks on hit without kill
+                if (!isKill && this.potionSystem?.isShadow) {
+                  this.potionSystem.breakShadow();
+                }
+              }
+            }
+          }
+        }
+
+        // If no enemy was hit, check destroyable props
+        if (!hitEnemy && playerChar.canApplyAttackHit() && this.propDestructionSystem) {
+          const propHit = this.propDestructionSystem.checkMeleeHit(
+            px, playerChar.groundY, pz,
+            playerChar.facing, playerChar.params.attackReach, playerChar.params.attackArcHalf,
+          );
+          if (propHit) {
+            playerChar.markAttackHitApplied();
+            if (this.impactCallbacks) {
+              this.impactCallbacks.onHitstop(0.04);
+              this.impactCallbacks.onCameraShake(0.1, 0.1, 0, 0);
+            }
+            // Shadow breaks on prop destruction near enemies
+            if (this.potionSystem?.isShadow) {
+              for (const enemy of this.enemies) {
+                if (!enemy.isAlive) continue;
+                const edx = enemy.mesh.position.x - px;
+                const edz = enemy.mesh.position.z - pz;
+                if (edx * edx + edz * edz < 9) { // ~3 unit radius
+                  this.potionSystem.breakShadow();
+                  break;
+                }
               }
             }
           }
@@ -381,52 +452,114 @@ export class EnemySystem {
         }
         this.lootSystem.spawnLoot(pos.clone());
         audioSystem.sfxAt('death', pos.x, pos.z);
-        this.chaseMemory.delete(enemy);
+        this.aggroTimers.delete(enemy);
         enemy.dispose();
         this.enemies.splice(i, 1);
         onEnemyDied();
         continue;
       }
 
-      // Visibility-based chase: only chase if both enemy and player are in the same active area
+      // Determine whether this enemy should actively chase the player
       const roomVis = this.terrain.getRoomVisibility();
-      let shouldChase = true;
-      if (roomVis) {
-        const ex = enemy.mesh.position.x;
-        const ez = enemy.mesh.position.z;
-        const px = playerChar.mesh.position.x;
-        const pz = playerChar.mesh.position.z;
-        const enemyVisible = roomVis.isPositionActive(ex, ez);
-        const playerVisible = roomVis.isPositionActive(px, pz);
-        const bothInActiveArea = enemyVisible && playerVisible;
 
-        if (bothInActiveArea) {
-          // Both visible — chase and reset memory timer
-          this.chaseMemory.set(enemy, EnemySystem.CHASE_MEMORY_DURATION);
+      const ex = enemy.mesh.position.x;
+      const ez = enemy.mesh.position.z;
+      const px = playerChar.mesh.position.x;
+      const pz = playerChar.mesh.position.z;
+
+      // In dungeons, skip ALL processing for enemies outside the active flood-fill area
+      // UNLESS they are currently chasing (chase memory timer still running)
+      if (roomVis && !roomVis.isPositionActive(ex, ez) && !enemy.isCurrentlyChasing()) {
+        continue;
+      }
+
+      let shouldChase = false;
+
+      if (this.potionSystem?.isShadow) {
+        // Shadow: enemies don't initiate chase
+        shouldChase = false;
+      } else if (roomVis) {
+        // Dungeon: enemy is already confirmed active; chase if player also active
+        shouldChase = roomVis.isPositionActive(px, pz);
+      } else {
+        // Open maps: chase if within range
+        const dx = ex - px, dz = ez - pz;
+        const chaseRange = useGameStore.getState().enemyParams.chaseRange * 0.25;
+        shouldChase = (dx * dx + dz * dz) < chaseRange * chaseRange;
+      }
+
+      // Frenzy: force-aggro enemies (dungeon: already in active area; open: distance-based)
+      if (this.potionSystem?.isFrenzy) {
+        if (roomVis) {
+          shouldChase = true;
         } else {
-          // Not in same area — count down memory
-          const remaining = (this.chaseMemory.get(enemy) ?? 0) - dt;
-          if (remaining > 0) {
-            this.chaseMemory.set(enemy, remaining);
-          } else {
-            this.chaseMemory.delete(enemy);
-            shouldChase = false;
-          }
+          const fdx = ex - px, fdz = ez - pz;
+          if (fdx * fdx + fdz * fdz < 64) shouldChase = true; // ~8 unit radius
         }
       }
 
-      enemy.setChaseTarget(shouldChase ? playerChar : null);
+      // Hit-aggro: enemies that were hit chase with a countdown
+      const aggroTime = this.aggroTimers.get(enemy);
+      if (aggroTime !== undefined) {
+        shouldChase = true;
+        // Clear aggro if timer expires or enemy reaches normal chase conditions
+        const remaining = aggroTime - dt;
+        let clearAggro = remaining <= 0;
+        if (!clearAggro) {
+          if (roomVis) {
+            clearAggro = roomVis.isPositionActive(px, pz);
+          } else {
+            const dx = ex - px, dz = ez - pz;
+            const chaseRange = useGameStore.getState().enemyParams.chaseRange * 0.25;
+            clearAggro = (dx * dx + dz * dz) < chaseRange * chaseRange;
+          }
+        }
+        if (clearAggro) {
+          this.aggroTimers.delete(enemy);
+        } else {
+          this.aggroTimers.set(enemy, remaining);
+        }
+      }
+
+      enemy.setChaseTarget(shouldChase ? playerChar : null, dt);
       enemy.update(dt);
 
+      // Awareness fog: fade enemies based on distance on open maps
+      if (!roomVis) {
+        const dx = ex - px, dz = ez - pz;
+        const dist = Math.sqrt(dx * dx + dz * dz);
+        const chaseRange = useGameStore.getState().enemyParams.chaseRange * 0.25;
+        const visRange = chaseRange * 1.5;
+        // Fully visible within chase range, fade out between chase and vis range, invisible beyond
+        const targetOpacity = dist <= chaseRange ? 1.0
+          : dist >= visRange ? 0.0
+          : 1.0 - (dist - chaseRange) / (visRange - chaseRange);
+        const mat = enemy.mesh.material as THREE.MeshStandardMaterial;
+        const current = mat.opacity ?? 1;
+        const speed = 3.0;
+        const newOpacity = current < targetOpacity
+          ? Math.min(targetOpacity, current + speed * dt)
+          : Math.max(targetOpacity, current - speed * dt);
+        if (newOpacity < 0.99) {
+          if (!mat.transparent) { mat.transparent = true; mat.needsUpdate = true; }
+          mat.opacity = newOpacity;
+          enemy.mesh.visible = newOpacity > 0.01;
+        } else {
+          if (mat.transparent) { mat.transparent = false; mat.needsUpdate = true; }
+          mat.opacity = 1;
+          enemy.mesh.visible = true;
+        }
+      }
+
       // Enemy melee: start on wantsToAttack (wind-up), evaluate hit only at climax
-      if (enemy.wantsToAttack() && enemy.stunTimer <= 0) {
+      if (enemy.mesh.visible && enemy.wantsToAttack() && enemy.stunTimer <= 0) {
         const started = enemy.startAttack();
         if (started) {
           audioSystem.sfxAt('slash', enemy.mesh.position.x, enemy.mesh.position.z);
           if (showSlashEffect) this.slashArcs.push(createSlashArc(enemy.mesh));
         }
       }
-      if (enemy.isAttacking && enemy.canApplyAttackHit()) {
+      if (enemy.mesh.visible && enemy.isAttacking && enemy.canApplyAttackHit()) {
         const ex = enemy.mesh.position.x;
         const ez = enemy.mesh.position.z;
         if (isInAttackArc(ex, enemy.groundY, ez, enemy.facing, playerChar.mesh.position.x, playerChar.groundY, playerChar.mesh.position.z, enemy.params.attackReach, enemy.params.attackArcHalf)) {
@@ -598,14 +731,38 @@ export class EnemySystem {
         this.damageNumbers.splice(i, 1);
         continue;
       }
-      dn.sprite.position.y = dn.startY + dn.age * 0.5;
-      (dn.sprite.material as THREE.SpriteMaterial).opacity = 1 - (dn.age / dn.lifetime);
+      const t = dn.age / dn.lifetime;
+
+      // Phase 1 (0-0.15): pop scale — grow to 1.6x then shrink back
+      // Phase 2 (0.15-1): drift up slowly + fade out in last 40%
+      const popEnd = 0.15;
+      let scale: number;
+      if (t < popEnd) {
+        const pt = t / popEnd;
+        // Quick elastic-ish pop: sin curve peaks at 0.5
+        scale = 1 + 0.6 * Math.sin(pt * Math.PI);
+      } else {
+        scale = 1;
+      }
+      dn.sprite.scale.set(dn.baseScaleX * scale, dn.baseScaleY * scale, 1);
+
+      // Drift: hold still during pop, then drift up + along knockback direction
+      const driftT = Math.max(0, t - popEnd) / (1 - popEnd);
+      const ease = 1 - (1 - driftT) * (1 - driftT); // ease-out
+      dn.sprite.position.y = dn.startY + driftT * 0.35;
+      dn.sprite.position.x = dn.startX + dn.dirX * ease * 0.3;
+      dn.sprite.position.z = dn.startZ + dn.dirZ * ease * 0.3;
+
+      // Fade: fully visible until 60%, then fade to 0
+      const fadeStart = 0.6;
+      (dn.sprite.material as THREE.SpriteMaterial).opacity =
+        t < fadeStart ? 1 : 1 - ((t - fadeStart) / (1 - fadeStart));
     }
   }
 
   /** Spawn a floating damage number at a world position (used by ProjectileSystem) */
-  spawnDamageNumber(x: number, y: number, z: number, amount: number): void {
-    this.damageNumbers.push(createDamageNumber(this.scene, x, y + 0.3, z, amount));
+  spawnDamageNumber(x: number, y: number, z: number, amount: number, dirX = 0, dirZ = 0): void {
+    this.damageNumbers.push(createDamageNumber(this.scene, x, y + 0.3, z, amount, dirX, dirZ));
   }
 
   /** Spawn hit sparks at a world position (used by ProjectileSystem) */
@@ -627,8 +784,18 @@ export class EnemySystem {
     return [playerChar, ...this.allyCharacters, ...this.enemies];
   }
 
+  /** Mark an enemy as aggro'd (e.g. hit by projectile) — will chase regardless of range */
+  aggroEnemy(enemy: Enemy): void {
+    this.aggroTimers.set(enemy, EnemySystem.AGGRO_DURATION);
+  }
+
   getEnemies(): ReadonlyArray<Enemy> {
     return this.enemies;
+  }
+
+  /** Get only visible enemies (for combat, targeting, projectiles) */
+  getVisibleEnemies(): ReadonlyArray<Enemy> {
+    return this.enemies.filter(e => e.mesh.visible);
   }
 
   /** Serialize all living enemies for level persistence */
@@ -647,11 +814,12 @@ export class EnemySystem {
 
   /** Spawn enemies from saved state instead of random placement */
   restoreEnemies(saved: SavedEnemy[]): void {
+    const isDungeon = !!this.terrain.getRoomVisibility();
     for (const s of saved) {
       const y = this.terrain.getTerrainY(s.x, s.z);
       const pos = new THREE.Vector3(s.x, y, s.z);
       const enemy = new Enemy(this.scene, this.terrain, this.navGrid, pos, this.ladderDefs);
-      enemy.initChaseBehavior(this.navGrid, this.ladderDefs);
+      enemy.initChaseBehavior(this.navGrid, this.ladderDefs, isDungeon);
       enemy.hp = s.hp;
       enemy.maxHp = s.maxHp;
       enemy.setFacing(s.facing);
@@ -667,7 +835,6 @@ export class EnemySystem {
   dispose(): void {
     for (const enemy of this.enemies) enemy.dispose();
     this.enemies = [];
-    this.chaseMemory.clear();
 
     for (const dn of this.damageNumbers) {
       this.scene.remove(dn.sprite);

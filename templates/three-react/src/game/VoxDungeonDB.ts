@@ -423,16 +423,16 @@ const ALL_PROPS: DungeonPropEntry[] = [
   { id: 'mug_d', category: 'mug', voxPath: `${P}/Mug/Mug%20D%20(Metal)/VOX/mug_d.vox`,             baseHeight: 0.08, radius: 0.04, placement: 'anywhere' },
 
   // Bottles
-  { id: 'bottle_a', category: 'bottle', voxPath: `${P}/Bottle/Bottle%20A%20(Red)/VOX/bottle_a.vox`,       baseHeight: 0.12, radius: 0.04, placement: 'anywhere' },
-  { id: 'bottle_b', category: 'bottle', voxPath: `${P}/Bottle/Bottle%20B%20(Green)/VOX/bottle_b.vox`,     baseHeight: 0.12, radius: 0.04, placement: 'anywhere' },
-  { id: 'bottle_c', category: 'bottle', voxPath: `${P}/Bottle/Bottle%20C%20(Blue)/VOX/bottle_c.vox`,      baseHeight: 0.12, radius: 0.04, placement: 'anywhere' },
-  { id: 'bottle_d', category: 'bottle', voxPath: `${P}/Bottle/Bottle%20D%20(Yellow)/VOX/bottle_d.vox`,    baseHeight: 0.12, radius: 0.04, placement: 'anywhere' },
+  { id: 'bottle_a', category: 'bottle', voxPath: `${P}/Bottle/Bottle%20A%20(Red)/VOX/bottle_a.vox`,       baseHeight: 0.15, radius: 0.04, placement: 'anywhere' },
+  { id: 'bottle_b', category: 'bottle', voxPath: `${P}/Bottle/Bottle%20B%20(Green)/VOX/bottle_b.vox`,     baseHeight: 0.15, radius: 0.04, placement: 'anywhere' },
+  { id: 'bottle_c', category: 'bottle', voxPath: `${P}/Bottle/Bottle%20C%20(Blue)/VOX/bottle_c.vox`,      baseHeight: 0.15, radius: 0.04, placement: 'anywhere' },
+  { id: 'bottle_d', category: 'bottle', voxPath: `${P}/Bottle/Bottle%20D%20(Yellow)/VOX/bottle_d.vox`,    baseHeight: 0.15, radius: 0.04, placement: 'anywhere' },
 
   // Potions
-  { id: 'potion_a', category: 'potion', voxPath: `${P}/Potion/Potion%20A%20(Red)/VOX/potion_a.vox`,       baseHeight: 0.1, radius: 0.04, placement: 'anywhere' },
-  { id: 'potion_b', category: 'potion', voxPath: `${P}/Potion/Potion%20B%20(Green)/VOX/potion_b.vox`,     baseHeight: 0.1, radius: 0.04, placement: 'anywhere' },
-  { id: 'potion_c', category: 'potion', voxPath: `${P}/Potion/Potion%20C%20(Blue)/VOX/potion_c.vox`,      baseHeight: 0.1, radius: 0.04, placement: 'anywhere' },
-  { id: 'potion_d', category: 'potion', voxPath: `${P}/Potion/Potion%20D%20(Yellow)/VOX/potion_d.vox`,    baseHeight: 0.1, radius: 0.04, placement: 'anywhere' },
+  { id: 'potion_a', category: 'potion', voxPath: `${P}/Potion/Potion%20A%20(Red)/VOX/potion_a.vox`,       baseHeight: 0.125, radius: 0.04, placement: 'anywhere' },
+  { id: 'potion_b', category: 'potion', voxPath: `${P}/Potion/Potion%20B%20(Green)/VOX/potion_b.vox`,     baseHeight: 0.125, radius: 0.04, placement: 'anywhere' },
+  { id: 'potion_c', category: 'potion', voxPath: `${P}/Potion/Potion%20C%20(Blue)/VOX/potion_c.vox`,      baseHeight: 0.125, radius: 0.04, placement: 'anywhere' },
+  { id: 'potion_d', category: 'potion', voxPath: `${P}/Potion/Potion%20D%20(Yellow)/VOX/potion_d.vox`,    baseHeight: 0.125, radius: 0.04, placement: 'anywhere' },
 
   // Signposts
   { id: 'signpost_a', category: 'signpost', voxPath: `${P}/Signpost/Signpost%20A%20(Wood)/VOX/signpost_a.vox`,             baseHeight: 0.4, radius: 0.08, placement: 'anywhere' },

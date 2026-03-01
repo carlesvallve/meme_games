@@ -7,6 +7,7 @@ import { DialogUI } from './DialogUI';
 import { CharacterSelect } from './CharacterSelect';
 import { SpeechBubbles } from './SpeechBubbles';
 import { SettingsPanel } from './settings';
+import { PotionHotbar } from './PotionHotbar';
 
 function FPSCounter() {
   const ref = useRef<HTMLDivElement>(null);
@@ -86,7 +87,8 @@ export function UIOverlay() {
       {phase === 'select' && <CharacterSelect />}
       {(phase === 'playing' || phase === 'paused') && <HUD />}
       {(phase === 'playing' || phase === 'paused') && <SpeechBubbles />}
-      {(phase === 'playing' || phase === 'paused') && <SettingsPanel />}
+      {(phase === 'playing' || phase === 'paused') && <PotionHotbar />}
+      <SettingsPanel />
       {phase === 'player_dead' && <DeathOverlay />}
       {phase === 'paused' && <PauseLabel />}
       {message && <DialogUI message={message} />}
