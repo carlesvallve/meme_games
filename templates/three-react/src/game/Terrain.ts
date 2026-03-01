@@ -1389,48 +1389,7 @@ export class Terrain {
     const dy = ladder.topY - ladder.bottomY;
     if (dy <= 0) return;
 
-    // ── Find actual cliff face geometry by sampling terrain ──
-    // Walk along the facing direction (from high side toward low side) to find
-    // where terrain transitions from topY to bottomY. This gives us the real
-    // cliff width, not the cell-to-cell distance which over-estimates it.
-    const cliffMidX = (ladder.lowWorldX + ladder.highWorldX) / 2;
-    const cliffMidZ = (ladder.lowWorldZ + ladder.highWorldZ) / 2;
-    const sampleStep = 0.15;
-    const lowThresh = ladder.bottomY + (dy * 0.15);
-    const highThresh = ladder.topY - (dy * 0.15);
-
-    // Find where cliff starts (low side) and ends (high side)
-    let cliffLowX = cliffMidX, cliffLowZ = cliffMidZ, cliffLowY = ladder.bottomY;
-    let cliffHighX = cliffMidX, cliffHighZ = cliffMidZ, cliffHighY = ladder.topY;
-
-    for (let d = sampleStep; d < 4; d += sampleStep) {
-      const sx = cliffMidX + ladder.facingDX * d;
-      const sz = cliffMidZ + ladder.facingDZ * d;
-      const h = this.getTerrainY(sx, sz);
-      if (h <= lowThresh) {
-        cliffLowX = sx; cliffLowZ = sz; cliffLowY = h;
-        break;
-      }
-    }
-    for (let d = sampleStep; d < 4; d += sampleStep) {
-      const sx = cliffMidX - ladder.facingDX * d;
-      const sz = cliffMidZ - ladder.facingDZ * d;
-      const h = this.getTerrainY(sx, sz);
-      if (h >= highThresh) {
-        cliffHighX = sx; cliffHighZ = sz; cliffHighY = h;
-        break;
-      }
-    }
-
-    // Compute lean from ACTUAL cliff geometry (not cell positions)
-    const cliffDX = cliffHighX - cliffLowX;
-    const cliffDZ = cliffHighZ - cliffLowZ;
-    const actualHorizDist = Math.sqrt(cliffDX * cliffDX + cliffDZ * cliffDZ);
-    const actualDY = cliffHighY - cliffLowY;
-    const ladderLength = Math.sqrt(actualHorizDist * actualHorizDist + actualDY * actualDY);
-
     const rungSpacing = 0.2;
-    const rungCount = Math.max(1, Math.floor(ladderLength / rungSpacing));
     const railWidth = 0.25;
     const railThickness = 0.04;
     const rungThickness = 0.03;
@@ -1443,54 +1402,129 @@ export class Terrain {
       emissiveIntensity: 0.3,
     });
 
-    const railGeo = new THREE.BoxGeometry(railThickness, ladderLength + 0.15, railThickness);
-    const rungGeo = new THREE.BoxGeometry(railWidth, rungThickness, rungThickness);
-
-    // Place ladder at the cliff face (offset slightly outward)
     const offsetFromWall = 0.06;
-    const midX = (cliffLowX + cliffHighX) / 2 + ladder.facingDX * offsetFromWall;
-    const midZ = (cliffLowZ + cliffHighZ) / 2 + ladder.facingDZ * offsetFromWall;
-    const midY = (cliffLowY + cliffHighY) / 2;
-
-    const leanAngle = Math.atan2(actualHorizDist, actualDY);
-    // Store on the LadderDef so Character.ts uses the same angle
-    ladder.leanAngle = leanAngle;
-    // Store actual cliff geometry positions for accurate climb path
-    ladder.cliffLowX = cliffLowX; ladder.cliffLowZ = cliffLowZ; ladder.cliffLowY = cliffLowY;
-    ladder.cliffHighX = cliffHighX; ladder.cliffHighZ = cliffHighZ; ladder.cliffHighY = cliffHighY;
     const yaw = Math.atan2(-ladder.facingDX, -ladder.facingDZ);
-
     const perpDX = -ladder.facingDZ;
     const perpDZ = ladder.facingDX;
 
-    for (const side of [-1, 1]) {
-      const rail = new THREE.Mesh(railGeo, mat);
-      rail.position.set(
-        midX + perpDX * (railWidth * 0.5) * side,
-        midY,
-        midZ + perpDZ * (railWidth * 0.5) * side,
-      );
-      rail.rotation.order = 'YXZ';
-      rail.rotation.y = yaw;
-      rail.rotation.x = leanAngle;
-      rail.castShadow = true;
-      ladderGroup.add(rail);
-    }
+    if (ladder.isVertical) {
+      // ── Vertical ladder: straight up, no lean ──
+      const ladderLength = dy;
+      const rungCount = Math.max(1, Math.floor(ladderLength / rungSpacing));
+      const baseX = ladder.bottomX + ladder.facingDX * offsetFromWall;
+      const baseZ = ladder.bottomZ + ladder.facingDZ * offsetFromWall;
+      const baseY = ladder.bottomY;
 
-    for (let i = 0; i <= rungCount; i++) {
-      const t = rungCount > 0 ? i / rungCount : 0;
-      const rx = cliffLowX + (cliffHighX - cliffLowX) * t + ladder.facingDX * offsetFromWall;
-      const rz = cliffLowZ + (cliffHighZ - cliffLowZ) * t + ladder.facingDZ * offsetFromWall;
-      const ry = cliffLowY + actualDY * t;
-      const rung = new THREE.Mesh(rungGeo, mat);
-      rung.position.set(rx, ry, rz);
-      rung.rotation.y = yaw;
-      rung.castShadow = true;
-      ladderGroup.add(rung);
+      ladder.leanAngle = 0;
+      ladder.cliffLowX = ladder.bottomX; ladder.cliffLowZ = ladder.bottomZ; ladder.cliffLowY = ladder.bottomY;
+      ladder.cliffHighX = ladder.bottomX; ladder.cliffHighZ = ladder.bottomZ; ladder.cliffHighY = ladder.topY;
+
+      const railGeo = new THREE.BoxGeometry(railThickness, ladderLength + 0.15, railThickness);
+      const rungGeo = new THREE.BoxGeometry(railWidth, rungThickness, rungThickness);
+
+      for (const side of [-1, 1]) {
+        const rail = new THREE.Mesh(railGeo, mat);
+        rail.position.set(
+          baseX + perpDX * (railWidth * 0.5) * side,
+          baseY + ladderLength / 2,
+          baseZ + perpDZ * (railWidth * 0.5) * side,
+        );
+        rail.rotation.y = yaw;
+        rail.castShadow = true;
+        ladderGroup.add(rail);
+      }
+
+      for (let i = 0; i <= rungCount; i++) {
+        const t = rungCount > 0 ? i / rungCount : 0;
+        const rung = new THREE.Mesh(rungGeo, mat);
+        rung.position.set(baseX, baseY + dy * t, baseZ);
+        rung.rotation.y = yaw;
+        rung.castShadow = true;
+        ladderGroup.add(rung);
+      }
+    } else {
+      // ── Terrain ladder: lean against cliff face ──
+      const cliffMidX = (ladder.lowWorldX + ladder.highWorldX) / 2;
+      const cliffMidZ = (ladder.lowWorldZ + ladder.highWorldZ) / 2;
+      const sampleStep = 0.15;
+      const lowThresh = ladder.bottomY + (dy * 0.15);
+      const highThresh = ladder.topY - (dy * 0.15);
+
+      let cliffLowX = cliffMidX, cliffLowZ = cliffMidZ, cliffLowY = ladder.bottomY;
+      let cliffHighX = cliffMidX, cliffHighZ = cliffMidZ, cliffHighY = ladder.topY;
+
+      for (let d = sampleStep; d < 4; d += sampleStep) {
+        const sx = cliffMidX + ladder.facingDX * d;
+        const sz = cliffMidZ + ladder.facingDZ * d;
+        const h = this.getTerrainY(sx, sz);
+        if (h <= lowThresh) {
+          cliffLowX = sx; cliffLowZ = sz; cliffLowY = h;
+          break;
+        }
+      }
+      for (let d = sampleStep; d < 4; d += sampleStep) {
+        const sx = cliffMidX - ladder.facingDX * d;
+        const sz = cliffMidZ - ladder.facingDZ * d;
+        const h = this.getTerrainY(sx, sz);
+        if (h >= highThresh) {
+          cliffHighX = sx; cliffHighZ = sz; cliffHighY = h;
+          break;
+        }
+      }
+
+      const cliffDX = cliffHighX - cliffLowX;
+      const cliffDZ = cliffHighZ - cliffLowZ;
+      const actualHorizDist = Math.sqrt(cliffDX * cliffDX + cliffDZ * cliffDZ);
+      const actualDY = cliffHighY - cliffLowY;
+      const ladderLength = Math.sqrt(actualHorizDist * actualHorizDist + actualDY * actualDY);
+      const rungCount = Math.max(1, Math.floor(ladderLength / rungSpacing));
+
+      const railGeo = new THREE.BoxGeometry(railThickness, ladderLength + 0.15, railThickness);
+      const rungGeo = new THREE.BoxGeometry(railWidth, rungThickness, rungThickness);
+
+      const midX = (cliffLowX + cliffHighX) / 2 + ladder.facingDX * offsetFromWall;
+      const midZ = (cliffLowZ + cliffHighZ) / 2 + ladder.facingDZ * offsetFromWall;
+      const midY = (cliffLowY + cliffHighY) / 2;
+
+      const leanAngle = Math.atan2(actualHorizDist, actualDY);
+      ladder.leanAngle = leanAngle;
+      ladder.cliffLowX = cliffLowX; ladder.cliffLowZ = cliffLowZ; ladder.cliffLowY = cliffLowY;
+      ladder.cliffHighX = cliffHighX; ladder.cliffHighZ = cliffHighZ; ladder.cliffHighY = cliffHighY;
+
+      for (const side of [-1, 1]) {
+        const rail = new THREE.Mesh(railGeo, mat);
+        rail.position.set(
+          midX + perpDX * (railWidth * 0.5) * side,
+          midY,
+          midZ + perpDZ * (railWidth * 0.5) * side,
+        );
+        rail.rotation.order = 'YXZ';
+        rail.rotation.y = yaw;
+        rail.rotation.x = leanAngle;
+        rail.castShadow = true;
+        ladderGroup.add(rail);
+      }
+
+      for (let i = 0; i <= rungCount; i++) {
+        const t = rungCount > 0 ? i / rungCount : 0;
+        const rx = cliffLowX + (cliffHighX - cliffLowX) * t + ladder.facingDX * offsetFromWall;
+        const rz = cliffLowZ + (cliffHighZ - cliffLowZ) * t + ladder.facingDZ * offsetFromWall;
+        const ry = cliffLowY + actualDY * t;
+        const rung = new THREE.Mesh(rungGeo, mat);
+        rung.position.set(rx, ry, rz);
+        rung.rotation.y = yaw;
+        rung.castShadow = true;
+        ladderGroup.add(rung);
+      }
     }
 
     this.group.add(ladderGroup);
-    this.ladderMeshes.push(ladderGroup);
+    // Replace at index if recreating, otherwise push
+    if (li < this.ladderMeshes.length) {
+      this.ladderMeshes[li] = ladderGroup;
+    } else {
+      this.ladderMeshes.push(ladderGroup);
+    }
   }
 
   private createDungeonDebris(): void {
@@ -2244,20 +2278,52 @@ export class Terrain {
       const halfWorld = (this.effectiveGroundSize || this.groundSize) / 2;
       const cs = this.dungeonCellSize;
       for (const hint of this.dungeonLadderHints) {
-        // Convert dungeon grid coords to NavGrid coords
-        const lowWX = -halfWorld + (hint.lowGX + 0.5) * cs;
-        const lowWZ = -halfWorld + (hint.lowGZ + 0.5) * cs;
-        const highWX = -halfWorld + (hint.highGX + 0.5) * cs;
-        const highWZ = -halfWorld + (hint.highGZ + 0.5) * cs;
+        // Bottom nav: corridor cell (low height). Top nav: room cell (high height).
+        // Use original dungeon grid positions, convert to navgrid coords.
+        const bottomWX = -halfWorld + (hint.lowGX + 0.5) * cs;
+        const bottomWZ = -halfWorld + (hint.lowGZ + 0.5) * cs;
+        const topWX = -halfWorld + (hint.highGX + 0.5) * cs;
+        const topWZ = -halfWorld + (hint.highGZ + 0.5) * cs;
 
-        const lowNav = grid.worldToGrid(lowWX, lowWZ);
-        const highNav = grid.worldToGrid(highWX, highWZ);
+        const bottomNav = grid.worldToGrid(bottomWX, bottomWZ);
+        const topNav = grid.worldToGrid(topWX, topWZ);
+
+        console.log(`[Ladder hint] low=(${hint.lowGX},${hint.lowGZ}) h=${hint.lowH.toFixed(2)} → high=(${hint.highGX},${hint.highGZ}) h=${hint.highH.toFixed(2)} | bottomNav=(${bottomNav.gx},${bottomNav.gz}) topNav=(${topNav.gx},${topNav.gz}) | worldBottom=(${bottomWX.toFixed(2)},${bottomWZ.toFixed(2)}) worldTop=(${topWX.toFixed(2)},${topWZ.toFixed(2)})`);
 
         const beforeCount = this.ladderDefs.length;
-        this.placeLadder(grid, LADDER_COST, NAV_LINK_OFFSET, lowNav.gx, lowNav.gz, highNav.gx, highNav.gz);
-        // Mark dungeon hint ladders as vertical
+        this.placeLadder(grid, LADDER_COST, NAV_LINK_OFFSET, bottomNav.gx, bottomNav.gz, topNav.gx, topNav.gz);
+
         if (this.ladderDefs.length > beforeCount) {
-          this.ladderDefs[this.ladderDefs.length - 1].isVertical = true;
+          const ld = this.ladderDefs[this.ladderDefs.length - 1];
+          ld.isVertical = true;
+
+          // Perfectly vertical: both endpoints at corridor cell XZ,
+          // nudged 1.5 navgrid cells (0.375m) toward the wall.
+          const navCell = 0.25;
+          const dx = hint.highGX - hint.lowGX;
+          const dz = hint.highGZ - hint.lowGZ;
+          const ladderX = bottomWX + dx * navCell * 1.5;
+          const ladderZ = bottomWZ + dz * navCell * 1.5;
+          ld.lowWorldX = ladderX;
+          ld.lowWorldZ = ladderZ;
+          ld.highWorldX = ladderX;
+          ld.highWorldZ = ladderZ;
+          ld.bottomX = ladderX;
+          ld.bottomZ = ladderZ;
+
+          console.log(`[Ladder placed] #${this.ladderDefs.length - 1} isVertical=true pos=(${ladderX.toFixed(2)},${ladderZ.toFixed(2)}) bottomY=${ld.bottomY.toFixed(2)} topY=${ld.topY.toFixed(2)} facing=(${ld.facingDX.toFixed(2)},${ld.facingDZ.toFixed(2)})`);
+
+          // Recreate the mesh with corrected positions
+          const meshIdx = this.ladderDefs.length - 1;
+          if (this.ladderMeshes[meshIdx]) {
+            this.ladderMeshes[meshIdx].traverse((child) => {
+              if ((child as THREE.Mesh).geometry) (child as THREE.Mesh).geometry.dispose();
+            });
+            this.group.remove(this.ladderMeshes[meshIdx]);
+          }
+          this.createSingleLadderMesh(meshIdx);
+        } else {
+          console.log(`[Ladder hint SKIPPED] placeLadder rejected — cells may be impassable or height diff < 0.3`);
         }
       }
       console.log(`[Terrain] Placed ${this.dungeonLadderHints.length} dungeon ladder hints`);
@@ -2368,6 +2434,8 @@ export class Terrain {
 
     const ladderIndex = this.ladderDefs.length;
     this.ladderDefs.push(ladderDef);
+
+    console.log(`[placeLadder] #${ladderIndex} nav=(${agx},${agz})→(${bgx},${bgz}) lowH=${lowCell.surfaceHeight.toFixed(2)} highH=${highCell.surfaceHeight.toFixed(2)} diff=${heightDiff.toFixed(2)} facing=(${fdx.toFixed(2)},${fdz.toFixed(2)}) world=(${lowWorld.x.toFixed(2)},${lowWorld.z.toFixed(2)})→(${highWorld.x.toFixed(2)},${highWorld.z.toFixed(2)})`);
 
     const bottomNavX = lowWorld.x + fdx * navLinkOffset;
     const bottomNavZ = lowWorld.z + fdz * navLinkOffset;
