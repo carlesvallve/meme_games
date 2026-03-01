@@ -23,6 +23,8 @@ export interface LadderDef {
    *  These are where the terrain transitions, not cell centers. */
   cliffLowX?: number; cliffLowZ?: number; cliffLowY?: number;
   cliffHighX?: number; cliffHighZ?: number; cliffHighY?: number;
+  /** If true, ladder is perfectly vertical (dungeon hint ladders against cliff walls) */
+  isVertical?: boolean;
 }
 
 export interface NavLink {

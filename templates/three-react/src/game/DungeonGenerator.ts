@@ -358,6 +358,113 @@ function connectRoomsMST(
   }
 }
 
+/**
+ * Get a point one cell OUTSIDE a room's edge, toward the target.
+ * This is the first wall cell in the direction of the target — carving from here
+ * ensures the wall between room and corridor is properly opened.
+ */
+function roomExitToward(r: Rect, target: { gx: number; gz: number }): { gx: number; gz: number } {
+  const cx = Math.floor(r.x + r.w / 2);
+  const cz = Math.floor(r.z + r.d / 2);
+  const dx = target.gx - cx;
+  const dz = target.gz - cz;
+
+  if (Math.abs(dx) > Math.abs(dz)) {
+    // Exit east or west
+    const exitX = dx > 0 ? r.x + r.w : r.x - 1;
+    const exitZ = Math.max(r.z, Math.min(r.z + r.d - 1, target.gz));
+    return { gx: exitX, gz: exitZ };
+  } else {
+    // Exit north or south
+    const exitZ = dz > 0 ? r.z + r.d : r.z - 1;
+    const exitX = Math.max(r.x, Math.min(r.x + r.w - 1, target.gx));
+    return { gx: exitX, gz: exitZ };
+  }
+}
+
+/**
+ * Add extra corridors between nearby rooms to create loops (cycles) in the dungeon.
+ * This gives players multiple paths between rooms and enables the stair/ladder system
+ * for loop corridors connecting rooms at different heights.
+ * ~30% of eligible nearby pairs get a loop corridor.
+ */
+function addLoopCorridors(
+  rooms: DungeonRoom[],
+  openGrid: boolean[],
+  gridW: number,
+  corridors: DungeonCorridor[],
+): void {
+  if (rooms.length < 3) return;
+
+  // Collect all room-pair distances
+  type Pair = { a: number; b: number; dist: number };
+  const pairs: Pair[] = [];
+  for (let i = 0; i < rooms.length; i++) {
+    const ci = roomCenter(rooms[i].rect);
+    for (let j = i + 1; j < rooms.length; j++) {
+      const cj = roomCenter(rooms[j].rect);
+      const d = Math.abs(ci.gx - cj.gx) + Math.abs(ci.gz - cj.gz);
+      pairs.push({ a: i, b: j, dist: d });
+    }
+  }
+
+  // Sort by distance — prefer short corridors
+  pairs.sort((a, b) => a.dist - b.dist);
+
+  // Track which rooms already have extra connections to avoid over-connecting
+  const extraConnections = new Map<number, number>();
+  const maxExtraPerRoom = 2; // at most 2 extra loop corridors per room
+  let added = 0;
+  const maxLoops = Math.max(2, Math.floor(rooms.length * 0.5)); // ~50% of room count
+
+  for (const pair of pairs) {
+    if (added >= maxLoops) break;
+    const { a, b } = pair;
+
+    // Skip if either room already has too many extras
+    if ((extraConnections.get(a) ?? 0) >= maxExtraPerRoom) continue;
+    if ((extraConnections.get(b) ?? 0) >= maxExtraPerRoom) continue;
+
+    // ~50% chance per eligible pair
+    if (rng.next() > 0.5) continue;
+
+    // Start carving from one cell OUTSIDE each room's edge (the wall cell)
+    // so the wall between room and corridor is properly carved open.
+    const exitA = roomExitToward(rooms[a].rect, roomCenter(rooms[b].rect));
+    const exitB = roomExitToward(rooms[b].rect, roomCenter(rooms[a].rect));
+
+    // Also carve the room edge cells to ensure entrance is open
+    const edgeA = roomEdgeToward(rooms[a].rect, roomCenter(rooms[b].rect));
+    const edgeB = roomEdgeToward(rooms[b].rect, roomCenter(rooms[a].rect));
+
+    // Carve the corridor from exit to exit (through wall cells)
+    const corridor = carveLCorridor(exitA.gx, exitA.gz, exitB.gx, exitB.gz, openGrid, gridW);
+
+    // Also ensure the room edge cells and the cells between edge→exit are open
+    // (carveLCorridor starts at exitA which is the wall cell, but we need
+    // the room edge cell to also be in the corridor for door detection)
+    const ensureOpen = (gx: number, gz: number) => {
+      if (gx >= 0 && gx < gridW && gz >= 0 && gz < gridW) {
+        openGrid[gz * gridW + gx] = true;
+      }
+    };
+    ensureOpen(edgeA.gx, edgeA.gz);
+    ensureOpen(exitA.gx, exitA.gz);
+    ensureOpen(edgeB.gx, edgeB.gz);
+    ensureOpen(exitB.gx, exitB.gz);
+
+    corridors.push(corridor);
+
+    extraConnections.set(a, (extraConnections.get(a) ?? 0) + 1);
+    extraConnections.set(b, (extraConnections.get(b) ?? 0) + 1);
+    added++;
+  }
+
+  if (added > 0) {
+    console.log(`[Dungeon] Added ${added} loop corridors`);
+  }
+}
+
 /** Carve an L-shaped corridor between two grid points (1 cell wide) */
 function carveLCorridor(
   x1: number, z1: number,
@@ -434,6 +541,9 @@ export function generateBSPDungeon(
   // Connect rooms via minimum spanning tree (shortest corridors)
   const corridors: DungeonCorridor[] = [];
   connectRoomsMST(rooms, openGrid, gridW, corridors);
+
+  // Add extra loop corridors (~30% of non-MST room pairs) for circular paths
+  addLoopCorridors(rooms, openGrid, gridW, corridors);
 
   // Eliminate 1-thick walls, re-bridge, repeat
   eliminateThinWalls(openGrid, roomGrid, gridW, gridD);

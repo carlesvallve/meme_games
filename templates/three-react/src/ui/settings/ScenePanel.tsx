@@ -153,6 +153,7 @@ export function ScenePanel() {
               <Slider label="Door Chance" value={doorChance} min={0} max={1} step={0.1}
                 onChange={(v) => setDoorChance(v)} />
               <Toggle label="Room Labels" value={roomLabels} onChange={setRoomLabels} />
+              <Toggle label="Force Stairs" value={useGameStore((s) => s.forceStairs)} onChange={useGameStore.getState().setForceStairs} />
               <div style={rowStyle}>
                 <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Test Prop</span>
                 <select value={testProp} onChange={(e) => setTestProp(e.target.value)} style={selectStyle}>

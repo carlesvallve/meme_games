@@ -158,6 +158,7 @@ export const DEFAULT_SCENE_SETTINGS = {
   useBiomes: true,
   debugBiomes: false,
   debugProjectileStick: false,
+  forceStairs: false,
   hmrCacheEnabled: false,
   dungeonVariant: 'random',
   dungeonSize: 40,
@@ -189,6 +190,7 @@ interface SavedSettings {
   useBiomes?: boolean;
   debugBiomes?: boolean;
   debugProjectileStick?: boolean;
+  forceStairs?: boolean;
   hmrCacheEnabled?: boolean;
   dungeonVariant?: string;
   dungeonSize?: number;
@@ -232,6 +234,7 @@ function saveSettings(): void {
     useBiomes: s.useBiomes,
     debugBiomes: s.debugBiomes,
     debugProjectileStick: s.debugProjectileStick,
+    forceStairs: s.forceStairs,
     hmrCacheEnabled: s.hmrCacheEnabled,
     dungeonVariant: s.dungeonVariant,
     dungeonSize: s.dungeonSize,
@@ -296,6 +299,8 @@ interface GameStore {
   setDebugBiomes: (on: boolean) => void;
   debugProjectileStick: boolean;
   setDebugProjectileStick: (on: boolean) => void;
+  forceStairs: boolean;
+  setForceStairs: (on: boolean) => void;
   hmrCacheEnabled: boolean;
   setHmrCacheEnabled: (on: boolean) => void;
   dungeonVariant: string;
@@ -450,6 +455,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
   setDebugBiomes: (debugBiomes) => set({ debugBiomes }),
   debugProjectileStick: saved.debugProjectileStick ?? DEFAULT_SCENE_SETTINGS.debugProjectileStick,
   setDebugProjectileStick: (debugProjectileStick) => set({ debugProjectileStick }),
+  forceStairs: saved.forceStairs ?? DEFAULT_SCENE_SETTINGS.forceStairs,
+  setForceStairs: (forceStairs) => set({ forceStairs }),
   hmrCacheEnabled: saved.hmrCacheEnabled ?? DEFAULT_SCENE_SETTINGS.hmrCacheEnabled,
   setHmrCacheEnabled: (hmrCacheEnabled) => set({ hmrCacheEnabled }),
   dungeonVariant: saved.dungeonVariant ?? DEFAULT_SCENE_SETTINGS.dungeonVariant,

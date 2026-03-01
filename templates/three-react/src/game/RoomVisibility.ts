@@ -232,9 +232,10 @@ export class RoomVisibility {
         mesh.material = dim ? this.getDimMaterial(origMat) : origMat;
       }
     }
-    // Disable lights in visited (dimmed) rooms
+    // Disable lights in visited (dimmed) rooms and tag them
     if ((obj as THREE.Light).isLight) {
       obj.visible = !dim;
+      obj.userData.roomDimmed = dim;
     }
     for (const child of obj.children) {
       this.setMeshMaterial(child, dim);
