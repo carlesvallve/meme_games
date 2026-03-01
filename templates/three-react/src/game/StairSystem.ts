@@ -192,21 +192,41 @@ export function computeCellHeights(
           }
 
           if (backGX >= 0) {
-            // Stair on the back cell, ascending toward (gx,gz)
             const stairDx = gx - backGX, stairDz = gz - backGZ;
-            stairs.push({
-              gx: backGX, gz: backGZ,
-              axis: stairDx !== 0 ? 'x' : 'z',
-              direction: (stairDx > 0 || stairDz > 0) ? 1 : -1,
-              totalHeight: stepH,
-              levelHeight: levelH,
-            });
-            usedCells.add(backGZ * gridW + backGX);
-            usedCells.add(cellIdx);
-            // Landing cell raised to upper height
-            cellHeights[cellIdx] = roomHeight[highRid];
-          } else {
-            // Fallback: stair directly adjacent to high room
+            // Only use back-cell if stair axis matches room direction (straight corridor).
+            // For L-shapes (different axes), the stair would face a wall.
+            const isStraight = (stairDx === dx && stairDz === dz);
+            if (isStraight) {
+              // Validate feet: cell behind stair bottom must be open
+              const feetX = backGX - stairDx, feetZ = backGZ - stairDz;
+              const feetOpen = feetX < 0 || feetX >= gridW || feetZ < 0 || feetZ >= gridD
+                || openGrid[feetZ * gridW + feetX];
+              const topOpen = openGrid[nz * gridW + nx];
+              if (!feetOpen || !topOpen) continue;
+
+              stairs.push({
+                gx: backGX, gz: backGZ,
+                axis: stairDx !== 0 ? 'x' : 'z',
+                direction: (stairDx > 0 || stairDz > 0) ? 1 : -1,
+                totalHeight: stepH,
+                levelHeight: levelH,
+              });
+              usedCells.add(backGZ * gridW + backGX);
+              usedCells.add(cellIdx);
+              cellHeights[cellIdx] = roomHeight[highRid];
+            } else {
+              // L-shape: skip back-cell, fall through to direct placement
+              backGX = -1;
+            }
+          }
+          if (backGX < 0) {
+            // Direct placement: stair at boundary cell ascending into room
+            const feetX = gx - dx, feetZ = gz - dz;
+            const feetOpen = feetX < 0 || feetX >= gridW || feetZ < 0 || feetZ >= gridD
+              || openGrid[feetZ * gridW + feetX];
+            const topOpen = openGrid[nz * gridW + nx];
+            if (!feetOpen || !topOpen) continue;
+
             stairs.push({
               gx, gz,
               axis: dx !== 0 ? 'x' : 'z',
