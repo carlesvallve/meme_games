@@ -11,6 +11,7 @@ interface GoreChunk {
   lifetime: number;
   bounced: boolean;
   size: number; // avg scale for sound volume
+  noWallStick?: boolean; // bounce off walls instead of sticking (for prop debris)
 }
 
 // ── Blood stain (parented to a character mesh, moves with them) ─────
@@ -66,14 +67,16 @@ const BLOOD_BRIGHT = new THREE.Color(0xcc1111);
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
-function sampleVertexColors(
+export function sampleVertexColors(
   geometry: THREE.BufferGeometry,
   yMin: number,
   yMax: number,
+  lerpColor?: THREE.Color,
+  lerpAmount = 0.5,
 ): THREE.Color {
   const posAttr = geometry.getAttribute('position');
   const colAttr = geometry.getAttribute('color');
-  if (!posAttr || !colAttr) return BLOOD_RED.clone();
+  if (!posAttr || !colAttr) return (lerpColor ?? BLOOD_RED).clone();
 
   const count = posAttr.count;
   let r = 0, g = 0, b = 0, n = 0;
@@ -86,13 +89,17 @@ function sampleVertexColors(
       n++;
     }
   }
-  if (n === 0) return BLOOD_RED.clone();
+  if (n === 0) return (lerpColor ?? BLOOD_RED).clone();
   const avg = new THREE.Color(r / n, g / n, b / n);
-  avg.lerp(BLOOD_RED, 0.5);
+  if (lerpColor !== undefined) {
+    avg.lerp(lerpColor, lerpAmount);
+  } else {
+    avg.lerp(BLOOD_RED, 0.5);
+  }
   return avg;
 }
 
-function getGeometryYBounds(geometry: THREE.BufferGeometry): { minY: number; maxY: number } {
+export function getGeometryYBounds(geometry: THREE.BufferGeometry): { minY: number; maxY: number } {
   const posAttr = geometry.getAttribute('position');
   if (!posAttr) return { minY: 0, maxY: 0.5 };
   let minY = Infinity, maxY = -Infinity;
@@ -348,7 +355,7 @@ export class GoreSystem {
 
   // ── Flying gore chunks ────────────────────────────────────────────
 
-  private spawnChunk(
+  spawnChunk(
     x: number, y: number, z: number,
     groundY: number,
     color: THREE.Color,
@@ -357,6 +364,7 @@ export class GoreSystem {
     _lifetimeHint: number,
     knockbackDirX = 0,
     knockbackDirZ = 0,
+    noWallStick = false,
   ): void {
     while (this.chunks.length >= MAX_CHUNKS) {
       const old = this.chunks.shift()!;
@@ -399,7 +407,7 @@ export class GoreSystem {
 
     const avgSize = (sx + sy + sz) / 3;
     const lifetime = randGoreLifetime();
-    this.chunks.push({ mesh, vel, groundY, age: 0, lifetime, bounced: false, size: avgSize });
+    this.chunks.push({ mesh, vel, groundY, age: 0, lifetime, bounced: false, size: avgSize, noWallStick });
   }
 
   // ── Floor splats (tiny puddles) ───────────────────────────────────
@@ -585,41 +593,57 @@ export class GoreSystem {
       chunk.mesh.position.y += chunk.vel.y * dt;
       chunk.mesh.position.z += chunk.vel.z * dt;
 
-      // Wall collision — stick to wall as a splat
+      // Wall collision — stick to wall as a splat (gore) or bounce off (prop debris)
       if (this.isOpenCell && chunk.vel.lengthSq() > 0.1) {
         const newX = chunk.mesh.position.x;
         const newZ = chunk.mesh.position.z;
         if (!this.isOpenCell(newX, newZ)) {
-          // Determine which axis hit the wall for splat orientation
           const xBlocked = !this.isOpenCell(newX, oldZ);
           const zBlocked = !this.isOpenCell(oldX, newZ);
 
-          let normalX = 0, normalZ = 0;
-          if (xBlocked && !zBlocked) {
-            normalX = chunk.vel.x > 0 ? -1 : 1;
-            chunk.mesh.position.x = oldX;
-          } else if (zBlocked && !xBlocked) {
-            normalZ = chunk.vel.z > 0 ? -1 : 1;
-            chunk.mesh.position.z = oldZ;
+          if (chunk.noWallStick) {
+            // Bounce off wall instead of sticking
+            if (xBlocked && !zBlocked) {
+              chunk.mesh.position.x = oldX;
+              chunk.vel.x *= -0.3;
+            } else if (zBlocked && !xBlocked) {
+              chunk.mesh.position.z = oldZ;
+              chunk.vel.z *= -0.3;
+            } else {
+              chunk.mesh.position.x = oldX;
+              chunk.mesh.position.z = oldZ;
+              chunk.vel.x *= -0.3;
+              chunk.vel.z *= -0.3;
+            }
           } else {
-            normalX = chunk.vel.x > 0 ? -1 : 1;
-            chunk.mesh.position.x = oldX;
-            chunk.mesh.position.z = oldZ;
+            // Determine which axis hit the wall for splat orientation
+            let normalX = 0, normalZ = 0;
+            if (xBlocked && !zBlocked) {
+              normalX = chunk.vel.x > 0 ? -1 : 1;
+              chunk.mesh.position.x = oldX;
+            } else if (zBlocked && !xBlocked) {
+              normalZ = chunk.vel.z > 0 ? -1 : 1;
+              chunk.mesh.position.z = oldZ;
+            } else {
+              normalX = chunk.vel.x > 0 ? -1 : 1;
+              chunk.mesh.position.x = oldX;
+              chunk.mesh.position.z = oldZ;
+            }
+
+            // Spawn wall splat at impact point
+            const color = ((chunk.mesh.material as THREE.MeshStandardMaterial).color ?? BLOOD_RED).clone();
+            const splatSize = 0.04 + chunk.size * 2.5;
+            this.spawnWallSplat(
+              chunk.mesh.position.x, chunk.mesh.position.y, chunk.mesh.position.z,
+              normalX, normalZ, color, splatSize,
+            );
+
+            // Remove the chunk — it became a wall splat
+            this.scene.remove(chunk.mesh);
+            (chunk.mesh.material as THREE.Material).dispose();
+            this.chunks.splice(i, 1);
+            continue;
           }
-
-          // Spawn wall splat at impact point
-          const color = ((chunk.mesh.material as THREE.MeshStandardMaterial).color ?? BLOOD_RED).clone();
-          const splatSize = 0.04 + chunk.size * 2.5;
-          this.spawnWallSplat(
-            chunk.mesh.position.x, chunk.mesh.position.y, chunk.mesh.position.z,
-            normalX, normalZ, color, splatSize,
-          );
-
-          // Remove the chunk — it became a wall splat
-          this.scene.remove(chunk.mesh);
-          (chunk.mesh.material as THREE.Material).dispose();
-          this.chunks.splice(i, 1);
-          continue;
         }
       }
 

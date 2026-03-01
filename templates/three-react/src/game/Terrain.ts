@@ -114,7 +114,7 @@ const PRESET_CONFIGS: Record<TerrainPreset, TerrainPresetConfig> = {
   },
 };
 
-const DEBUG_RAMPS = true;
+const DEBUG_RAMPS = false;
 
 // ── Terrain class ───────────────────────────────────────────────────
 
@@ -1765,6 +1765,7 @@ export class Terrain {
         theme,
         this.dungeonSeed,
         cellHeightsArr,
+        output.roomOwnership,
       );
 
       // Register prop meshes + labels with room visibility
@@ -2577,6 +2578,11 @@ export class Terrain {
     this.propSystem?.update(dt);
   }
 
+  /** Get the dungeon prop system (if any) — used by PropDestructionSystem */
+  getPropSystem(): DungeonPropSystem | null {
+    return this.propSystem;
+  }
+
 
 
   /** Get the ground/debris height at a point, optionally expanded by a radius */
@@ -2602,6 +2608,22 @@ export class Terrain {
       }
     }
     return maxY;
+  }
+
+  /** Unblock nav cell at a world position (e.g. after destroying a prop) and remove its debris box. */
+  unblockPropAt(wx: number, wz: number): void {
+    if (this.navGrid) {
+      const cell = this.navGrid.worldToGrid(wx, wz);
+      this.navGrid.unblockCells([cell]);
+    }
+    // Remove matching prop debris box
+    for (let i = this.debris.length - 1; i >= 0; i--) {
+      const d = this.debris[i];
+      if (d.isProp && Math.abs(d.x - wx) < 0.3 && Math.abs(d.z - wz) < 0.3) {
+        this.debris.splice(i, 1);
+        break;
+      }
+    }
   }
 
   /** Check if a world position is on an open dungeon cell (structural walls only, ignores props). */

@@ -8,7 +8,7 @@ const CHARACTER_MOVE_PARAMS: SliderDef<keyof MovementParams>[] = [
   { key: 'capsuleRadius', label: 'Capsule Radius', min: 0.05, max: 1.5, step: 0.05 },
   { key: 'arrivalReach', label: 'Arrival Reach', min: 0.02, max: 0.5, step: 0.01 },
   { key: 'hopHeight', label: 'Hop Intensity', min: 0, max: 0.5, step: 0.01 },
-  { key: 'magnetRadius', label: 'Magnet Radius', min: 0, max: 10, step: 0.5 },
+  { key: 'magnetRadius', label: 'Magnet Radius', min: 0, max: 10, step: 0.1 },
   { key: 'magnetSpeed', label: 'Magnet Speed', min: 1, max: 32, step: 1 },
 ];
 

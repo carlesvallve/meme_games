@@ -196,6 +196,15 @@ export class NavGrid {
     };
   }
 
+  /** Count walkable cells (not blocked, has at least one passable edge) */
+  getWalkableCellCount(): number {
+    let count = 0;
+    for (const cell of this.cells) {
+      if (!cell.blocked && cell.passable !== 0) count++;
+    }
+    return count;
+  }
+
   /** Check if a world-space position is on a walkable cell (not blocked and has passable edges) */
   isWalkable(x: number, z: number): boolean {
     const { gx, gz } = this.worldToGrid(x, z);
@@ -362,6 +371,24 @@ export class NavGrid {
       if (cell) {
         cell.blocked = true;
         cell.passable = 0;
+      }
+    }
+
+    this.recomputePassability();
+    this.bakeSpawnRegion();
+  }
+
+  /**
+   * Unblock specific nav cells (e.g. after destroying a prop).
+   * Recomputes passability and spawn region.
+   */
+  unblockCells(cells: ReadonlyArray<{ gx: number; gz: number }>): void {
+    const { width, height } = this;
+    for (const { gx, gz } of cells) {
+      if (gx < 0 || gx >= width || gz < 0 || gz >= height) continue;
+      const cell = this.cells[gz * width + gx];
+      if (cell) {
+        cell.blocked = false;
       }
     }
 

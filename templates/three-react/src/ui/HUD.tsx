@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useGameStore } from '../store';
-import type { ParticleToggles } from '../store';
+import type { ParticleToggles, ActivePotionDisplay } from '../store';
+import { EFFECT_META } from '../game/PotionEffectSystem';
 
 const TOGGLE_KEYS: { key: keyof ParticleToggles; label: string }[] = [
   { key: 'dust', label: 'Dust' },
@@ -78,16 +79,61 @@ function HPBar({ hp, maxHp }: { hp: number; maxHp: number }) {
   );
 }
 
+const EFFECT_ICONS: Record<string, string> = {
+  heal: '❤️', poison: '☠️',
+  speed: '⚡', slow: '🐌',
+  armor: '🛡️', fragile: '💔',
+  shadow: '👻', frenzy: '🔥',
+};
+
+function ActiveEffects({ effects }: { effects: ActivePotionDisplay[] }) {
+  if (effects.length === 0) return null;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'flex-end' }}>
+      {effects.map(({ effect, remaining, duration, positive }) => {
+        const ratio = duration > 0 ? remaining / duration : 0;
+        const color = positive ? '#44dd66' : '#dd4444';
+        const icon = EFFECT_ICONS[effect] ?? '🧪';
+        const label = EFFECT_META[effect].label;
+        return (
+          <div key={effect} style={{
+            display: 'flex', alignItems: 'center', gap: 5,
+          }}>
+            <span style={{ fontSize: 10, fontWeight: 600, color, minWidth: 48, textAlign: 'right' }}>
+              {icon} {label}
+            </span>
+            <div style={{
+              width: 60, height: 5,
+              background: 'rgba(255,255,255,0.12)',
+              borderRadius: 3, overflow: 'hidden',
+            }}>
+              <div style={{
+                width: `${ratio * 100}%`, height: '100%',
+                background: color, borderRadius: 3,
+                transition: 'width 0.15s linear',
+              }} />
+            </div>
+            <span style={{ fontSize: 9, opacity: 0.6, minWidth: 20 }}>
+              {Math.ceil(remaining)}s
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export function HUD() {
   const collectibles = useGameStore((s) => s.collectibles);
   const coins = useGameStore((s) => s.coins);
-  const potions = useGameStore((s) => s.potions);
+  const potionCount = useGameStore((s) => s.potionInventory.reduce((sum, slot) => sum + slot.count, 0));
   const hp = useGameStore((s) => s.hp);
   const maxHp = useGameStore((s) => s.maxHp);
   const toggles = useGameStore((s) => s.particleToggles);
   const toggle = useGameStore((s) => s.toggleParticle);
   const activeCharacterName = useGameStore((s) => s.activeCharacterName);
   const activeCharacterColor = useGameStore((s) => s.activeCharacterColor);
+  const activePotionEffects = useGameStore((s) => s.activePotionEffects);
 
   return (
     <div
@@ -165,8 +211,9 @@ export function HUD() {
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
           <Stat icon="💎" value={collectibles} color="#44ffaa" />
           <Stat icon="🪙" value={coins} color="#ffd700" />
-          <Stat icon="🧪" value={potions} color="#ff6688" />
+          <Stat icon="🧪" value={potionCount} color="#ff6688" />
         </div>
+        <ActiveEffects effects={activePotionEffects} />
       </div>
     </div>
   );

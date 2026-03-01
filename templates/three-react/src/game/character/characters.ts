@@ -6,11 +6,11 @@ import { ALL_VOX_CHARACTERS, type VoxCharEntry } from './VoxCharacterDB';
 
 export type CharacterType =
   | 'slot0' | 'slot1' | 'slot2' | 'slot3' | 'slot4' | 'slot5'
-  | 'slot6' | 'slot7' | 'slot8' | 'slot9' | 'slot10' | 'slot11';
+  | 'slot6' | 'slot7' | 'slot8' | 'slot9' | 'slot10';
 
 const ALL_SLOTS: CharacterType[] = [
   'slot0', 'slot1', 'slot2', 'slot3', 'slot4', 'slot5',
-  'slot6', 'slot7', 'slot8', 'slot9', 'slot10', 'slot11',
+  'slot6', 'slot7', 'slot8', 'slot9', 'slot10',
 ];
 
 // ── VOX Roster ──
@@ -51,7 +51,6 @@ export const CHARACTER_TEAM_COLORS: Record<CharacterType, string> = {
   slot8: '#88ccff',
   slot9: '#ccff88',
   slot10: '#ffcc00',
-  slot11: '#c44',
 };
 
 // ── Names from roster ──

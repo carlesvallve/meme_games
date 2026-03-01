@@ -6,6 +6,19 @@ import type { HeightmapStyle } from './game/TerrainNoise';
 import { DEFAULT_CHARACTER_PARAMS } from './game/character';
 import type { MovementParams, MeleeParams, RangedParams } from './game/character';
 import type { LevelSnapshot } from './game/LevelState';
+import type { PotionEffect } from './game/PotionEffectSystem';
+
+export interface ActivePotionDisplay {
+  effect: PotionEffect;
+  remaining: number;
+  duration: number;
+  positive: boolean;
+}
+
+export interface PotionSlot {
+  colorIndex: number;
+  count: number;
+}
 import { floorSeed } from './utils/SeededRandom';
 
 export type { MovementParams, MeleeParams, RangedParams } from './game/character';
@@ -26,10 +39,13 @@ export interface EnemyParams {
   melee: MeleeParams;
   ranged: RangedParams & { enabled: boolean };
   // ── Enemy AI ──
+  /** Chase range in nav grid cells. Converted to world units at point of use. */
   chaseRange: number;
   /** Damage the player deals to enemies (attacker-side). */
   playerDamage: number;
-  /** Max enemies to spawn (used across all terrain presets). */
+  /** Enemy density: ratio of enemies per walkable nav cell (e.g. 0.02 = 1 enemy per 50 cells). */
+  enemyDensity: number;
+  /** Hard cap on total enemies (prevents performance issues on large maps). */
   maxEnemies: number;
   /** Seconds between wave-spawn attempts once initial enemies are placed. */
   spawnInterval: number;
@@ -46,9 +62,10 @@ export const DEFAULT_ENEMY_PARAMS: EnemyParams = {
   stunDuration: 0.15,
   melee: { autoTarget: true, knockback: 5, showSlashEffect: true, exhaustionEnabled: false },
   ranged: { enabled: false, autoTarget: true, knockback: 2.5, exhaustionEnabled: false },
-  chaseRange: 8,
+  chaseRange: 12,
   playerDamage: 2,
-  maxEnemies: 6,
+  enemyDensity: 0.02,
+  maxEnemies: 32,
   spawnInterval: 12,
   allowedTypes: [],
 };
@@ -250,7 +267,7 @@ interface GameStore {
   selectedCharacter: CharacterType | null;
   collectibles: number;
   coins: number;
-  potions: number;
+  potionInventory: PotionSlot[];
   speechBubbles: SpeechBubbleData[];
   particleToggles: ParticleToggles;
   characterParams: MovementParams;
@@ -323,7 +340,9 @@ interface GameStore {
   selectCharacter: (type: CharacterType) => void;
   setCollectibles: (n: number) => void;
   addCoins: (n: number) => void;
-  addPotions: (n: number) => void;
+  addPotionToInventory: (colorIndex: number) => void;
+  removePotionFromInventory: (colorIndex: number) => void;
+  clearPotionInventory: () => void;
   setSpeechBubbles: (bubbles: SpeechBubbleData[]) => void;
   toggleParticle: (key: keyof ParticleToggles) => void;
   setCharacterParam: <K extends keyof MovementParams>(key: K, value: MovementParams[K]) => void;
@@ -347,12 +366,18 @@ interface GameStore {
   setDoorChance: (chance: number) => void;
   setRoomLabels: (on: boolean) => void;
 
+  /** Active potion effects for HUD display */
+  activePotionEffects: ActivePotionDisplay[];
+  setActivePotionEffects: (effects: ActivePotionDisplay[]) => void;
+
   activeCharacterName: string | null;
   activeCharacterColor: string | null;
   setActiveCharacter: (name: string | null, color: string | null) => void;
 
   heightmapThumb: string | null;
   setHeightmapThumb: (url: string | null) => void;
+  walkableCells: number;
+  setWalkableCells: (count: number) => void;
 
   onStartGame: (() => void) | null;
   onPauseToggle: (() => void) | null;
@@ -366,6 +391,7 @@ interface GameStore {
   onResetSceneParams: (() => void) | null;
   onSpawnEnemy: (() => void) | null;
   onResetEnemyParams: (() => void) | null;
+  onDrinkPotion: ((colorIndex: number) => void) | null;
 }
 
 const saved = loadSettings();
@@ -386,7 +412,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
   selectedCharacter: null,
   collectibles: 0,
   coins: 0,
-  potions: 0,
+  potionInventory: [],
   speechBubbles: [],
   particleToggles: saved.particleToggles ?? { ...DEFAULT_PARTICLE_TOGGLES },
   characterParams: { ...DEFAULT_CHARACTER_PARAMS, ...(saved.characterParams ?? saved.playerParams) },
@@ -484,7 +510,23 @@ export const useGameStore = create<GameStore>((set, get) => ({
   selectCharacter: (type) => set({ selectedCharacter: type, phase: 'playing' }),
   setCollectibles: (collectibles) => set({ collectibles }),
   addCoins: (n) => set((s) => ({ coins: s.coins + n })),
-  addPotions: (n) => set((s) => ({ potions: s.potions + n })),
+  addPotionToInventory: (colorIndex) => set((s) => {
+    const inv = [...s.potionInventory];
+    const existing = inv.find(slot => slot.colorIndex === colorIndex);
+    if (existing) {
+      existing.count++;
+    } else {
+      inv.push({ colorIndex, count: 1 });
+    }
+    return { potionInventory: inv };
+  }),
+  removePotionFromInventory: (colorIndex) => set((s) => {
+    const inv = s.potionInventory
+      .map(slot => slot.colorIndex === colorIndex ? { ...slot, count: slot.count - 1 } : slot)
+      .filter(slot => slot.count > 0);
+    return { potionInventory: inv };
+  }),
+  clearPotionInventory: () => set({ potionInventory: [] }),
   setSpeechBubbles: (speechBubbles) => set({ speechBubbles }),
   toggleParticle: (key) =>
     set((s) => ({
@@ -526,12 +568,17 @@ export const useGameStore = create<GameStore>((set, get) => ({
   setDoorChance: (doorChance) => set({ doorChance }),
   setRoomLabels: (roomLabels) => set({ roomLabels }),
 
+  activePotionEffects: [],
+  setActivePotionEffects: (activePotionEffects) => set({ activePotionEffects }),
+
   activeCharacterName: null,
   activeCharacterColor: null,
   setActiveCharacter: (activeCharacterName, activeCharacterColor) => set({ activeCharacterName, activeCharacterColor }),
 
   heightmapThumb: null,
   setHeightmapThumb: (heightmapThumb) => set({ heightmapThumb }),
+  walkableCells: 0,
+  setWalkableCells: (walkableCells) => set({ walkableCells }),
 
   onStartGame: null,
   onPauseToggle: null,
@@ -545,6 +592,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
   onResetSceneParams: null,
   onSpawnEnemy: null,
   onResetEnemyParams: null,
+  onDrinkPotion: null,
 }));
 
 // Auto-save settings to localStorage on any change

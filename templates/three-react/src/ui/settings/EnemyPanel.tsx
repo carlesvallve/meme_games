@@ -18,7 +18,7 @@ export function EnemyPanel() {
   return (
     <SettingsWindow>
       <Section label="Spawn" accent={accent} first>
-        <Slider label="Max Enemies" value={ep.maxEnemies} min={0} max={20} step={1} accent={accent} onChange={(v) => set('maxEnemies', v)} />
+        <Slider label="Enemy Density" value={ep.enemyDensity} min={0} max={0.08} step={0.005} accent={accent} onChange={(v) => set('enemyDensity', v)} />
         <Slider label="Respawn Time" value={ep.spawnInterval} min={2} max={60} step={1} accent={accent} onChange={(v) => set('spawnInterval', v)} />
         <MultiSelect
           label="Types"
@@ -40,7 +40,7 @@ export function EnemyPanel() {
       <Section label="Behaviour" accent={accent}>
         <Slider label="HP" value={ep.hp} min={1} max={20} step={1} accent={accent} onChange={(v) => set('hp', v)} />
         <Slider label="Player Dmg" value={ep.playerDamage} min={1} max={10} step={1} accent={accent} onChange={(v) => set('playerDamage', v)} />
-        <Slider label="Chase Range" value={ep.chaseRange} min={1} max={20} step={0.5} accent={accent} onChange={(v) => set('chaseRange', v)} />
+        <Slider label="Chase Range (cells)" value={ep.chaseRange} min={0} max={60} step={1} accent={accent} onChange={(v) => set('chaseRange', v)} />
       </Section>
 
       <Section label="Move" accent={accent}>

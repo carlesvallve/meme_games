@@ -27,6 +27,13 @@ export interface SavedLoot {
   z: number;
   type: 'coin' | 'potion';
   value: number;
+  /** Potion color index (0-7) for effect mapping */
+  colorIndex?: number;
+}
+
+export interface SavedDestroyedProp {
+  x: number;
+  z: number;
 }
 
 export interface LevelSnapshot {
@@ -37,6 +44,7 @@ export interface LevelSnapshot {
   chests: SavedChest[];
   collectibles: SavedCollectible[];
   loot: SavedLoot[];
+  destroyedProps: SavedDestroyedProp[];
 }
 
 /** Keyed by floor number */

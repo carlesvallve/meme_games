@@ -19,6 +19,7 @@ export function ScenePanel() {
   const setHeightmapStyle = useGameStore((s) => s.setHeightmapStyle);
   const regenerate = useGameStore((s) => s.onRegenerateScene);
   const heightmapThumb = useGameStore((s) => s.heightmapThumb);
+  const walkableCells = useGameStore((s) => s.walkableCells);
   const paletteName = useGameStore((s) => s.paletteName);
   const paletteActive = useGameStore((s) => s.paletteActive);
   const setPaletteName = useGameStore((s) => s.setPaletteName);
@@ -71,14 +72,19 @@ export function ScenePanel() {
       {/* ── TERRAIN ── */}
       <Section label="Terrain" first>
         {heightmapThumb && (
-          <img
-            src={heightmapThumb}
-            alt="heightmap"
-            style={{
-              width: 48, height: 48, imageRendering: 'pixelated', marginTop: 4,
-              border: '1px solid rgba(255,255,255,0.2)', borderRadius: 3,
-            }}
-          />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+            <img
+              src={heightmapThumb}
+              alt="heightmap"
+              style={{
+                width: 48, height: 48, imageRendering: 'pixelated',
+                border: '1px solid rgba(255,255,255,0.2)', borderRadius: 3,
+              }}
+            />
+            <span style={{ fontSize: 10, color: '#999', lineHeight: 1.3 }}>
+              {walkableCells} walkable cells
+            </span>
+          </div>
         )}
         <div style={rowStyle}>
           <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Preset</span>

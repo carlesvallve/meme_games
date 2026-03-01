@@ -6,11 +6,19 @@ import type { LadderDef } from '../Ladder';
 import type { VoxCharEntry } from './VoxCharacterDB';
 import { getFilteredEnemies } from './VoxCharacterDB';
 import { ChaseBehavior } from '../behaviors/ChaseBehavior';
+import { Roaming } from '../behaviors/Roaming';
+import type { BehaviorContext } from '../behaviors/Behavior';
 import type { CharacterType } from './characters';
 import { useGameStore, type EnemyParams } from '../../store';
 
+/** How long an enemy keeps chasing after losing sight of the player */
+const CHASE_MEMORY = 4.0;
+
 export class Enemy extends Character {
   private chaseBehavior: ChaseBehavior | null = null;
+  private roamBehavior: Roaming | null = null;
+  private isChasing = false;
+  private chaseMemoryTimer = 0;
 
   constructor(
     scene: THREE.Scene,
@@ -32,7 +40,7 @@ export class Enemy extends Character {
       hopHeight: 0.03,
       attackDamage: Math.floor(Math.random() * 4) + 1,
       attackCooldown: ep.attackCooldown,
-      chaseRange: ep.chaseRange,
+      chaseRange: ep.chaseRange * 0.25,
       invulnDuration: ep.invulnDuration,
       stunDuration: ep.stunDuration,
       melee: { ...ep.melee },
@@ -52,22 +60,49 @@ export class Enemy extends Character {
   }
 
   /** Initialize chase behavior — call after construction */
-  initChaseBehavior(navGrid: NavGrid, ladderDefs: ReadonlyArray<LadderDef>): void {
+  initChaseBehavior(navGrid: NavGrid, ladderDefs: ReadonlyArray<LadderDef>, isDungeon = false): void {
+    const ctx: BehaviorContext = { navGrid, ladderDefs };
+    // In dungeons, chase range is infinite — chasing is controlled by flood-fill visibility
+    const behaviorChaseRange = isDungeon ? Infinity : this.params.chaseRange;
     this.chaseBehavior = new ChaseBehavior(
-      { navGrid, ladderDefs },
+      ctx,
       this.params,
       this.params.attackReach,
       this.params.attackCooldown,
-      this.params.chaseRange,
+      behaviorChaseRange,
     );
-    this.behavior = this.chaseBehavior;
+    this.roamBehavior = new Roaming(ctx, this.params, {
+      radiusMin: 2,
+      radiusMax: 5,
+      idleMin: 2,
+      idleMax: 5,
+    });
+    this.behavior = this.roamBehavior;
   }
 
   /** Set the chase target each frame */
-  setChaseTarget(target: Character | null): void {
-    if (this.chaseBehavior && target) {
+  setChaseTarget(target: Character | null, dt: number): void {
+    if (!this.chaseBehavior) return;
+    if (target) {
       this.chaseBehavior.setTarget(target, target.isAlive);
+      this.chaseMemoryTimer = CHASE_MEMORY;
+      if (!this.isChasing) {
+        this.isChasing = true;
+        this.behavior = this.chaseBehavior;
+      }
+    } else if (this.isChasing) {
+      // Lost sight — keep chasing on memory timer
+      this.chaseMemoryTimer -= dt;
+      if (this.chaseMemoryTimer <= 0) {
+        this.isChasing = false;
+        this.behavior = this.roamBehavior!;
+      }
     }
+  }
+
+  /** Check if this enemy is currently in chase mode (active chase or memory timer) */
+  isCurrentlyChasing(): boolean {
+    return this.isChasing;
   }
 
   /** Check if the chase behavior is in attack state (wants to attack) */
