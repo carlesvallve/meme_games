@@ -6,6 +6,9 @@ import * as THREE from 'three';
 import type { DoorDef } from './DungeonGenerator';
 import type { DoorSystem } from './Door';
 
+/** Max flood-fill radius from player in grid cells (~7.5m with cellSize=0.75) */
+const MAX_FLOOD_DIST_SQ = 10 * 10;
+
 export class RoomVisibility {
   private roomOwnership: number[];
   private openGrid: boolean[];
@@ -15,6 +18,7 @@ export class RoomVisibility {
   private halfWorld: number;
   private cellHeights: Float32Array | null = null;
   private heightThreshold: number;
+  private stairCells: Set<number>;
 
   // Door cell lookup: cellIndex → door index in DoorSystem
   private doorCellMap = new Map<number, number>();
@@ -46,6 +50,7 @@ export class RoomVisibility {
     gridDoors: DoorDef[],
     cellHeights?: Float32Array,
     heightThreshold = 0.4,
+    stairCells?: Set<number>,
   ) {
     this.roomOwnership = roomOwnership;
     this.openGrid = openGrid;
@@ -55,6 +60,7 @@ export class RoomVisibility {
     this.halfWorld = groundSize / 2;
     this.cellHeights = cellHeights ?? null;
     this.heightThreshold = heightThreshold;
+    this.stairCells = stairCells ?? new Set();
 
     // Build door cell map for flood-fill
     for (let di = 0; di < gridDoors.length; di++) {
@@ -159,6 +165,10 @@ export class RoomVisibility {
         const nidx = nz * gridW + nx;
         if (reached.has(nidx)) continue;
         if (!openGrid[nidx]) continue;
+
+        // Max distance from player (in grid cells)
+        const distSq = (nx - pgx) * (nx - pgx) + (nz - pgz) * (nz - pgz);
+        if (distSq > MAX_FLOOD_DIST_SQ) continue;
 
         // Door cell: blocks if door is closed OR doorSystem not yet loaded
         const doorIdx = this.doorCellMap.get(nidx);

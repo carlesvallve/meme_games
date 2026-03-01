@@ -63,7 +63,7 @@ export function generateDungeon(
   wallGap = 1,
   cellSizeOverride?: number,
   roomSpacing?: number,
-  doorChance = 0.7,
+  doorChance = 1.0,
   seed?: number,
 ): DungeonOutput {
   // Initialize seeded RNG — use provided seed or generate a random one
@@ -556,7 +556,7 @@ export function generateBSPDungeon(
   minRoomSize = 3,
   maxDepth = 6,
   roomSpacingOverride?: number,
-  doorChance = 0.7,
+  doorChance = 1.0,
 ): DungeonResult {
   const border = 2;
   const roomSpacing = Math.max(1, roomSpacingOverride ?? 3);
@@ -634,7 +634,7 @@ export function generateAdjacentRooms(
   cols = 4,
   rows = 4,
   wallGap = 1,
-  doorChance = 0.7,
+  doorChance = 1.0,
 ): DungeonResult {
   const border = 1;
   const openGrid = new Array(gridW * gridD).fill(false);
@@ -855,7 +855,7 @@ function detectCorridorDoors(
   openGrid: boolean[],
   gridW: number,
   gridD: number,
-  doorChance = 0.7,
+  doorChance = 1.0,
 ): DoorDef[] {
   // Collect candidate positions: corridor cells adjacent to a room cell
   // Determine orientation from corridor shape — check if perpendicular neighbors are corridor cells

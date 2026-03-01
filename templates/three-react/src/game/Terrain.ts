@@ -1653,10 +1653,20 @@ export class Terrain {
 
     // Remove doors at cells with large height differences — the height-based
     // flood-fill blocking handles visibility, and doors look wrong at cliff edges.
+    // But keep doors adjacent to stairs (the stair handles the height transition).
     for (let i = output.gridDoors.length - 1; i >= 0; i--) {
       const gx = Math.round(output.gridDoors[i].x);
       const gz = Math.round(output.gridDoors[i].z);
       if (gx < 0 || gx >= gridW || gz < 0 || gz >= gridD) continue;
+      // Skip removal if this cell is adjacent to a stair
+      let adjStair = false;
+      for (const [ddx, ddz] of [[0, -1], [0, 1], [-1, 0], [1, 0]] as [number, number][]) {
+        const nx = gx + ddx, nz = gz + ddz;
+        if (nx >= 0 && nx < gridW && nz >= 0 && nz < gridD && this.stairMap.has(nz * gridW + nx)) {
+          adjStair = true; break;
+        }
+      }
+      if (adjStair) continue;
       const dh = cellHeightsArr[gz * gridW + gx];
       let maxNeighborDiff = 0;
       for (const [ddx, ddz] of [[0, -1], [0, 1], [-1, 0], [1, 0]] as [number, number][]) {
@@ -1715,6 +1725,8 @@ export class Terrain {
       this.groundSize,
       output.gridDoors,
       cellHeightsArr,
+      0.15, // tight threshold — only allow terrain unevenness, not level transitions
+      getStairCellSet(stairs, gridW),
     );
 
     // Hide terrain group until onDungeonReady — prevents flash of unhidden rooms
@@ -2381,7 +2393,24 @@ export class Terrain {
 
       // Group connected boundary edges (same direction, adjacent along the perpendicular axis)
       // and pick one ladder per group (the middle edge).
+      // Dedup: one ladder per height-level pair (same terrace transition).
       const usedEdges = new Set<number>();
+      const heightDropPairs = new Set<string>();
+      // Also skip height pairs already covered by StairSystem stairs/ladders
+      // Round to nearest 10 (0.1 precision) to avoid floating-point mismatches
+      const hRound = (v: number) => Math.round(v * 10);
+      if (this.stairMap.size > 0 || this.dungeonLadderHints.length > 0) {
+        for (const s of this.stairMap.values()) {
+          const lowH = hRound(ch[s.gz * gridW + s.gx]);
+          const highH = hRound(ch[s.gz * gridW + s.gx] + s.levelHeight);
+          heightDropPairs.add(`${Math.min(lowH, highH)}:${Math.max(lowH, highH)}`);
+        }
+        for (const hint of this.dungeonLadderHints) {
+          const lowH = hRound(hint.lowH);
+          const highH = hRound(hint.highH);
+          heightDropPairs.add(`${Math.min(lowH, highH)}:${Math.max(lowH, highH)}`);
+        }
+      }
       let heightDropLadders = 0;
 
       for (let ei = 0; ei < allEdges.length; ei++) {
@@ -2413,6 +2442,14 @@ export class Terrain {
 
         // Pick middle edge of the group
         const mid = allEdges[group[Math.floor(group.length / 2)]];
+
+        // Dedup: skip if this height-level pair already has a stair/ladder
+        const edgeLowH = hRound(ch[mid.lowGZ * gridW + mid.lowGX]);
+        const edgeHighH = hRound(ch[mid.highGZ * gridW + mid.highGX]);
+        const edgePairKey = `${Math.min(edgeLowH, edgeHighH)}:${Math.max(edgeLowH, edgeHighH)}`;
+        if (heightDropPairs.has(edgePairKey)) continue;
+        heightDropPairs.add(edgePairKey);
+
         const lowWX = -halfWorld + (mid.lowGX + 0.5) * dcs;
         const lowWZ = -halfWorld + (mid.lowGZ + 0.5) * dcs;
         const highWX = -halfWorld + (mid.highGX + 0.5) * dcs;

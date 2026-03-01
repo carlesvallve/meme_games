@@ -129,44 +129,27 @@ export function computeCellHeights(
     }
   }
 
-  // ── 4. Place stairs/ladders at room-corridor boundaries ──
-  const usedCells = new Set<number>();
+  // ── 4. Place stairs and ladders ──
+  // Simple two-pass approach:
+  //   Pass 1: Scan ALL corridor-room boundaries. 1-level diff + floor top & bottom → stair. One per room pair.
+  //   Pass 2: Any room pair with height diff that has NO stair → ONE ladder.
 
+  const usedCells = new Set<number>();
+  // Track which room pairs (min:max) already have a stair or ladder
+  const connectedPairs = new Set<string>();
+  const rpKey = (a: number, b: number) => `${Math.min(a, b)}:${Math.max(a, b)}`;
+
+  // ── Pass 1: Place stairs at 1-level boundaries ──
   for (const ci of corridorInfos) {
     if (ci.rooms.length < 2) continue;
 
-    // Find pair with largest height diff
-    let maxDiff = 0, lowRid = -1, highRid = -1;
-    for (let a = 0; a < ci.rooms.length; a++) {
-      for (let b = a + 1; b < ci.rooms.length; b++) {
-        if (!roomVisited[ci.rooms[a]] || !roomVisited[ci.rooms[b]]) continue;
-        const d = Math.abs(roomHeight[ci.rooms[a]] - roomHeight[ci.rooms[b]]);
-        if (d > maxDiff) {
-          maxDiff = d;
-          if (roomHeight[ci.rooms[a]] <= roomHeight[ci.rooms[b]]) {
-            lowRid = ci.rooms[a]; highRid = ci.rooms[b];
-          } else {
-            lowRid = ci.rooms[b]; highRid = ci.rooms[a];
-          }
-        }
-      }
-    }
-
-    if (maxDiff < 0.001 || lowRid < 0) continue;
-
-    // Find a corridor cell adjacent to the high room.
-    // Place stair one cell back along the corridor so the boundary cell
-    // becomes a flat landing at upper height (room to turn on L-shaped corridors).
-    // Fallback to direct placement if no corridor cell behind.
     const corridorCellSet = new Set<number>();
     for (const { gx: cx, gz: cz } of ci.cells) {
       const ci2 = cz * gridW + cx;
       if (roomOwnership[ci2] < 0) corridorCellSet.add(ci2);
     }
 
-    let placed = false;
     for (const { gx, gz } of ci.cells) {
-      if (placed) break;
       const cellIdx = gz * gridW + gx;
       if (roomOwnership[cellIdx] >= 0) continue; // only corridor cells
       if (usedCells.has(cellIdx)) continue;
@@ -174,60 +157,169 @@ export function computeCellHeights(
       for (const [dx, dz] of DIRS) {
         const nx = gx + dx, nz = gz + dz;
         if (nx < 0 || nx >= gridW || nz < 0 || nz >= gridD) continue;
-        if (roomOwnership[nz * gridW + nx] !== highRid) continue;
+        const nIdx = nz * gridW + nx;
+        const highRid = roomOwnership[nIdx];
+        if (highRid < 0 || !roomVisited[highRid]) continue;
+        if (!openGrid[nIdx]) continue; // top must be walkable floor
 
-        if (maxDiff <= levelH * 1.1) {
-          // Find a corridor neighbor of (gx,gz) that isn't the room direction —
-          // that's the "previous" corridor cell where the stair should go.
+        // Find the low room on the opposite side of the corridor
+        const corridorH = cellHeights[cellIdx];
+        const roomH = roomHeight[highRid];
+        const diff = roomH - corridorH;
+        if (diff < levelH * 0.5 || diff > levelH * 1.1) continue; // not a 1-level diff
+
+        // Find which low room this corridor belongs to
+        let lowRid = -1;
+        for (const rid of ci.rooms) {
+          if (rid === highRid) continue;
+          if (!roomVisited[rid]) continue;
+          if (Math.abs(roomHeight[rid] - corridorH) < levelH * 0.3) { lowRid = rid; break; }
+        }
+        if (lowRid < 0) continue;
+
+        const pk = rpKey(lowRid, highRid);
+        if (connectedPairs.has(pk)) continue;
+
+        // Check bottom cell is walkable, at correct (low) height,
+        // and has at least one open neighbor (so the player can actually reach it)
+        const feetX = gx - dx, feetZ = gz - dz;
+        const feetInBounds = feetX >= 0 && feetX < gridW && feetZ >= 0 && feetZ < gridD;
+        const feetIdx = feetInBounds ? feetZ * gridW + feetX : -1;
+        let feetOpen = feetInBounds && openGrid[feetIdx]
+          && Math.abs(cellHeights[feetIdx] - corridorH) < levelH * 0.3;
+        if (feetOpen) {
+          // Feet cell must connect to something — at least one open neighbor besides the stair
+          let hasNeighbor = false;
+          for (const [ndx, ndz] of DIRS) {
+            if (ndx === dx && ndz === dz) continue; // skip direction back toward stair
+            const nnx = feetX + ndx, nnz = feetZ + ndz;
+            if (nnx >= 0 && nnx < gridW && nnz >= 0 && nnz < gridD && openGrid[nnz * gridW + nnx]) {
+              hasNeighbor = true; break;
+            }
+          }
+          if (!hasNeighbor) feetOpen = false;
+        }
+
+        // Try back-cell placement (stair on the cell behind, landing on gx,gz)
+        let placed = false;
+        if (feetOpen) {
+          // Check for a corridor cell behind to use as stair cell
           let backGX = -1, backGZ = -1;
           for (const [bdx, bdz] of DIRS) {
-            if (bdx === dx && bdz === dz) continue; // skip room direction
+            if (bdx === dx && bdz === dz) continue;
             const bx = gx + bdx, bz = gz + bdz;
             if (bx < 0 || bx >= gridW || bz < 0 || bz >= gridD) continue;
             const bIdx = bz * gridW + bx;
             if (corridorCellSet.has(bIdx) && !usedCells.has(bIdx)) {
-              backGX = bx; backGZ = bz;
-              break;
+              const stairDx = gx - bx, stairDz = gz - bz;
+              if (stairDx === dx && stairDz === dz) { // straight line
+                const fx = bx - stairDx, fz2 = bz - stairDz;
+                if (fx >= 0 && fx < gridW && fz2 >= 0 && fz2 < gridD && openGrid[fz2 * gridW + fx]) {
+                  backGX = bx; backGZ = bz;
+                  break;
+                }
+              }
             }
           }
 
           if (backGX >= 0) {
             const stairDx = gx - backGX, stairDz = gz - backGZ;
-            const isStraight = (stairDx === dx && stairDz === dz);
-            if (isStraight) {
-              stairs.push({
-                gx: backGX, gz: backGZ,
-                axis: stairDx !== 0 ? 'x' : 'z',
-                direction: (stairDx > 0 || stairDz > 0) ? 1 : -1,
-                totalHeight: stepH,
-                levelHeight: levelH,
-              });
-              usedCells.add(backGZ * gridW + backGX);
-              usedCells.add(cellIdx);
-              cellHeights[cellIdx] = roomHeight[highRid];
-            } else {
-              backGX = -1;
-            }
-          }
-          if (backGX < 0) {
+            stairs.push({
+              gx: backGX, gz: backGZ,
+              axis: stairDx !== 0 ? 'x' : 'z',
+              direction: (stairDx > 0 || stairDz > 0) ? 1 : -1,
+              totalHeight: stepH, levelHeight: levelH,
+            });
+            usedCells.add(backGZ * gridW + backGX);
+            usedCells.add(cellIdx);
+            cellHeights[cellIdx] = roomHeight[highRid];
+            connectedPairs.add(pk);
+            placed = true;
+          } else {
+            // Direct placement: stair on this cell
             stairs.push({
               gx, gz,
               axis: dx !== 0 ? 'x' : 'z',
               direction: (dx > 0 || dz > 0) ? 1 : -1,
-              totalHeight: stepH,
-              levelHeight: levelH,
+              totalHeight: stepH, levelHeight: levelH,
             });
             usedCells.add(cellIdx);
+            connectedPairs.add(pk);
+            placed = true;
           }
-        } else {
-          ladderHints.push({
-            lowGX: gx, lowGZ: gz,
-            highGX: nx, highGZ: nz,
-            lowH: roomHeight[lowRid], highH: roomHeight[highRid],
-          });
         }
-        placed = true;
-        break;
+        if (placed) break;
+      }
+    }
+  }
+
+  // ── Pass 2: ONE ladder for each unconnected room pair with height diff ──
+  for (const ci of corridorInfos) {
+    if (ci.rooms.length < 2) continue;
+    for (let a = 0; a < ci.rooms.length; a++) {
+      for (let b = a + 1; b < ci.rooms.length; b++) {
+        const ra = ci.rooms[a], rb = ci.rooms[b];
+        if (!roomVisited[ra] || !roomVisited[rb]) continue;
+        const d = Math.abs(roomHeight[ra] - roomHeight[rb]);
+        if (d < levelH * 0.5) continue;
+        const pk = rpKey(ra, rb);
+        if (connectedPairs.has(pk)) continue;
+
+        const low = roomHeight[ra] <= roomHeight[rb] ? ra : rb;
+        const high = low === ra ? rb : ra;
+
+        // Find a corridor cell adjacent to the high room
+        let found = false;
+        for (const { gx, gz } of ci.cells) {
+          if (roomOwnership[gz * gridW + gx] >= 0) continue;
+          for (const [dx, dz] of DIRS) {
+            const nx = gx + dx, nz = gz + dz;
+            if (nx < 0 || nx >= gridW || nz < 0 || nz >= gridD) continue;
+            if (roomOwnership[nz * gridW + nx] !== high) continue;
+            connectedPairs.add(pk);
+            ladderHints.push({
+              lowGX: gx, lowGZ: gz, highGX: nx, highGZ: nz,
+              lowH: roomHeight[low], highH: roomHeight[high],
+            });
+            found = true; break;
+          }
+          if (found) break;
+        }
+      }
+    }
+  }
+
+  // ── Pass 3: Global scan for any remaining unconnected room pairs ──
+  // Catches pairs not sharing a corridor (connected through intermediate rooms)
+  for (let gz = 0; gz < gridD; gz++) {
+    for (let gx = 0; gx < gridW; gx++) {
+      const idx = gz * gridW + gx;
+      const ridA = roomOwnership[idx];
+      if (ridA < 0 || !roomVisited[ridA]) continue;
+
+      for (const [dx, dz] of DIRS) {
+        const nx = gx + dx, nz = gz + dz;
+        if (nx < 0 || nx >= gridW || nz < 0 || nz >= gridD) continue;
+        const nidx = nz * gridW + nx;
+        const ridB = roomOwnership[nidx];
+        if (ridB < 0 || ridB === ridA || !roomVisited[ridB]) continue;
+
+        const d = Math.abs(roomHeight[ridA] - roomHeight[ridB]);
+        if (d < levelH * 0.5) continue;
+        const pk = rpKey(ridA, ridB);
+        if (connectedPairs.has(pk)) continue;
+
+        const low = roomHeight[ridA] <= roomHeight[ridB] ? ridA : ridB;
+        const high = low === ridA ? ridB : ridA;
+        const lowCell = roomHeight[ridA] <= roomHeight[ridB] ? { gx, gz } : { gx: nx, gz: nz };
+        const highCell = roomHeight[ridA] <= roomHeight[ridB] ? { gx: nx, gz: nz } : { gx, gz };
+
+        connectedPairs.add(pk);
+        ladderHints.push({
+          lowGX: lowCell.gx, lowGZ: lowCell.gz,
+          highGX: highCell.gx, highGZ: highCell.gz,
+          lowH: roomHeight[low], highH: roomHeight[high],
+        });
       }
     }
   }
