@@ -48,7 +48,7 @@ export function computeCellHeights(
   stepH: number,
   levelH: number,
   rng: SeededRandom,
-  heightChance = 0.4,
+  _heightChance = 0.55,
 ): { cellHeights: Float32Array; stairs: StairDef[]; ladderHints: LadderHint[] } {
   const cellHeights = new Float32Array(gridW * gridD);
   const stairs: StairDef[] = [];
@@ -97,7 +97,17 @@ export function computeCellHeights(
     for (const neighbor of roomAdj.get(rid) ?? []) {
       if (roomVisited[neighbor]) continue;
       roomVisited[neighbor] = 1;
-      roomHeight[neighbor] = roomHeight[rid] + (rng.next() < heightChance ? levelH : 0);
+      // Height change distribution per BFS hop:
+      //   40% → +1 level (stairs)
+      //   10% → +2 levels (ladder)
+      //   10% → -1 level (stairs, adds variety)
+      //   40% → flat (no change)
+      const roll = rng.next();
+      const delta = roll < 0.40 ? levelH
+        : roll < 0.50 ? 2 * levelH
+        : roll < 0.60 ? -levelH
+        : 0;
+      roomHeight[neighbor] = Math.max(0, roomHeight[rid] + delta);
       queue.push(neighbor);
     }
   }
