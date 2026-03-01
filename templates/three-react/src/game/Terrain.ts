@@ -167,6 +167,7 @@ export class Terrain {
   private dungeonCellSize = 0;
   private dungeonGridW = 0;
   private dungeonGridD = 0;
+  private dungeonRoomOwnership: number[] | null = null;
   private stairMap: Map<number, StairDef> = new Map();
   /** Dungeon cell indices that have ladder endpoints — cliff blocking allows movement here */
   private ladderCellSet = new Set<number>();
@@ -1635,6 +1636,7 @@ export class Terrain {
     this.dungeonCellSize = cellSize;
     this.dungeonGridW = gridW;
     this.dungeonGridD = gridD;
+    this.dungeonRoomOwnership = output.roomOwnership;
     this.stairMap.clear();
     for (const s of stairs) this.stairMap.set(s.gz * gridW + s.gx, s);
     this.dungeonLadderHints = ladderHints;
@@ -1695,6 +1697,26 @@ export class Terrain {
       this.exitRoomCenter.y = cellHeightsArr[xgz * gridW + xgx];
     }
 
+    // Split corridor IDs by height level so corridor cells at different heights
+    // get different visibility IDs. Without this, a stair landing (raised to upper
+    // level) shares a corridor ID with lower-level cells, lighting them all up.
+    const visOwnership = output.roomOwnership.slice();
+    let nextSyntheticId = -1000; // synthetic IDs well below normal corridor IDs
+    const corridorHeightMap = new Map<string, number>(); // "corridorId:heightBucket" → syntheticId
+    for (let i = 0; i < visOwnership.length; i++) {
+      const rid = visOwnership[i];
+      if (rid >= 0) continue; // rooms keep their ID
+      if (rid === -1) continue; // unowned
+      const hBucket = Math.round((cellHeightsArr[i] ?? 0) * 10); // 0.1 precision
+      const key = `${rid}:${hBucket}`;
+      let synId = corridorHeightMap.get(key);
+      if (synId === undefined) {
+        synId = nextSyntheticId--;
+        corridorHeightMap.set(key, synId);
+      }
+      visOwnership[i] = synId;
+    }
+
     const voxConfig = {
       openGrid: visualOpenGrid,
       gridW: output.walkMask.gridW,
@@ -1703,7 +1725,7 @@ export class Terrain {
       groundSize: this.groundSize,
       doors: output.doors,
       gridDoors: output.gridDoors,
-      roomOwnership: output.roomOwnership,
+      roomOwnership: visOwnership,
       theme,
       cellHeights: cellHeightsArr,
       stairCells: getStairCellSet(stairs, gridW),
@@ -1719,7 +1741,7 @@ export class Terrain {
 
     // Create room visibility system
     this.roomVisibility = new RoomVisibility(
-      output.roomOwnership,
+      visOwnership,
       visualOpenGrid,
       gridW, gridD, cellSize,
       this.groundSize,
@@ -1769,7 +1791,7 @@ export class Terrain {
           for (const [dx, dz] of [[0, -1], [0, 1], [-1, 0], [1, 0], [-1, -1], [1, -1], [-1, 1], [1, 1]]) {
             const nx = gx + dx, nz = gz + dz;
             if (nx >= 0 && nx < gridW && nz >= 0 && nz < gridD) {
-              const rid = output.roomOwnership[nz * gridW + nx];
+              const rid = visOwnership[nz * gridW + nx];
               if (rid !== -1) adjRooms.add(rid);
             }
           }
@@ -1808,13 +1830,13 @@ export class Terrain {
             const mgx = Math.floor((wx + halfW) / cellSize);
             const mgz = Math.floor((wz + halfW) / cellSize);
             if (mgx >= 0 && mgx < gridW && mgz >= 0 && mgz < gridD) {
-              const rid = output.roomOwnership[mgz * gridW + mgx];
+              const rid = visOwnership[mgz * gridW + mgx];
               const adjRooms = new Set<number>();
               if (rid !== -1) adjRooms.add(rid);
               for (const [dx, dz] of [[0, -1], [0, 1], [-1, 0], [1, 0]]) {
                 const nx = mgx + dx, nz = mgz + dz;
                 if (nx >= 0 && nx < gridW && nz >= 0 && nz < gridD) {
-                  const nrid = output.roomOwnership[nz * gridW + nx];
+                  const nrid = visOwnership[nz * gridW + nx];
                   if (nrid !== -1) adjRooms.add(nrid);
                 }
               }
@@ -2504,6 +2526,45 @@ export class Terrain {
     // Bake spawn region labels so getRandomPosition can filter out unreachable areas
     grid.bakeSpawnRegion();
     this.navGrid = grid;
+
+    // Register ladder meshes with room visibility so they get hidden/dimmed
+    if (this.roomVisibility && this.dungeonRoomOwnership) {
+      const dGridW = this.dungeonGridW;
+      for (let li = 0; li < this.ladderDefs.length; li++) {
+        const mesh = this.ladderMeshes[li];
+        if (!mesh) continue;
+        const ld = this.ladderDefs[li];
+        // Find room IDs from the ladder's dungeon grid cells
+        const roomIds = new Set<number>();
+        // Bottom cell
+        if (ld.bottomCellGX >= 0 && ld.bottomCellGZ >= 0) {
+          const bIdx = ld.bottomCellGZ * dGridW + ld.bottomCellGX;
+          // Nav grid cells are smaller than dungeon cells — convert to dungeon grid
+          const halfW = (this.effectiveGroundSize || this.groundSize) / 2;
+          const bwx = grid.gridToWorld(ld.bottomCellGX, ld.bottomCellGZ);
+          const dgx = Math.floor((bwx.x + halfW) / this.dungeonCellSize);
+          const dgz = Math.floor((bwx.z + halfW) / this.dungeonCellSize);
+          if (dgx >= 0 && dgx < dGridW && dgz >= 0 && dgz < this.dungeonGridD) {
+            const rid = this.dungeonRoomOwnership[dgz * dGridW + dgx];
+            if (rid >= 0) roomIds.add(rid);
+          }
+        }
+        // Top cell
+        if (ld.topCellGX >= 0 && ld.topCellGZ >= 0) {
+          const twx = grid.gridToWorld(ld.topCellGX, ld.topCellGZ);
+          const halfW = (this.effectiveGroundSize || this.groundSize) / 2;
+          const dgx = Math.floor((twx.x + halfW) / this.dungeonCellSize);
+          const dgz = Math.floor((twx.z + halfW) / this.dungeonCellSize);
+          if (dgx >= 0 && dgx < dGridW && dgz >= 0 && dgz < this.dungeonGridD) {
+            const rid = this.dungeonRoomOwnership[dgz * dGridW + dgx];
+            if (rid >= 0) roomIds.add(rid);
+          }
+        }
+        if (roomIds.size > 0) {
+          this.roomVisibility.registerMesh(mesh, [...roomIds]);
+        }
+      }
+    }
 
     return grid;
   }
