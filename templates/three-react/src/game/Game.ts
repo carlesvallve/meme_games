@@ -315,6 +315,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
         terrain.dispose();
         scene.remove(terrain.group);
         entityRegistry.clear();
+        useGameStore.getState().setCurrentTheme(''); // clear stale theme from failed attempt
         retrySeed = undefined; // random seed on retry
       }
       terrain = new Terrain(scene, terrainPreset, heightmapStyle, palPick, retrySeed);

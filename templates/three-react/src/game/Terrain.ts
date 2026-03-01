@@ -1613,8 +1613,9 @@ export class Terrain {
       // Clear it so next generation doesn't reuse stale value
       useGameStore.getState().setCurrentTheme('');
     } else if (dungeonVariant === 'random') {
-      // Deterministic theme selection from seed
-      const themeRng = new SeededRandom(this.dungeonSeed ?? 0);
+      // Deterministic theme selection — mix seed with a theme-specific salt
+      // to avoid correlation with dungeon layout RNG using the same seed
+      const themeRng = new SeededRandom((this.dungeonSeed ?? 0) ^ 0x7E3A91F5);
       theme = DUNGEON_VARIANTS[themeRng.int(0, DUNGEON_VARIANTS.length)];
     } else {
       theme = dungeonVariant;
