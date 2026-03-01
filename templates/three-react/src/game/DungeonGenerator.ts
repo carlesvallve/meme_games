@@ -176,26 +176,33 @@ export function generateDungeon(
       return dist;
     };
 
-    // Pick entrance from top-3 candidates with most distant rooms (randomized)
-    // First pass: find the pair with max path distance
-    let bestDist = 0;
-    const pairCandidates: { a: number; b: number; dist: number }[] = [];
+    // Find max BFS path distance
+    let bestPathDist = 0;
+    const pairCandidates: { a: number; b: number; pathDist: number; linDistSq: number }[] = [];
     for (let i = 0; i < roomRects.length; i++) {
       const dists = bfsFrom(i);
       for (let j = i + 1; j < roomRects.length; j++) {
-        if (dists[j] > 0) {
-          if (dists[j] > bestDist) bestDist = dists[j];
-          pairCandidates.push({ a: i, b: j, dist: dists[j] });
-        }
+        if (dists[j] <= 0) continue;
+        if (dists[j] > bestPathDist) bestPathDist = dists[j];
+        const cx1 = roomRects[i].x + roomRects[i].w / 2;
+        const cz1 = roomRects[i].z + roomRects[i].d / 2;
+        const cx2 = roomRects[j].x + roomRects[j].w / 2;
+        const cz2 = roomRects[j].z + roomRects[j].d / 2;
+        const linDistSq = (cx2 - cx1) ** 2 + (cz2 - cz1) ** 2;
+        pairCandidates.push({ a: i, b: j, pathDist: dists[j], linDistSq });
       }
     }
 
-    // Keep pairs in the top ~60% of path distances for variety
-    const threshold = Math.max(1, Math.ceil(bestDist * 0.6));
-    const topPairs = pairCandidates.filter(p => p.dist >= threshold);
-    if (topPairs.length > 0) {
-      const pick = topPairs[Math.floor(rng.next() * topPairs.length)];
-      // Randomly swap entrance/exit
+    // Require at least half the max BFS distance (filters trivially close rooms)
+    const minPath = Math.max(2, Math.ceil(bestPathDist * 0.5));
+    const qualified = pairCandidates.filter(p => p.pathDist >= minPath);
+
+    // Among qualified, sort by linear distance (descending) and pick from top 3
+    const pool = (qualified.length > 0 ? qualified : pairCandidates)
+      .sort((a, b) => b.linDistSq - a.linDistSq);
+    const topN = Math.min(3, pool.length);
+    if (topN > 0) {
+      const pick = pool[Math.floor(rng.next() * topN)];
       if (rng.next() < 0.5) {
         entranceRoom = pick.a;
         exitRoom = pick.b;

@@ -168,6 +168,7 @@ export class Terrain {
   private dungeonGridW = 0;
   private dungeonGridD = 0;
   private dungeonRoomOwnership: number[] | null = null;
+  private visOwnership: number[] | null = null;
   private stairMap: Map<number, StairDef> = new Map();
   /** Dungeon cell indices that have ladder endpoints — cliff blocking allows movement here */
   private ladderCellSet = new Set<number>();
@@ -1701,6 +1702,7 @@ export class Terrain {
     // get different visibility IDs. Without this, a stair landing (raised to upper
     // level) shares a corridor ID with lower-level cells, lighting them all up.
     const visOwnership = output.roomOwnership.slice();
+    this.visOwnership = visOwnership;
     let nextSyntheticId = -1000; // synthetic IDs well below normal corridor IDs
     const corridorHeightMap = new Map<string, number>(); // "corridorId:heightBucket" → syntheticId
     for (let i = 0; i < visOwnership.length; i++) {
@@ -2341,8 +2343,15 @@ export class Terrain {
         if (this.ladderDefs.length > beforeCount) {
           const ld = this.ladderDefs[this.ladderDefs.length - 1];
           ld.isVertical = true;
-          this.ladderCellSet.add(hint.lowGZ * this.dungeonGridW + hint.lowGX);
-          this.ladderCellSet.add(hint.highGZ * this.dungeonGridW + hint.highGX);
+          const lowCellIdx = hint.lowGZ * this.dungeonGridW + hint.lowGX;
+          const highCellIdx = hint.highGZ * this.dungeonGridW + hint.highGX;
+          this.ladderCellSet.add(lowCellIdx);
+          this.ladderCellSet.add(highCellIdx);
+
+          // Register ladder link for flood-fill visibility (see both levels at ladder)
+          if (this.roomVisibility) {
+            this.roomVisibility.addLadderLink(highCellIdx, lowCellIdx);
+          }
 
           // Perfectly vertical: both endpoints at corridor cell XZ,
           // nudged 1.5 navgrid cells (0.375m) toward the wall.
@@ -2486,8 +2495,15 @@ export class Terrain {
         if (this.ladderDefs.length > beforeCount) {
           const ld = this.ladderDefs[this.ladderDefs.length - 1];
           ld.isVertical = true;
-          this.ladderCellSet.add(mid.lowGZ * gridW + mid.lowGX);
-          this.ladderCellSet.add(mid.highGZ * gridW + mid.highGX);
+          const lowCI = mid.lowGZ * gridW + mid.lowGX;
+          const highCI = mid.highGZ * gridW + mid.highGX;
+          this.ladderCellSet.add(lowCI);
+          this.ladderCellSet.add(highCI);
+
+          // Register ladder link for flood-fill visibility
+          if (this.roomVisibility) {
+            this.roomVisibility.addLadderLink(highCI, lowCI);
+          }
 
           const navCell = 0.25;
           const ladderX = lowWX + mid.ddx * navCell * 1.5;
@@ -2528,36 +2544,23 @@ export class Terrain {
     this.navGrid = grid;
 
     // Register ladder meshes with room visibility so they get hidden/dimmed
-    if (this.roomVisibility && this.dungeonRoomOwnership) {
+    if (this.roomVisibility && this.visOwnership) {
       const dGridW = this.dungeonGridW;
+      const halfW = (this.effectiveGroundSize || this.groundSize) / 2;
       for (let li = 0; li < this.ladderDefs.length; li++) {
         const mesh = this.ladderMeshes[li];
         if (!mesh) continue;
         const ld = this.ladderDefs[li];
-        // Find room IDs from the ladder's dungeon grid cells
+        // Find visibility IDs from the ladder's dungeon grid cells
         const roomIds = new Set<number>();
-        // Bottom cell
-        if (ld.bottomCellGX >= 0 && ld.bottomCellGZ >= 0) {
-          const bIdx = ld.bottomCellGZ * dGridW + ld.bottomCellGX;
-          // Nav grid cells are smaller than dungeon cells — convert to dungeon grid
-          const halfW = (this.effectiveGroundSize || this.groundSize) / 2;
-          const bwx = grid.gridToWorld(ld.bottomCellGX, ld.bottomCellGZ);
-          const dgx = Math.floor((bwx.x + halfW) / this.dungeonCellSize);
-          const dgz = Math.floor((bwx.z + halfW) / this.dungeonCellSize);
+        for (const [cgx, cgz] of [[ld.bottomCellGX, ld.bottomCellGZ], [ld.topCellGX, ld.topCellGZ]]) {
+          if (cgx < 0 || cgz < 0) continue;
+          const wpos = grid.gridToWorld(cgx, cgz);
+          const dgx = Math.floor((wpos.x + halfW) / this.dungeonCellSize);
+          const dgz = Math.floor((wpos.z + halfW) / this.dungeonCellSize);
           if (dgx >= 0 && dgx < dGridW && dgz >= 0 && dgz < this.dungeonGridD) {
-            const rid = this.dungeonRoomOwnership[dgz * dGridW + dgx];
-            if (rid >= 0) roomIds.add(rid);
-          }
-        }
-        // Top cell
-        if (ld.topCellGX >= 0 && ld.topCellGZ >= 0) {
-          const twx = grid.gridToWorld(ld.topCellGX, ld.topCellGZ);
-          const halfW = (this.effectiveGroundSize || this.groundSize) / 2;
-          const dgx = Math.floor((twx.x + halfW) / this.dungeonCellSize);
-          const dgz = Math.floor((twx.z + halfW) / this.dungeonCellSize);
-          if (dgx >= 0 && dgx < dGridW && dgz >= 0 && dgz < this.dungeonGridD) {
-            const rid = this.dungeonRoomOwnership[dgz * dGridW + dgx];
-            if (rid >= 0) roomIds.add(rid);
+            const rid = this.visOwnership[dgz * dGridW + dgx];
+            if (rid !== -1) roomIds.add(rid); // include corridors (negative IDs)
           }
         }
         if (roomIds.size > 0) {

@@ -184,7 +184,7 @@ export class CharacterClimbing {
         // Smoothly interpolate Y between rungs using fractional progress
         const t = Math.min(1, rungProgress / cs.rungCount);
         const frac = rungProgress - Math.floor(rungProgress); // 0..1 within current rung
-        const smoothFrac = frac * frac * (3 - 2 * frac); // smoothstep
+        const smoothFrac = frac < 0.5 ? 4 * frac * frac * frac : 1 - Math.pow(-2 * frac + 2, 3) / 2; // easeInOutCubic
         const smoothRungT = Math.min(1, (Math.floor(rungProgress) + smoothFrac) / cs.rungCount);
 
         if (cs.direction === 'up') {
@@ -248,15 +248,27 @@ export class CharacterClimbing {
         );
         owner.mesh.position.y = owner.visualGroundY;
 
-        owner.facing = cs.targetFacing;
+        // When climbing down, smoothly turn 180° during dismount to face away from wall
+        if (cs.direction === 'down') {
+          const turnTarget = cs.targetFacing + Math.PI;
+          owner.facing = lerpAngle(cs.targetFacing, turnTarget, t);
+        } else {
+          owner.facing = cs.targetFacing;
+        }
         owner.mesh.rotation.order = 'YXZ';
         owner.mesh.rotation.y = owner.facing;
         owner.mesh.rotation.x = cs.leanAngle * (1 - t);
 
         if (cs.phaseTime >= cs.dismountDuration) {
+          if (cs.direction === 'down') {
+            owner.facing = cs.targetFacing + Math.PI;
+            // Normalize to [-PI, PI]
+            owner.facing = Math.atan2(Math.sin(owner.facing), Math.cos(owner.facing));
+          }
           owner.velocityY = 0;
           owner.mesh.rotation.order = 'XYZ';
           owner.mesh.rotation.x = 0;
+          owner.mesh.rotation.y = owner.facing;
           this.climbState = null;
           return false;
         }
