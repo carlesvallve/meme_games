@@ -1771,19 +1771,19 @@ export class Terrain {
             canvas.height = 32;
             const ctx = canvas.getContext('2d')!;
             ctx.fillStyle = 'white';
-            ctx.font = 'bold 20px monospace';
+            ctx.font = 'bold 22px monospace';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.fillText(`${gx}_${gz}`, 32, 16);
             const tex = new THREE.CanvasTexture(canvas);
             tex.minFilter = THREE.LinearFilter;
-            const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true, opacity: 0.7 });
+            const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true, opacity: 0.6 });
             const sprite = new THREE.Sprite(mat);
             const wx = -halfW + (gx + 0.5) * cellSize;
             const wz = -halfW + (gz + 0.5) * cellSize;
             const cy = cellHeightsArr[gz * gridW + gx] + 0.15;
             sprite.position.set(wx, cy, wz);
-            sprite.scale.set(cellSize * 0.8, cellSize * 0.4, 1);
+            sprite.scale.set(cellSize * 0.45, cellSize * 0.22, 1);
             labelGroup.add(sprite);
           }
         }
