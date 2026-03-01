@@ -1639,6 +1639,7 @@ export class Terrain {
       theme,
       cellHeights: cellHeightsArr,
       stairCells: getStairCellSet(stairs, gridW),
+      stairs,
     };
 
     const vdResult = buildVoxelDungeonCollision(voxConfig, this.boxGroup);
@@ -1720,7 +1721,9 @@ export class Terrain {
       // Build stair riser meshes and register with room visibility
       if (stairs.length > 0 && visualResult) {
         const stairGroup = buildStairMeshes(
-          stairs, cellHeightsArr, cellSize, gridW, this.groundSize, visualResult.groundColor,
+          stairs, cellHeightsArr,
+          cellSize, gridW, this.groundSize,
+          visualResult.groundColor,
         );
         this.group.add(stairGroup);
 
@@ -1754,6 +1757,37 @@ export class Terrain {
             }
           }
         }
+      }
+
+      // Debug: grid coordinate labels on each open tile
+      {
+        const labelGroup = new THREE.Group();
+        labelGroup.name = 'debugGridLabels';
+        for (let gz = 0; gz < gridD; gz++) {
+          for (let gx = 0; gx < gridW; gx++) {
+            if (!visualOpenGrid[gz * gridW + gx]) continue;
+            const canvas = document.createElement('canvas');
+            canvas.width = 64;
+            canvas.height = 32;
+            const ctx = canvas.getContext('2d')!;
+            ctx.fillStyle = 'white';
+            ctx.font = 'bold 20px monospace';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(`${gx}_${gz}`, 32, 16);
+            const tex = new THREE.CanvasTexture(canvas);
+            tex.minFilter = THREE.LinearFilter;
+            const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true, opacity: 0.7 });
+            const sprite = new THREE.Sprite(mat);
+            const wx = -halfW + (gx + 0.5) * cellSize;
+            const wz = -halfW + (gz + 0.5) * cellSize;
+            const cy = cellHeightsArr[gz * gridW + gx] + 0.15;
+            sprite.position.set(wx, cy, wz);
+            sprite.scale.set(cellSize * 0.8, cellSize * 0.4, 1);
+            labelGroup.add(sprite);
+          }
+        }
+        this.group.add(labelGroup);
       }
 
       // Place all props (room props, portals, corridor props) — meshes start hidden
