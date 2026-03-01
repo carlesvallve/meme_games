@@ -170,6 +170,8 @@ export class Terrain {
   private dungeonRoomOwnership: number[] | null = null;
   private visOwnership: number[] | null = null;
   private stairMap: Map<number, StairDef> = new Map();
+  /** Dual-level cells (stair/ladder top & bottom): cellIdx → active-only rid from other level */
+  private dualLevelCells = new Map<number, number>();
   /** Dungeon cell indices that have ladder endpoints — cliff blocking allows movement here */
   private ladderCellSet = new Set<number>();
 
@@ -218,6 +220,26 @@ export class Terrain {
     this.group.add(this.boxGroup);
     this.createDebris();
     scene.add(this.group);
+  }
+
+  /** Register a mesh with room visibility, automatically applying dual-level
+   *  active-only IDs if the world position falls on a stair/ladder boundary cell. */
+  registerVisibility(obj: THREE.Object3D, roomIds: number[], wx?: number, wz?: number): void {
+    if (!this.roomVisibility) return;
+    if (roomIds.length === 0) return;
+    let activeOnly: number[] | undefined;
+    if (wx !== undefined && wz !== undefined && this.dualLevelCells.size > 0) {
+      const halfW = (this.effectiveGroundSize || this.groundSize) / 2;
+      const gx = Math.floor((wx + halfW) / this.dungeonCellSize);
+      const gz = Math.floor((wz + halfW) / this.dungeonCellSize);
+      if (gx >= 0 && gx < this.dungeonGridW && gz >= 0 && gz < this.dungeonGridD) {
+        const extraRid = this.dualLevelCells.get(gz * this.dungeonGridW + gx);
+        if (extraRid !== undefined && !roomIds.includes(extraRid)) {
+          activeOnly = [extraRid];
+        }
+      }
+    }
+    this.roomVisibility.registerMesh(obj, roomIds, activeOnly);
   }
 
   /** Water plane Y. Lower for caves so only low areas flood. */
@@ -1783,9 +1805,67 @@ export class Terrain {
         );
       }
 
-      // Register door groups with room visibility — same as walls: use adjacent cell room IDs
-      // Filter by height similarity to avoid cross-level registration
-      const visHeightThreshold = wallVoxH * 0.5; // distinguishes level transitions from terrain unevenness
+      // ── Build dual-level visibility map ──
+      // Stair/ladder top & bottom cells + their same-height neighbors get an
+      // active-only cross-level rid so objects there are visible from both levels.
+      const visHeightThreshold = wallVoxH * 0.5;
+      const stairDualLevel = new Map<number, number>(); // cellIdx → extra rid
+
+      // Stairs: stair cell + top landing + bottom foot tile.
+      // Scan all 4 cardinal neighbors to find highest (landing) and lowest (foot)
+      // by actual cell height — robust regardless of stair placement variant.
+      for (const stair of stairs) {
+        const stairIdx = stair.gz * gridW + stair.gx;
+        const stairH = cellHeightsArr[stairIdx];
+        let highIdx = -1, lowIdx = -1;
+        let bestHighH = stairH, bestLowH = stairH;
+        for (const [ddx, ddz] of [[0, -1], [0, 1], [-1, 0], [1, 0]]) {
+          const nx = stair.gx + ddx, nz = stair.gz + ddz;
+          if (nx < 0 || nx >= gridW || nz < 0 || nz >= gridD) continue;
+          const nIdx = nz * gridW + nx;
+          const nH = cellHeightsArr[nIdx];
+          if (nH > bestHighH) { bestHighH = nH; highIdx = nIdx; }
+          if (nH <= bestLowH && visOwnership[nIdx] !== -1) { bestLowH = nH; lowIdx = nIdx; }
+        }
+        // Find a valid lower rid: prefer low cell, then stair cell, then any neighbor below high
+        let lowerRid = -1;
+        if (lowIdx >= 0 && visOwnership[lowIdx] !== -1) lowerRid = visOwnership[lowIdx];
+        if (lowerRid === -1 && visOwnership[stairIdx] !== -1) lowerRid = visOwnership[stairIdx];
+        if (lowerRid === -1) {
+          // Fallback: any neighbor at the low height with a valid rid
+          for (const [ddx, ddz] of [[0, -1], [0, 1], [-1, 0], [1, 0]]) {
+            const nx = stair.gx + ddx, nz = stair.gz + ddz;
+            if (nx < 0 || nx >= gridW || nz < 0 || nz >= gridD) continue;
+            const nIdx = nz * gridW + nx;
+            if (nIdx === highIdx) continue;
+            const nRid = visOwnership[nIdx];
+            if (nRid !== -1) { lowerRid = nRid; break; }
+          }
+        }
+        const upperRid = highIdx >= 0 ? visOwnership[highIdx] : -1;
+        if (highIdx >= 0 && lowerRid !== -1) stairDualLevel.set(highIdx, lowerRid);
+        if (upperRid !== -1) stairDualLevel.set(stairIdx, upperRid);
+        if (lowIdx >= 0 && upperRid !== -1) stairDualLevel.set(lowIdx, upperRid);
+      }
+
+      // Ladders: top tile + bottom tile
+      for (const lh of ladderHints) {
+        const idx1 = lh.lowGZ * gridW + lh.lowGX;
+        const idx2 = lh.highGZ * gridW + lh.highGX;
+        const h1 = cellHeightsArr[idx1];
+        const h2 = cellHeightsArr[idx2];
+        const highIdx = h2 >= h1 ? idx2 : idx1;
+        const lowIdx = h2 >= h1 ? idx1 : idx2;
+        const lowerRid = visOwnership[lowIdx];
+        const upperRid = visOwnership[highIdx];
+        if (lowerRid !== -1) stairDualLevel.set(highIdx, lowerRid);
+        if (upperRid !== -1) stairDualLevel.set(lowIdx, upperRid);
+      }
+
+      this.dualLevelCells = stairDualLevel;
+
+      // Register door groups with room visibility — use adjacent cell room IDs
+      // filtered by height similarity to avoid cross-level registration
       if (this.doorSystem && this.roomVisibility && output.gridDoors) {
         const doorGroups = this.doorSystem.getDoorGroups();
         for (let i = 0; i < doorGroups.length && i < output.gridDoors.length; i++) {
@@ -1798,37 +1878,15 @@ export class Terrain {
             const nx = gx + dx, nz = gz + dz;
             if (nx >= 0 && nx < gridW && nz >= 0 && nz < gridD) {
               const nH = cellHeightsArr[nz * gridW + nx];
-              if (Math.abs(nH - cellH) > visHeightThreshold) continue; // skip cross-level neighbors
+              if (Math.abs(nH - cellH) > visHeightThreshold) continue;
               const rid = visOwnership[nz * gridW + nx];
               if (rid !== -1) adjRooms.add(rid);
             }
           }
-          if (adjRooms.size > 0) this.roomVisibility.registerMesh(doorGroups[i], [...adjRooms]);
-        }
-      }
-
-      // Build stair dual-level map: cells that should be visible from both levels.
-      // Includes the stair cell, the landing tile at top, AND the foot tile at bottom.
-      // Maps cellIndex → extra rid (active-only) from the other level.
-      const stairDualLevel = new Map<number, number>(); // cellIdx → extra rid
-      for (const stair of stairs) {
-        const stairIdx = stair.gz * gridW + stair.gx;
-        const topGX = stair.gx + (stair.axis === 'x' ? stair.direction : 0);
-        const topGZ = stair.gz + (stair.axis === 'z' ? stair.direction : 0);
-        const botGX = stair.gx - (stair.axis === 'x' ? stair.direction : 0);
-        const botGZ = stair.gz - (stair.axis === 'z' ? stair.direction : 0);
-        if (topGX >= 0 && topGX < gridW && topGZ >= 0 && topGZ < gridD) {
-          const landingIdx = topGZ * gridW + topGX;
-          const lowerRid = visOwnership[stairIdx];
-          const upperRid = visOwnership[landingIdx];
-          // Landing tile (top): add lower-level rid so visible from below
-          if (lowerRid !== -1) stairDualLevel.set(landingIdx, lowerRid);
-          // Stair cell: add upper-level rid so visible from above
-          if (upperRid !== -1) stairDualLevel.set(stairIdx, upperRid);
-          // Foot tile (bottom): add upper-level rid so visible from above
-          if (botGX >= 0 && botGX < gridW && botGZ >= 0 && botGZ < gridD) {
-            const footIdx = botGZ * gridW + botGX;
-            if (upperRid !== -1) stairDualLevel.set(footIdx, upperRid);
+          if (adjRooms.size > 0) {
+            const doorWX = -halfWorld + (gx + 0.5) * cellSize;
+            const doorWZ = -halfWorld + (gz + 0.5) * cellSize;
+            this.registerVisibility(doorGroups[i], [...adjRooms], doorWX, doorWZ);
           }
         }
       }
@@ -1960,15 +2018,16 @@ export class Terrain {
         const rv = this.roomVisibility;
         const halfW = this.groundSize / 2;
         for (const { mesh, gx, gz } of this.propSystem.getAllPropMeshesWithCells()) {
-          // Use grid cell to find room if available, fall back to world position
           const wx = -halfW + (gx + 0.5) * cellSize;
           const wz = -halfW + (gz + 0.5) * cellSize;
-          const rid = (gx > 0 || gz > 0) ? rv.getRoomAtWorld(wx, wz) : rv.getRoomAtWorld(mesh.position.x, mesh.position.z);
-          if (rid !== -1) rv.registerMesh(mesh, [rid]);
+          const propWX = (gx > 0 || gz > 0) ? wx : mesh.position.x;
+          const propWZ = (gx > 0 || gz > 0) ? wz : mesh.position.z;
+          const rid = rv.getRoomAtWorld(propWX, propWZ);
+          if (rid !== -1) this.registerVisibility(mesh, [rid], propWX, propWZ);
         }
         for (const label of this.propSystem.getAllLabels()) {
           const rid = rv.getRoomAtWorld(label.position.x, label.position.z);
-          if (rid !== -1) rv.registerMesh(label, [rid]);
+          if (rid !== -1) this.registerVisibility(label, [rid], label.position.x, label.position.z);
         }
       }
 
