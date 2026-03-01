@@ -20,6 +20,9 @@ export class RoomVisibility {
   private heightThreshold: number;
   private stairCells: Set<number>;
 
+  // Ladder peek: when player is near top and facing toward it, reveal bottom area
+  private ladderPeeks: { topIdx: number; bottomIdx: number; dirX: number; dirZ: number }[] = [];
+
   // Door cell lookup: cellIndex → door index in DoorSystem
   private doorCellMap = new Map<number, number>();
 
@@ -69,6 +72,19 @@ export class RoomVisibility {
       const gz = Math.round(door.z);
       this.doorCellMap.set(gz * gridW + gx, di);
     }
+  }
+
+  /** Register a ladder peek: when player is near top and facing toward it, reveal bottom area.
+   *  dirX/dirZ: direction from top cell toward bottom cell (in grid space). */
+  addLadderLink(topCellIdx: number, bottomCellIdx: number): void {
+    const topGX = topCellIdx % this.gridW;
+    const topGZ = (topCellIdx - topGX) / this.gridW;
+    const botGX = bottomCellIdx % this.gridW;
+    const botGZ = (bottomCellIdx - botGX) / this.gridW;
+    const dx = botGX - topGX, dz = botGZ - topGZ;
+    const len = Math.sqrt(dx * dx + dz * dz) || 1;
+    this.ladderPeeks.push({ topIdx: topCellIdx, bottomIdx: bottomCellIdx, dirX: dx / len, dirZ: dz / len });
+    this.prevActiveKey = ''; // force re-apply
   }
 
   /** Register a mesh (or group) under one or more room IDs */
@@ -135,8 +151,9 @@ export class RoomVisibility {
     return rid !== -1 && (this.activeRooms.has(rid) || this.visitedRooms.has(rid));
   }
 
-  /** Main update — cell-level flood-fill, stop at closed doors */
-  update(playerWX: number, playerWZ: number, doorSystem: DoorSystem | null): void {
+  /** Main update — cell-level flood-fill, stop at closed doors.
+   *  playerFacing: angle in radians (0 = -Z, like Three.js Y rotation). */
+  update(playerWX: number, playerWZ: number, doorSystem: DoorSystem | null, playerFacing = 0): void {
     const { roomOwnership, openGrid, gridW, gridD, cellSize, halfWorld } = this;
 
     // Player grid position
@@ -187,6 +204,69 @@ export class RoomVisibility {
 
         reached.add(nidx);
         queue.push(nidx);
+      }
+
+    }
+
+    // Ladder peek: if player is adjacent to a ladder top and facing toward it,
+    // do a limited flood-fill from the bottom to reveal the area below
+    if (this.ladderPeeks.length > 0) {
+      const faceDirX = -Math.sin(playerFacing);
+      const faceDirZ = -Math.cos(playerFacing);
+      const PEEK_RADIUS_SQ = 6 * 6; // max cells from ladder bottom to reveal
+
+      for (const peek of this.ladderPeeks) {
+        const topGX = peek.topIdx % gridW;
+        const topGZ = (peek.topIdx - topGX) / gridW;
+
+        // Player must be within 1 cell of ladder top
+        const dpx = pgx - topGX, dpz = pgz - topGZ;
+        if (dpx * dpx + dpz * dpz > 2) continue; // > ~1.4 cells away
+
+        // Player must be facing toward the ladder (dot product with top→bottom direction)
+        const dot = faceDirX * peek.dirX + faceDirZ * peek.dirZ;
+        if (dot < 0.5) continue; // not facing toward ladder
+
+        // Mini flood-fill from ladder bottom, limited radius
+        const botGX = peek.bottomIdx % gridW;
+        const botGZ = (peek.bottomIdx - botGX) / gridW;
+        if (!openGrid[peek.bottomIdx]) continue;
+
+        const miniQueue: number[] = [peek.bottomIdx];
+        if (!reached.has(peek.bottomIdx)) reached.add(peek.bottomIdx);
+
+        while (miniQueue.length > 0) {
+          const idx = miniQueue.pop()!;
+          const gx = idx % gridW;
+          const gz = (idx - gx) / gridW;
+
+          for (const [dx, dz] of dirs) {
+            const nx = gx + dx, nz = gz + dz;
+            if (nx < 0 || nx >= gridW || nz < 0 || nz >= gridD) continue;
+            const nidx = nz * gridW + nx;
+            if (reached.has(nidx)) continue;
+            if (!openGrid[nidx]) continue;
+
+            // Limit radius from ladder bottom
+            const distSq = (nx - botGX) * (nx - botGX) + (nz - botGZ) * (nz - botGZ);
+            if (distSq > PEEK_RADIUS_SQ) continue;
+
+            // Door check
+            const doorIdx = this.doorCellMap.get(nidx);
+            if (doorIdx !== undefined) {
+              if (!doorSystem || !doorSystem.isDoorOpen(doorIdx)) continue;
+            }
+
+            // Height check (stay at bottom level)
+            if (this.cellHeights) {
+              const hDiff = Math.abs(this.cellHeights[nidx] - this.cellHeights[idx]);
+              if (hDiff > this.heightThreshold) continue;
+            }
+
+            reached.add(nidx);
+            miniQueue.push(nidx);
+          }
+        }
       }
     }
 

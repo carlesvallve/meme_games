@@ -127,9 +127,9 @@ export const DEFAULT_HOP_FREQUENCY = 4;
 
 // ── Climbing ────────────────────────────────────────────────────────────
 
-export const CLIMB_SPEED = 2.5;       // m/s along ladder
-export const MOUNT_SPEED = 4.0;       // m/s walking to ladder entry
-export const DISMOUNT_SPEED = 3.0;    // m/s stepping off ladder
+export const CLIMB_SPEED = 1.6;       // m/s along ladder
+export const MOUNT_SPEED = 3.0;       // m/s walking to ladder entry
+export const DISMOUNT_SPEED = 2.0;    // m/s stepping off ladder
 /** How far the character stands in front of the cliff during climbing (along facing normal) */
 export const CLIMB_WALL_OFFSET = 0.18;
 

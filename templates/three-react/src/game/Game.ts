@@ -1389,7 +1389,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       const roomVis = terrain.getRoomVisibility();
       if (roomVis && playerChar) {
         const pp = playerChar.getPosition();
-        roomVis.update(pp.x, pp.z, doorSystem);
+        roomVis.update(pp.x, pp.z, doorSystem, playerChar.getFacing());
       }
 
       // Gore system (body chunks + blood decals)
