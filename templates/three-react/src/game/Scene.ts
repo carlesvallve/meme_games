@@ -34,6 +34,7 @@ const PRESET_SCALES: Record<LightPreset, number> = {
   none: 0,
 };
 
+
 export function applyLightPreset(lights: SceneLights, preset: LightPreset, isExterior = false): void {
   const s = PRESET_SCALES[preset];
   const ext = isExterior ? 1.6 : 1;
