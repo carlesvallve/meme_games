@@ -191,7 +191,9 @@ export class CharacterClimbing {
         owner.mesh.position.x = curX;
         owner.mesh.position.z = curZ;
 
-        const terrainY = owner.terrain.getTerrainY(curX, curZ);
+        // Sample terrain at the EXIT position (not current), so we don't dip
+        // into the low corridor floor when dismounting upward on vertical ladders.
+        const terrainY = owner.terrain.getTerrainY(exitX, exitZ);
         owner.groundY = terrainY;
         owner.visualGroundY = THREE.MathUtils.lerp(
           owner.visualGroundY, terrainY, 1 - Math.exp(-STEP_UP_RATE * dt),
