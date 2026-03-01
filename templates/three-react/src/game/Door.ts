@@ -33,8 +33,9 @@ interface DoorObj {
 }
 
 const OPEN_DIST = 1.2;
-const CLOSE_DIST = 1.2;
+const CLOSE_DIST = 0.8;
 const LATERAL_TOLERANCE = 0.6; // max offset along the door's parallel axis
+const APPROACH_DOT = 0.3; // min dot-product of move direction vs door normal to trigger open
 const ANIM_SPEED = 3.0;
 
 // Procedural door dimensions
@@ -46,6 +47,7 @@ export class DoorSystem {
   private doors: DoorObj[] = [];
   private readonly terrain: Terrain;
   private readonly parent: THREE.Object3D;
+  private _prevPositions: THREE.Vector3[] = [];
   /** Per-cell height offsets from stair system */
   private cellHeights: Float32Array | null = null;
   private gridW = 0;
@@ -404,13 +406,17 @@ export class DoorSystem {
   }
 
   update(dt: number, characterPositions: THREE.Vector3[], stepHeight: number): void {
+    // Track previous positions to compute movement direction
+    if (!this._prevPositions) this._prevPositions = [];
+
     for (const door of this.doors) {
       let closestDist = Infinity;
       let closestDx = 0;
       let closestDz = 0;
-      let anyInRange = false;
+      let anyApproaching = false;
 
-      for (const pos of characterPositions) {
+      for (let ci = 0; ci < characterPositions.length; ci++) {
+        const pos = characterPositions[ci];
         const dx = pos.x - door.worldX;
         const dz = pos.z - door.worldZ;
         const dy = Math.abs(pos.y - door.group.position.y);
@@ -430,11 +436,26 @@ export class DoorSystem {
           closestDz = dz;
         }
         if (perp < OPEN_DIST) {
-          anyInRange = true;
+          // Check movement direction: must be moving toward the door
+          const prev = this._prevPositions[ci];
+          if (prev) {
+            const mvx = pos.x - prev.x;
+            const mvz = pos.z - prev.z;
+            const mvLen = Math.sqrt(mvx * mvx + mvz * mvz);
+            if (mvLen > 0.001) {
+              // Door normal: perpendicular axis pointing from char to door
+              const normX = door.orientation === 'EW' ? 0 : -Math.sign(dx);
+              const normZ = door.orientation === 'EW' ? -Math.sign(dz) : 0;
+              const dot = (mvx / mvLen) * normX + (mvz / mvLen) * normZ;
+              if (dot > APPROACH_DOT) {
+                anyApproaching = true;
+              }
+            }
+          }
         }
       }
 
-      const shouldOpen = anyInRange;
+      const shouldOpen = anyApproaching;
       const shouldClose = closestDist > CLOSE_DIST;
 
       if (shouldOpen && !door.isOpen) {
@@ -480,12 +501,16 @@ export class DoorSystem {
         this.terrain.addDynamicDebris(door.debrisBox);
       }
     }
+
+    // Store current positions for next frame's direction check
+    this._prevPositions = characterPositions.map(p => p.clone());
   }
 
-  /** Check if a door at the given index is open (or opening). */
+  /** Check if a door at the given index is open (or opening).
+   *  Requires door to be at least 40% open to prevent visibility flicker. */
   isDoorOpen(index: number): boolean {
     const door = this.doors[index];
-    return door ? door.openProgress > 0 : false;
+    return door ? door.openProgress > 0.4 : false;
   }
 
   /** Number of doors in the system. */

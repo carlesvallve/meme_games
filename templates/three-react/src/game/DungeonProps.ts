@@ -615,6 +615,30 @@ export class DungeonPropSystem {
       }
     }
 
+    // Block cells in front of entrance/exit portals before placing room props.
+    // Portal sits on a wall-edge cell facing into the room; block the cell it faces.
+    for (const portalRoomIdx of [entranceRoom, exitRoom]) {
+      if (portalRoomIdx < 0 || portalRoomIdx >= rooms.length) continue;
+      const room = rooms[portalRoomIdx];
+      for (let gz = room.z; gz < room.z + room.d; gz++) {
+        for (let gx = room.x; gx < room.x + room.w; gx++) {
+          if (!openGrid[gz * gridW + gx]) continue;
+          const atN = gz === room.z && (gz - 1 < 0 || !openGrid[(gz - 1) * gridW + gx]);
+          const atS = gz === room.z + room.d - 1 && (gz + 1 >= gridH || !openGrid[(gz + 1) * gridW + gx]);
+          const atW = gx === room.x && (gx - 1 < 0 || !openGrid[gz * gridW + (gx - 1)]);
+          const atE = gx === room.x + room.w - 1 && (gx + 1 >= gridW || !openGrid[gz * gridW + (gx + 1)]);
+          if (atN || atS || atW || atE) {
+            // Block wall-edge cell (potential portal) and the cell in front of it
+            occupied.add(`${gx},${gz}`);
+            if (atN) occupied.add(`${gx},${gz + 1}`);
+            if (atS) occupied.add(`${gx},${gz - 1}`);
+            if (atW) occupied.add(`${gx + 1},${gz}`);
+            if (atE) occupied.add(`${gx - 1},${gz}`);
+          }
+        }
+      }
+    }
+
     // testProp override: read from store
     const testProp = (await import('../store')).useGameStore.getState().testProp;
 
@@ -1752,6 +1776,14 @@ export class DungeonPropSystem {
       // Pick a random candidate
       const cell = candidates[Math.floor(rng.next() * candidates.length)];
       occupied.add(`${cell.gx},${cell.gz}`);
+
+      // Block the cell in front of the portal (into the room) so no props spawn there
+      const frontPush = WALL_PUSH[cell.wallSide];
+      if (frontPush) {
+        const fgx = cell.gx - frontPush[0];
+        const fgz = cell.gz - frontPush[1];
+        occupied.add(`${fgx},${fgz}`);
+      }
 
       // Load entrance VOX tile
       const tileEntry = getRandomTile('entrance', theme);

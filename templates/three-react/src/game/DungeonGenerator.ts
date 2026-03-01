@@ -129,19 +129,80 @@ export function generateDungeon(
   }
   // console.log(`[DOOR] final world-space doors: ${doors.length}`);
 
-  // Find the two most distant rooms for entrance/exit placement
+  // Find entrance/exit by longest path distance through the room graph
   const roomRects = result.rooms.map(r => r.rect);
   let entranceRoom = 0;
   let exitRoom = roomRects.length > 1 ? 1 : 0;
-  let maxDistSq = 0;
-  for (let i = 0; i < roomRects.length; i++) {
-    for (let j = i + 1; j < roomRects.length; j++) {
-      const cx1 = roomRects[i].x + roomRects[i].w / 2;
-      const cz1 = roomRects[i].z + roomRects[i].d / 2;
-      const cx2 = roomRects[j].x + roomRects[j].w / 2;
-      const cz2 = roomRects[j].z + roomRects[j].d / 2;
-      const dist = (cx2 - cx1) ** 2 + (cz2 - cz1) ** 2;
-      if (dist > maxDistSq) { maxDistSq = dist; entranceRoom = i; exitRoom = j; }
+
+  if (roomRects.length > 1) {
+    // Build room adjacency from corridors
+    const roomAdj = new Map<number, Set<number>>();
+    for (const corridor of result.corridors) {
+      const touched = new Set<number>();
+      for (const { gx, gz } of corridor.cells) {
+        for (const [dx, dz] of [[0, -1], [0, 1], [-1, 0], [1, 0]] as [number, number][]) {
+          const nx = gx + dx, nz = gz + dz;
+          if (nx < 0 || nx >= gridW || nz < 0 || nz >= gridD) continue;
+          const rid = result.roomOwnership![nz * gridW + nx];
+          if (rid >= 0) touched.add(rid);
+        }
+      }
+      const arr = [...touched];
+      for (let a = 0; a < arr.length; a++) {
+        for (let b = a + 1; b < arr.length; b++) {
+          if (!roomAdj.has(arr[a])) roomAdj.set(arr[a], new Set());
+          if (!roomAdj.has(arr[b])) roomAdj.set(arr[b], new Set());
+          roomAdj.get(arr[a])!.add(arr[b]);
+          roomAdj.get(arr[b])!.add(arr[a]);
+        }
+      }
+    }
+
+    // BFS from each room to find path distances
+    const bfsFrom = (start: number): number[] => {
+      const dist = new Array(roomRects.length).fill(-1);
+      dist[start] = 0;
+      const q = [start];
+      let head = 0;
+      while (head < q.length) {
+        const cur = q[head++];
+        for (const nb of roomAdj.get(cur) ?? []) {
+          if (dist[nb] === -1) {
+            dist[nb] = dist[cur] + 1;
+            q.push(nb);
+          }
+        }
+      }
+      return dist;
+    };
+
+    // Pick entrance from top-3 candidates with most distant rooms (randomized)
+    // First pass: find the pair with max path distance
+    let bestDist = 0;
+    const pairCandidates: { a: number; b: number; dist: number }[] = [];
+    for (let i = 0; i < roomRects.length; i++) {
+      const dists = bfsFrom(i);
+      for (let j = i + 1; j < roomRects.length; j++) {
+        if (dists[j] > 0) {
+          if (dists[j] > bestDist) bestDist = dists[j];
+          pairCandidates.push({ a: i, b: j, dist: dists[j] });
+        }
+      }
+    }
+
+    // Keep pairs in the top ~60% of path distances for variety
+    const threshold = Math.max(1, Math.ceil(bestDist * 0.6));
+    const topPairs = pairCandidates.filter(p => p.dist >= threshold);
+    if (topPairs.length > 0) {
+      const pick = topPairs[Math.floor(rng.next() * topPairs.length)];
+      // Randomly swap entrance/exit
+      if (rng.next() < 0.5) {
+        entranceRoom = pick.a;
+        exitRoom = pick.b;
+      } else {
+        entranceRoom = pick.b;
+        exitRoom = pick.a;
+      }
     }
   }
 

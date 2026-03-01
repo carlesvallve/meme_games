@@ -166,9 +166,10 @@ export class RoomVisibility {
         if (reached.has(nidx)) continue;
         if (!openGrid[nidx]) continue;
 
-        // Max distance from player (in grid cells)
-        const distSq = (nx - pgx) * (nx - pgx) + (nz - pgz) * (nz - pgz);
-        if (distSq > MAX_FLOOD_DIST_SQ) continue;
+        // // Max distance from player (in grid cells) — disabled, height-based blocking handles visibility
+        // const distSq = (nx - pgx) * (nx - pgx) + (nz - pgz) * (nz - pgz);
+        // if (distSq > MAX_FLOOD_DIST_SQ) continue;
+        //
 
         // Door cell: blocks if door is closed OR doorSystem not yet loaded
         const doorIdx = this.doorCellMap.get(nidx);
