@@ -12,7 +12,7 @@ import { DoorSystem } from './Door';
 import { generateNature, type NatureGeneratorResult } from './NatureGenerator';
 import { paletteBiome } from './ColorPalettes';
 import { buildVoxelDungeonCollision, loadVoxelDungeonVisuals } from './VoxelDungeon';
-import { findStairCandidates, computeCellHeights, buildStairMeshes, getStairCellSet, type StairDef } from './StairSystem';
+import { computeCellHeights, buildStairMeshes, getStairCellSet, type StairDef } from './StairSystem';
 import { DUNGEON_VARIANTS } from './VoxDungeonDB';
 import { RoomVisibility } from './RoomVisibility';
 import { DungeonPropSystem, clearPropCache } from './DungeonProps';
@@ -1589,14 +1589,10 @@ export class Terrain {
     const floorVoxH = 1 * voxScale;   // floor tile thickness
     const stepH = wallVoxH + floorVoxH; // total stair rise — top step flush with next floor surface
     const stairRng = new SeededRandom(this.dungeonSeed ?? 0);
-    const stairs = findStairCandidates(
-      output.roomOwnership, output.corridors, gridW, gridD, stepH, wallVoxH, stairRng,
-      output.entranceRoom, output.rooms.length,
-    );
-    const cellHeightsArr = computeCellHeights(
-      stairs, output.roomOwnership, visualOpenGrid,
+    const { cellHeights: cellHeightsArr, stairs, ladderHints } = computeCellHeights(
+      output.roomOwnership, visualOpenGrid,
       output.entranceRoom, output.rooms, gridW, gridD,
-      output.corridors,
+      output.corridors, stepH, wallVoxH, stairRng,
     );
     this.cellHeights = cellHeightsArr;
     this.dungeonCellSize = cellSize;
@@ -1604,6 +1600,18 @@ export class Terrain {
     this.dungeonGridD = gridD;
     this.stairMap.clear();
     for (const s of stairs) this.stairMap.set(s.gz * gridW + s.gx, s);
+
+    // Remove doors that overlap with stairs — stairs already serve as the room transition.
+    // Filter both parallel arrays (gridDoors and doors) together.
+    for (let i = output.gridDoors.length - 1; i >= 0; i--) {
+      const gx = Math.round(output.gridDoors[i].x);
+      const gz = Math.round(output.gridDoors[i].z);
+      if (gx < 0 || gx >= gridW || gz < 0 || gz >= gridD) continue;
+      if (this.stairMap.has(gz * gridW + gx)) {
+        output.gridDoors.splice(i, 1);
+        output.doors.splice(i, 1);
+      }
+    }
 
     // Update entrance/exit room center Y with cell heights
     if (this.entranceRoomCenter && output.rooms.length > 0) {
