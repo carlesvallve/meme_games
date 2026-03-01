@@ -323,13 +323,15 @@ function connectBSPSiblings(
 }
 
 /** Connect rooms using Prim's MST — always picks the nearest unconnected room */
+/** Returns MST adjacency list so addLoopCorridors can detect cross-branch pairs */
 function connectRoomsMST(
   rooms: DungeonRoom[],
   openGrid: boolean[],
   gridW: number,
   corridors: DungeonCorridor[],
-): void {
-  if (rooms.length < 2) return;
+): Map<number, number[]> {
+  const adj = new Map<number, number[]>();
+  if (rooms.length < 2) return adj;
 
   const connected = new Set<number>([0]);
   const remaining = new Set<number>();
@@ -353,9 +355,15 @@ function connectRoomsMST(
     const b = roomEdgeToward(rooms[bestTo].rect, roomCenter(rooms[bestFrom].rect));
     corridors.push(carveLCorridor(a.gx, a.gz, b.gx, b.gz, openGrid, gridW));
 
+    if (!adj.has(bestFrom)) adj.set(bestFrom, []);
+    if (!adj.has(bestTo)) adj.set(bestTo, []);
+    adj.get(bestFrom)!.push(bestTo);
+    adj.get(bestTo)!.push(bestFrom);
+
     connected.add(bestTo);
     remaining.delete(bestTo);
   }
+  return adj;
 }
 
 /**
@@ -393,56 +401,59 @@ function addLoopCorridors(
   openGrid: boolean[],
   gridW: number,
   corridors: DungeonCorridor[],
-): void {
-  if (rooms.length < 3) return;
+  mstAdj: Map<number, number[]>,
+): Set<number> {
+  const protectedCells = new Set<number>();
+  if (rooms.length < 3) return protectedCells;
 
-  // Collect all room-pair distances
-  type Pair = { a: number; b: number; dist: number };
+  // BFS hop distance between all room pairs through MST
+  const mstHops = (from: number, to: number): number => {
+    const visited = new Set<number>([from]);
+    const queue: [number, number][] = [[from, 0]];
+    while (queue.length > 0) {
+      const [cur, hops] = queue.shift()!;
+      if (cur === to) return hops;
+      for (const nb of mstAdj.get(cur) ?? []) {
+        if (!visited.has(nb)) { visited.add(nb); queue.push([nb, hops + 1]); }
+      }
+    }
+    return Infinity;
+  };
+
+  // Collect all room-pair distances + MST hop distance
+  type Pair = { a: number; b: number; dist: number; hops: number };
   const pairs: Pair[] = [];
   for (let i = 0; i < rooms.length; i++) {
     const ci = roomCenter(rooms[i].rect);
     for (let j = i + 1; j < rooms.length; j++) {
       const cj = roomCenter(rooms[j].rect);
       const d = Math.abs(ci.gx - cj.gx) + Math.abs(ci.gz - cj.gz);
-      pairs.push({ a: i, b: j, dist: d });
+      const h = mstHops(i, j);
+      pairs.push({ a: i, b: j, dist: d, hops: h });
     }
   }
 
-  // Sort by distance — prefer short corridors
-  pairs.sort((a, b) => a.dist - b.dist);
+  // Score: prioritise cross-branch connections (high hops, low physical dist).
+  // score = hops / dist — higher is better (far in tree, close physically).
+  pairs.sort((a, b) => (b.hops / b.dist) - (a.hops / a.dist));
 
-  // Track which rooms already have extra connections to avoid over-connecting
   const extraConnections = new Map<number, number>();
-  const maxExtraPerRoom = 2; // at most 2 extra loop corridors per room
+  const maxExtraPerRoom = 1;
   let added = 0;
-  const maxLoops = Math.max(2, Math.floor(rooms.length * 0.5)); // ~50% of room count
+  const maxLoops = Math.max(2, Math.floor(rooms.length * 0.35));
 
-  for (const pair of pairs) {
-    if (added >= maxLoops) break;
+  const carveLoop = (pair: Pair): boolean => {
     const { a, b } = pair;
+    if ((extraConnections.get(a) ?? 0) >= maxExtraPerRoom) return false;
+    if ((extraConnections.get(b) ?? 0) >= maxExtraPerRoom) return false;
 
-    // Skip if either room already has too many extras
-    if ((extraConnections.get(a) ?? 0) >= maxExtraPerRoom) continue;
-    if ((extraConnections.get(b) ?? 0) >= maxExtraPerRoom) continue;
-
-    // ~50% chance per eligible pair
-    if (rng.next() > 0.5) continue;
-
-    // Start carving from one cell OUTSIDE each room's edge (the wall cell)
-    // so the wall between room and corridor is properly carved open.
     const exitA = roomExitToward(rooms[a].rect, roomCenter(rooms[b].rect));
     const exitB = roomExitToward(rooms[b].rect, roomCenter(rooms[a].rect));
-
-    // Also carve the room edge cells to ensure entrance is open
     const edgeA = roomEdgeToward(rooms[a].rect, roomCenter(rooms[b].rect));
     const edgeB = roomEdgeToward(rooms[b].rect, roomCenter(rooms[a].rect));
 
-    // Carve the corridor from exit to exit (through wall cells)
     const corridor = carveLCorridor(exitA.gx, exitA.gz, exitB.gx, exitB.gz, openGrid, gridW);
 
-    // Also ensure the room edge cells and the cells between edge→exit are open
-    // (carveLCorridor starts at exitA which is the wall cell, but we need
-    // the room edge cell to also be in the corridor for door detection)
     const ensureOpen = (gx: number, gz: number) => {
       if (gx >= 0 && gx < gridW && gz >= 0 && gz < gridW) {
         openGrid[gz * gridW + gx] = true;
@@ -454,29 +465,68 @@ function addLoopCorridors(
     ensureOpen(exitB.gx, exitB.gz);
 
     corridors.push(corridor);
-
+    for (const c of corridor.cells) protectedCells.add(c.gz * gridW + c.gx);
     extraConnections.set(a, (extraConnections.get(a) ?? 0) + 1);
     extraConnections.set(b, (extraConnections.get(b) ?? 0) + 1);
     added++;
+    const tag = pair.hops >= 4 ? 'CROSS' : 'loop';
+    console.log(`[Dungeon] ${tag} corridor room ${a}↔${b} dist=${pair.dist} hops=${pair.hops} cells=${corridor.cells.length}`);
+    return true;
+  };
+
+  // Phase 1: Cross-branch connections (hops >= 4, sorted by score)
+  for (const pair of pairs) {
+    if (added >= maxLoops) break;
+    if (pair.hops < 4) continue;
+    if (rng.next() > 0.5) continue; // 50% chance
+    carveLoop(pair);
+  }
+
+  // Phase 2: Fill remaining budget with shorter loops
+  for (const pair of pairs) {
+    if (added >= maxLoops) break;
+    if (pair.hops >= 4) continue; // already handled
+    if (rng.next() > 0.5) continue;
+    carveLoop(pair);
   }
 
   if (added > 0) {
-    console.log(`[Dungeon] Added ${added} loop corridors`);
+    console.log(`[Dungeon] Added ${added} loop corridors total (${protectedCells.size} protected cells)`);
   }
+  return protectedCells;
 }
 
-/** Carve an L-shaped corridor between two grid points (1 cell wide) */
+/** Carve an L-shaped corridor between two grid points.
+ *  @param width — corridor width in cells (1 = single, 2 = double). Extra cells
+ *  are carved perpendicular to the carving direction so the corridor survives
+ *  eliminateThinWalls. */
 function carveLCorridor(
   x1: number, z1: number,
   x2: number, z2: number,
   openGrid: boolean[],
   gridW: number,
+  width = 1,
 ): DungeonCorridor {
+  const gridD = openGrid.length / gridW;
   const cells: { gx: number; gz: number }[] = [];
+  const carved = new Set<number>();
   const carve = (gx: number, gz: number) => {
-    if (gx >= 0 && gx < gridW && gz >= 0 && gz < gridW) {
-      openGrid[gz * gridW + gx] = true;
-      cells.push({ gx, gz });
+    if (gx >= 0 && gx < gridW && gz >= 0 && gz < gridD) {
+      const idx = gz * gridW + gx;
+      if (!carved.has(idx)) {
+        openGrid[idx] = true;
+        cells.push({ gx, gz });
+        carved.add(idx);
+      }
+    }
+  };
+
+  // Carve with optional width expansion perpendicular to direction
+  const carveWide = (gx: number, gz: number, axis: 'x' | 'z') => {
+    carve(gx, gz);
+    for (let w = 1; w < width; w++) {
+      if (axis === 'x') carve(gx, gz + w);  // expand in z when moving along x
+      else carve(gx + w, gz);                // expand in x when moving along z
     }
   };
 
@@ -484,15 +534,15 @@ function carveLCorridor(
   if (rng.next() < 0.5) {
     // Horizontal then vertical
     const dx = x2 > x1 ? 1 : -1;
-    for (let x = x1; x !== x2; x += dx) carve(x, z1);
+    for (let x = x1; x !== x2; x += dx) carveWide(x, z1, 'x');
     const dz = z2 > z1 ? 1 : -1;
-    for (let z = z1; z !== z2 + dz; z += dz) carve(x2, z);
+    for (let z = z1; z !== z2 + dz; z += dz) carveWide(x2, z, 'z');
   } else {
     // Vertical then horizontal
     const dz = z2 > z1 ? 1 : -1;
-    for (let z = z1; z !== z2; z += dz) carve(x1, z);
+    for (let z = z1; z !== z2; z += dz) carveWide(x1, z, 'z');
     const dx = x2 > x1 ? 1 : -1;
-    for (let x = x1; x !== x2 + dx; x += dx) carve(x, z2);
+    for (let x = x1; x !== x2 + dx; x += dx) carveWide(x, z2, 'x');
   }
 
   return { cells };
@@ -540,15 +590,16 @@ export function generateBSPDungeon(
 
   // Connect rooms via minimum spanning tree (shortest corridors)
   const corridors: DungeonCorridor[] = [];
-  connectRoomsMST(rooms, openGrid, gridW, corridors);
+  const mstAdj = connectRoomsMST(rooms, openGrid, gridW, corridors);
 
-  // Add extra loop corridors (~30% of non-MST room pairs) for circular paths
-  addLoopCorridors(rooms, openGrid, gridW, corridors);
+  // Add extra loop corridors — prioritise cross-branch connections
+  const loopProtected = addLoopCorridors(rooms, openGrid, gridW, corridors, mstAdj);
 
   // Eliminate 1-thick walls, re-bridge, repeat
-  eliminateThinWalls(openGrid, roomGrid, gridW, gridD);
+  // Loop corridor cells are protected from being closed.
+  eliminateThinWalls(openGrid, roomGrid, gridW, gridD, loopProtected);
   ensureConnectivity(rooms, openGrid, gridW, gridD, corridors);
-  eliminateThinWalls(openGrid, roomGrid, gridW, gridD);
+  eliminateThinWalls(openGrid, roomGrid, gridW, gridD, loopProtected);
 
   // Detect doors: where corridor cells meet room boundaries
   // Log corridor cell count for debugging
@@ -972,6 +1023,7 @@ function eliminateThinWalls(
   roomGrid: Int8Array,
   gridW: number,
   gridD: number,
+  protectedCells?: Set<number>,
 ): void {
   const isOpen = (gx: number, gz: number): boolean => {
     if (gx < 0 || gx >= gridW || gz < 0 || gz >= gridD) return false;
@@ -985,18 +1037,23 @@ function eliminateThinWalls(
         if (openGrid[gz * gridW + gx]) continue; // only check closed cells
 
         // Cardinal thin walls: open on opposite sides
+        // Never close protected cells (loop corridor cells)
         if (isOpen(gx, gz - 1) && isOpen(gx, gz + 1)) {
-          if (roomGrid[(gz - 1) * gridW + gx] < 0) {
-            openGrid[(gz - 1) * gridW + gx] = false; changed = true;
-          } else if (roomGrid[(gz + 1) * gridW + gx] < 0) {
-            openGrid[(gz + 1) * gridW + gx] = false; changed = true;
+          const idxN = (gz - 1) * gridW + gx;
+          const idxS = (gz + 1) * gridW + gx;
+          if (roomGrid[idxN] < 0 && !protectedCells?.has(idxN)) {
+            openGrid[idxN] = false; changed = true;
+          } else if (roomGrid[idxS] < 0 && !protectedCells?.has(idxS)) {
+            openGrid[idxS] = false; changed = true;
           }
         }
         if (isOpen(gx - 1, gz) && isOpen(gx + 1, gz)) {
-          if (roomGrid[gz * gridW + (gx - 1)] < 0) {
-            openGrid[gz * gridW + (gx - 1)] = false; changed = true;
-          } else if (roomGrid[gz * gridW + (gx + 1)] < 0) {
-            openGrid[gz * gridW + (gx + 1)] = false; changed = true;
+          const idxW = gz * gridW + (gx - 1);
+          const idxE = gz * gridW + (gx + 1);
+          if (roomGrid[idxW] < 0 && !protectedCells?.has(idxW)) {
+            openGrid[idxW] = false; changed = true;
+          } else if (roomGrid[idxE] < 0 && !protectedCells?.has(idxE)) {
+            openGrid[idxE] = false; changed = true;
           }
         }
       }

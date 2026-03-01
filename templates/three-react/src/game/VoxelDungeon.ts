@@ -162,6 +162,37 @@ export function buildVoxelDungeonCollision(
     }
   }
 
+  // Foundation collision: invisible boxes under elevated open cells.
+  // Prevents player from walking inside the space below raised floors.
+  if (cellHeights) {
+    for (let gz = 0; gz < gridD; gz++) {
+      for (let gx = 0; gx < gridW; gx++) {
+        if (!openGrid[gz * gridW + gx]) continue;
+        const h = cellHeights[gz * gridW + gx];
+        if (h < 0.01) continue; // ground level, no foundation needed
+
+        const wx = toWorldX(gx);
+        const wz = toWorldZ(gz);
+
+        // Box from Y=0 up to the cell's floor height
+        const geo = new THREE.BoxGeometry(cellSize, h, cellSize);
+        const mat = new THREE.MeshBasicMaterial({ visible: false });
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.position.set(wx, h / 2, wz);
+        mesh.userData.collisionOnly = true;
+        group.add(mesh);
+
+        entities.push(new Entity(mesh, {
+          layer: Layer.Architecture,
+          radius: half,
+          weight: Infinity,
+        }));
+
+        debris.push({ x: wx, z: wz, halfW: half, halfD: half, height: h });
+      }
+    }
+  }
+
   return { debris, entities, wallHeight };
 }
 
@@ -412,17 +443,28 @@ export async function loadVoxelDungeonVisuals(
         }
       }
 
-      // Place wall tile(s): stack down to Y=0 when USE_STACKED_WALLS is on
-      const tileH = wallHeight;
-      const stackCount = USE_STACKED_WALLS && maxAdjacentH > 0.01 ? Math.ceil(maxAdjacentH / tileH) + 1 : 1;
-      for (let si = 0; si < stackCount; si++) {
-        const wallMesh = placeVoxReturn(wallVisualGroup, wx, wz, role, rot, wallMat, tileOverride, theme);
-        if (wallMesh) {
-          wallMesh.position.y = maxAdjacentH - si * tileH;
-          wallMesh.userData.isWall = true;
+      // Place wall tile at maxAdjacentH
+      const wallMesh = placeVoxReturn(wallVisualGroup, wx, wz, role, rot, wallMat, tileOverride, theme);
+      if (wallMesh) {
+        wallMesh.position.y = maxAdjacentH;
+        wallMesh.userData.isWall = true;
+        if (ownership && adjRooms.size > 0) {
+          wallMesh.userData.roomIds = [...adjRooms];
+          wallMeshList.push(wallMesh);
+        }
+      }
+
+      // If adjacent open cells span a height gap, add a lower-tier copy of the
+      // same wall to fill the visual gap. Only affects this closed cell — no
+      // open cells, doors, or entrances are touched.
+      if (maxAdjacentH - minAdjacentH > wallHeight * 0.5) {
+        const lowerWall = placeVoxReturn(wallVisualGroup, wx, wz, role, rot, wallMat, tileOverride, theme);
+        if (lowerWall) {
+          lowerWall.position.y = minAdjacentH;
+          lowerWall.userData.isWall = true;
           if (ownership && adjRooms.size > 0) {
-            wallMesh.userData.roomIds = [...adjRooms];
-            wallMeshList.push(wallMesh);
+            lowerWall.userData.roomIds = [...adjRooms];
+            wallMeshList.push(lowerWall);
           }
         }
       }
@@ -482,6 +524,65 @@ export async function loadVoxelDungeonVisuals(
             if (adjRooms.size > 0) {
               wallMesh.userData.roomIds = [...adjRooms];
               wallMeshList.push(wallMesh);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // ── Pass 2d: Foundation walls under elevated floors ──
+  // For every open cell above height 0, stack wall tiles downward to fill the
+  // vertical gap. One column per exposed cardinal face (where neighbor is lower).
+  if (config.cellHeights) {
+    for (let gz = 0; gz < gridD; gz++) {
+      for (let gx = 0; gx < gridW; gx++) {
+        if (!isOpen(gx, gz)) continue;
+        const idx = gz * gridW + gx;
+        const h = config.cellHeights[idx];
+        if (h < wallHeight * 0.5) continue; // skip ground-level cells
+
+        const wx = toWorldX(gx);
+        const wz = toWorldZ(gz);
+
+        for (const [dx, dz] of [[0, -1], [0, 1], [-1, 0], [1, 0]] as [number, number][]) {
+          const nx = gx + dx, nz = gz + dz;
+          // Neighbor height: out-of-bounds or closed cells count as 0
+          let nh = 0;
+          if (nx >= 0 && nx < gridW && nz >= 0 && nz < gridD) {
+            nh = config.cellHeights[nz * gridW + nx];
+          }
+          if (nh >= h) continue; // neighbor is same or higher — not exposed
+
+          // Wall faces toward the lower neighbor (exposed side)
+          let rot = BASE_ROT;
+          if (dz === 1)       rot = BASE_ROT;         // south neighbor lower → face south
+          else if (dx === 1)  rot = BASE_ROT + 90;    // east neighbor lower  → face east
+          else if (dz === -1) rot = BASE_ROT + 180;   // north neighbor lower → face north
+          else if (dx === -1) rot = BASE_ROT + 270;   // west neighbor lower  → face west
+
+          // Stack wall tiles from neighbor height up to (but not including) cell height
+          const levels = Math.round((h - nh) / wallHeight);
+          for (let lvl = 0; lvl < levels; lvl++) {
+            const y = nh + lvl * wallHeight;
+            const fMesh = placeVoxReturn(wallVisualGroup, wx, wz, 'outer_wall_segment', rot, wallMat, null, theme);
+            if (fMesh) {
+              fMesh.position.y = y;
+              fMesh.userData.isWall = true;
+              if (ownership) {
+                const adjRooms = new Set<number>();
+                for (const [adx, adz] of [[0, -1], [0, 1], [-1, 0], [1, 0]]) {
+                  const ax = gx + adx, az = gz + adz;
+                  if (ax >= 0 && ax < gridW && az >= 0 && az < gridD) {
+                    const rid = ownership[az * gridW + ax];
+                    if (rid !== undefined) adjRooms.add(rid);
+                  }
+                }
+                if (adjRooms.size > 0) {
+                  fMesh.userData.roomIds = [...adjRooms];
+                  wallMeshList.push(fMesh);
+                }
+              }
             }
           }
         }
