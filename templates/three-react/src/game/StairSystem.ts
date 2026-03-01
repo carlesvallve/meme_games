@@ -195,7 +195,7 @@ export function computeCellHeights(
   return { cellHeights, stairs, ladderHints };
 }
 
-/** Build stair meshes for each stair cell. */
+/** Build stair step meshes for each stair cell. */
 export function buildStairMeshes(
   stairs: StairDef[],
   cellHeights: Float32Array,

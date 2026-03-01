@@ -45,6 +45,8 @@ export interface VoxelDungeonConfig {
   cellHeights?: Float32Array;
   /** Set of cell indices that contain stairs — skip ground tile placement for these */
   stairCells?: Set<number>;
+  /** Stair definitions for placing side walls */
+  stairs?: { gx: number; gz: number; axis: 'x' | 'z'; direction: 1 | -1 }[];
   /** Floor vox tile height — used to lower wall placement on elevated levels */
   floorTileHeight?: number;
 }
@@ -425,6 +427,65 @@ export async function loadVoxelDungeonVisuals(
         }
       }
       wallCount++;
+    }
+  }
+
+  // ── Pass 2b: Stair side walls ──
+  // Place outer_wall_segment tiles on each perpendicular side of stair cells.
+  // Uses the same rotation as the corridor walls leading into the stair.
+  if (config.stairs) {
+    for (const stair of config.stairs) {
+      const perpDirs: [number, number][] = stair.axis === 'x'
+        ? [[0, -1], [0, 1]]   // stair along X → wall on north/south
+        : [[-1, 0], [1, 0]];  // stair along Z → wall on east/west
+
+      const stairIdx = stair.gz * gridW + stair.gx;
+      const baseH = config.cellHeights ? config.cellHeights[stairIdx] : 0;
+
+      for (const [dx, dz] of perpDirs) {
+        const nx = stair.gx + dx, nz = stair.gz + dz;
+        if (nx < 0 || nx >= gridW || nz < 0 || nz >= gridD) continue;
+        const nIdx = nz * gridW + nx;
+
+        // Only place wall if that side cell is already closed (wall cell)
+        // — we extend the existing corridor wall into the stair cell.
+        // If the side is open, skip (don't block room space).
+        if (isOpen(nx, nz)) continue;
+
+        const wx = toWorldX(nx);
+        const wz = toWorldZ(nz);
+
+        // Rotation: wall faces toward the stair (open cell)
+        // dx=-1 → wall faces east (+X) → rot = BASE_ROT + 90
+        // dx=+1 → wall faces west (-X) → rot = BASE_ROT + 270
+        // dz=-1 → wall faces south (+Z) → rot = BASE_ROT
+        // dz=+1 → wall faces north (-Z) → rot = BASE_ROT + 180
+        let rot = BASE_ROT;
+        if (dx === -1)      rot = BASE_ROT + 90;
+        else if (dx === 1)  rot = BASE_ROT + 270;
+        else if (dz === -1) rot = BASE_ROT;
+        else if (dz === 1)  rot = BASE_ROT + 180;
+
+        const wallMesh = placeVoxReturn(wallVisualGroup, wx, wz, 'outer_wall_segment', rot, wallMat, null, theme);
+        if (wallMesh) {
+          wallMesh.position.y = baseH;
+          wallMesh.userData.isWall = true;
+          if (ownership) {
+            const adjRooms = new Set<number>();
+            for (const [adx, adz] of [[0, -1], [0, 1], [-1, 0], [1, 0]]) {
+              const ax = nx + adx, az = nz + adz;
+              if (ax >= 0 && ax < gridW && az >= 0 && az < gridD) {
+                const rid = ownership[az * gridW + ax];
+                if (rid !== undefined) adjRooms.add(rid);
+              }
+            }
+            if (adjRooms.size > 0) {
+              wallMesh.userData.roomIds = [...adjRooms];
+              wallMeshList.push(wallMesh);
+            }
+          }
+        }
+      }
     }
   }
 
