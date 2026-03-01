@@ -4,6 +4,10 @@ import type { Terrain } from '../Terrain';
 import { lerpAngle } from '../../utils/math';
 import { CLIMB_SPEED, MOUNT_SPEED, DISMOUNT_SPEED, CLIMB_WALL_OFFSET, STEP_UP_RATE } from './CharacterSettings';
 
+const RUNG_SPACING = 0.4;
+/** Pause at each rung (seconds) */
+const RUNG_PAUSE = 0.06;
+
 type ClimbPhase = 'face' | 'mount' | 'climb' | 'dismount';
 
 interface ClimbState {
@@ -23,6 +27,10 @@ interface ClimbState {
   cHighX: number; cHighZ: number; cHighY: number;
   /** Cliff-derived facing direction */
   cfDX: number; cfDZ: number;
+  /** Rung stepping state */
+  rungCount: number;
+  currentRung: number;
+  rungPauseTimer: number;
 }
 
 /** Owner interface — fields the climbing module reads/writes on the character. */
@@ -34,6 +42,7 @@ export interface ClimbOwner {
   velocityY: number;
   terrain: Terrain;
   updateTorch(dt: number): void;
+  playClimbStep?: () => void;
 }
 
 export class CharacterClimbing {
@@ -76,6 +85,11 @@ export class CharacterClimbing {
       cHighY - cLowY,
     ));
 
+    const dy = Math.abs(cHighY - cLowY);
+    const horizDist = Math.sqrt((cHighX - cLowX) ** 2 + (cHighZ - cLowZ) ** 2);
+    const totalLen = Math.sqrt(horizDist * horizDist + dy * dy);
+    const rungCount = Math.max(1, Math.floor(totalLen / RUNG_SPACING));
+
     this.climbState = {
       ladder,
       direction,
@@ -91,6 +105,9 @@ export class CharacterClimbing {
       cLowX, cLowZ, cLowY,
       cHighX, cHighZ, cHighY,
       cfDX, cfDZ,
+      rungCount,
+      currentRung: 0,
+      rungPauseTimer: 0,
     };
   }
 
@@ -125,6 +142,8 @@ export class CharacterClimbing {
           owner.mesh.rotation.x = cs.leanAngle;
           cs.phase = 'climb';
           cs.phaseTime = 0;
+          cs.currentRung = 0;
+          cs.rungPauseTimer = 0;
         }
         break;
       }
@@ -133,24 +152,52 @@ export class CharacterClimbing {
         const dy = Math.abs(cs.cHighY - cs.cLowY);
         const dxW = cs.cHighX - cs.cLowX;
         const dzW = cs.cHighZ - cs.cLowZ;
-        const horizDist = Math.sqrt(dxW * dxW + dzW * dzW);
-        const totalLen = Math.sqrt(horizDist * horizDist + dy * dy);
-        const climbDuration = totalLen / CLIMB_SPEED;
-        const t = Math.min(1, cs.phaseTime / climbDuration);
         const oX = cs.cfDX * CLIMB_WALL_OFFSET;
         const oZ = cs.cfDZ * CLIMB_WALL_OFFSET;
+
+        // Time per rung = distance per rung / speed
+        const horizDist = Math.sqrt(dxW * dxW + dzW * dzW);
+        const totalLen = Math.sqrt(horizDist * horizDist + dy * dy);
+        const timePerRung = (totalLen / cs.rungCount) / CLIMB_SPEED;
+
+        // Handle rung pause
+        if (cs.rungPauseTimer > 0) {
+          cs.rungPauseTimer -= dt;
+          if (cs.rungPauseTimer > 0) break;
+          // Consume leftover time
+          dt = -cs.rungPauseTimer;
+          cs.rungPauseTimer = 0;
+        }
+
+        cs.phaseTime += 0; // phaseTime already incremented at top
+        const prevRung = cs.currentRung;
+        const rungProgress = cs.phaseTime / timePerRung;
+        const nextRung = Math.min(cs.rungCount, Math.floor(rungProgress));
+
+        // Crossed a rung boundary — snap to it and pause
+        if (nextRung > prevRung && nextRung < cs.rungCount) {
+          cs.currentRung = nextRung;
+          cs.rungPauseTimer = RUNG_PAUSE;
+          owner.playClimbStep?.();
+        }
+
+        // Smoothly interpolate Y between rungs using fractional progress
+        const t = Math.min(1, rungProgress / cs.rungCount);
+        const frac = rungProgress - Math.floor(rungProgress); // 0..1 within current rung
+        const smoothFrac = frac * frac * (3 - 2 * frac); // smoothstep
+        const smoothRungT = Math.min(1, (Math.floor(rungProgress) + smoothFrac) / cs.rungCount);
 
         if (cs.direction === 'up') {
           owner.mesh.position.x = cs.cLowX + dxW * t + oX;
           owner.mesh.position.z = cs.cLowZ + dzW * t + oZ;
-          const y = cs.cLowY + dy * t;
+          const y = cs.cLowY + dy * smoothRungT;
           owner.groundY = y;
           owner.visualGroundY = y;
           owner.mesh.position.y = y;
         } else {
           owner.mesh.position.x = cs.cHighX - dxW * t + oX;
           owner.mesh.position.z = cs.cHighZ - dzW * t + oZ;
-          const y = cs.cHighY - dy * t;
+          const y = cs.cHighY - dy * smoothRungT;
           owner.groundY = y;
           owner.visualGroundY = y;
           owner.mesh.position.y = y;
@@ -161,7 +208,8 @@ export class CharacterClimbing {
         owner.mesh.rotation.y = owner.facing;
         owner.mesh.rotation.x = cs.leanAngle;
 
-        if (cs.phaseTime >= climbDuration) {
+        if (nextRung >= cs.rungCount) {
+          owner.playClimbStep?.();
           cs.phase = 'dismount';
           cs.phaseTime = 0;
         }

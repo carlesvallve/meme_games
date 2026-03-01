@@ -518,6 +518,10 @@ export class Character implements BehaviorAgent {
 
   // ── Climbing ─────────────────────────────────────────────────────
 
+  playClimbStep(): void {
+    audioSystem.sfxAt('step', this.mesh.position.x, this.mesh.position.z, 0.4);
+  }
+
   startClimb(ladder: LadderDef, direction: 'up' | 'down'): void {
     this.climbing.start(this, ladder, direction);
   }

@@ -191,18 +191,46 @@ export function computeCellHeights(
             }
           }
 
+          /** Check that a cell is open floor (uses roomHeight lookup, NOT cellHeights,
+           *  since cellHeights is still being built at this point) */
+          const isOpenCell = (cx: number, cz: number): boolean => {
+            if (cx < 0 || cx >= gridW || cz < 0 || cz >= gridD) return false;
+            return openGrid[cz * gridW + cx];
+          };
+
+          /** Check that a cell acts as a wall: closed OR belongs to a different-height room */
+          const isWallLike = (cx: number, cz: number, refH: number): boolean => {
+            if (cx < 0 || cx >= gridW || cz < 0 || cz >= gridD) return true;
+            const ci3 = cz * gridW + cx;
+            if (!openGrid[ci3]) return true;
+            // Check room height for room-owned cells, corridor height for corridor cells
+            const rid = roomOwnership[ci3];
+            const cellH = rid >= 0 && roomVisited[rid] ? roomHeight[rid] : cellHeights[ci3];
+            return Math.abs(cellH - refH) > levelH * 0.5;
+          };
+
+          const lowH = roomHeight[lowRid];
+
+          /** Validate stair: open floor at bottom & top, at least one perpendicular wall */
+          const validateStair = (sx: number, sz: number, tdx: number, tdz: number): boolean => {
+            const feetX = sx - tdx, feetZ = sz - tdz;
+            const topX = sx + tdx, topZ = sz + tdz;
+            if (!isOpenCell(feetX, feetZ)) return false;
+            if (!isOpenCell(topX, topZ)) return false;
+            // At least one perpendicular side should be wall-like
+            const perpX = tdz !== 0 ? 1 : 0;
+            const perpZ = tdx !== 0 ? 1 : 0;
+            const wallA = isWallLike(sx + perpX, sz + perpZ, lowH);
+            const wallB = isWallLike(sx - perpX, sz - perpZ, lowH);
+            if (!wallA && !wallB) return false;
+            return true;
+          };
+
           if (backGX >= 0) {
             const stairDx = gx - backGX, stairDz = gz - backGZ;
-            // Only use back-cell if stair axis matches room direction (straight corridor).
-            // For L-shapes (different axes), the stair would face a wall.
             const isStraight = (stairDx === dx && stairDz === dz);
             if (isStraight) {
-              // Validate feet: cell behind stair bottom must be open
-              const feetX = backGX - stairDx, feetZ = backGZ - stairDz;
-              const feetOpen = feetX < 0 || feetX >= gridW || feetZ < 0 || feetZ >= gridD
-                || openGrid[feetZ * gridW + feetX];
-              const topOpen = openGrid[nz * gridW + nx];
-              if (!feetOpen || !topOpen) continue;
+              if (!validateStair(backGX, backGZ, stairDx, stairDz)) continue;
 
               stairs.push({
                 gx: backGX, gz: backGZ,
@@ -215,17 +243,11 @@ export function computeCellHeights(
               usedCells.add(cellIdx);
               cellHeights[cellIdx] = roomHeight[highRid];
             } else {
-              // L-shape: skip back-cell, fall through to direct placement
               backGX = -1;
             }
           }
           if (backGX < 0) {
-            // Direct placement: stair at boundary cell ascending into room
-            const feetX = gx - dx, feetZ = gz - dz;
-            const feetOpen = feetX < 0 || feetX >= gridW || feetZ < 0 || feetZ >= gridD
-              || openGrid[feetZ * gridW + feetX];
-            const topOpen = openGrid[nz * gridW + nx];
-            if (!feetOpen || !topOpen) continue;
+            if (!validateStair(gx, gz, dx, dz)) continue;
 
             stairs.push({
               gx, gz,
