@@ -154,7 +154,16 @@ export function computeCellHeights(
 
     if (maxDiff < 0.001 || lowRid < 0) continue;
 
-    // Find a corridor cell adjacent to the high room
+    // Find a corridor cell adjacent to the high room.
+    // Place stair one cell back along the corridor so the boundary cell
+    // becomes a flat landing at upper height (room to turn on L-shaped corridors).
+    // Fallback to direct placement if no corridor cell behind.
+    const corridorCellSet = new Set<number>();
+    for (const { gx: cx, gz: cz } of ci.cells) {
+      const ci2 = cz * gridW + cx;
+      if (roomOwnership[ci2] < 0) corridorCellSet.add(ci2);
+    }
+
     let placed = false;
     for (const { gx, gz } of ci.cells) {
       if (placed) break;
@@ -168,17 +177,46 @@ export function computeCellHeights(
         if (roomOwnership[nz * gridW + nx] !== highRid) continue;
 
         if (maxDiff <= levelH * 1.1) {
-          // 1 level → stair ascending toward room
-          stairs.push({
-            gx, gz,
-            axis: dx !== 0 ? 'x' : 'z',
-            direction: (dx > 0 || dz > 0) ? 1 : -1,
-            totalHeight: stepH,
-            levelHeight: levelH,
-          });
-          usedCells.add(cellIdx);
+          // Find a corridor neighbor of (gx,gz) that isn't the room direction —
+          // that's the "previous" corridor cell where the stair should go.
+          let backGX = -1, backGZ = -1;
+          for (const [bdx, bdz] of DIRS) {
+            if (bdx === dx && bdz === dz) continue; // skip room direction
+            const bx = gx + bdx, bz = gz + bdz;
+            if (bx < 0 || bx >= gridW || bz < 0 || bz >= gridD) continue;
+            const bIdx = bz * gridW + bx;
+            if (corridorCellSet.has(bIdx) && !usedCells.has(bIdx)) {
+              backGX = bx; backGZ = bz;
+              break;
+            }
+          }
+
+          if (backGX >= 0) {
+            // Stair on the back cell, ascending toward (gx,gz)
+            const stairDx = gx - backGX, stairDz = gz - backGZ;
+            stairs.push({
+              gx: backGX, gz: backGZ,
+              axis: stairDx !== 0 ? 'x' : 'z',
+              direction: (stairDx > 0 || stairDz > 0) ? 1 : -1,
+              totalHeight: stepH,
+              levelHeight: levelH,
+            });
+            usedCells.add(backGZ * gridW + backGX);
+            usedCells.add(cellIdx);
+            // Landing cell raised to upper height
+            cellHeights[cellIdx] = roomHeight[highRid];
+          } else {
+            // Fallback: stair directly adjacent to high room
+            stairs.push({
+              gx, gz,
+              axis: dx !== 0 ? 'x' : 'z',
+              direction: (dx > 0 || dz > 0) ? 1 : -1,
+              totalHeight: stepH,
+              levelHeight: levelH,
+            });
+            usedCells.add(cellIdx);
+          }
         } else {
-          // >1 level → ladder hint
           ladderHints.push({
             lowGX: gx, lowGZ: gz,
             highGX: nx, highGZ: nz,
