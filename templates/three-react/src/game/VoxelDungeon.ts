@@ -352,7 +352,8 @@ export async function loadVoxelDungeonVisuals(
         }
         groundMeshes.push(mesh);
         groundMeshList.push(mesh);
-        // Tag with room ownership for visibility system
+        // Tag with room ownership and cell index for visibility system
+        mesh.userData.cellIndex = gz * gridW + gx;
         if (ownership) {
           mesh.userData.roomId = ownership[gz * gridW + gx];
         }
@@ -431,25 +432,38 @@ export async function loadVoxelDungeonVisuals(
       }
       if (minAdjacentH === Infinity) { minAdjacentH = 0; maxAdjacentH = 0; }
 
-      // Compute adjacent room IDs for visibility
-      const adjRooms = new Set<number>();
+      // Compute adjacent room IDs for visibility, split by height level
+      // so walls at height boundaries don't get registered under both levels
+      const adjRoomsHigh = new Set<number>();
+      const adjRoomsLow = new Set<number>();
+      const adjRoomsAll = new Set<number>();
+      const heightGap = maxAdjacentH - minAdjacentH;
+      const heightMid = (maxAdjacentH + minAdjacentH) / 2;
       if (ownership) {
         for (const [dx, dz] of [[0, -1], [0, 1], [-1, 0], [1, 0], [-1, -1], [1, -1], [-1, 1], [1, 1]]) {
           const nx = gx + dx, nz = gz + dz;
           if (nx >= 0 && nx < gridW && nz >= 0 && nz < gridD) {
             const nid = ownership[nz * gridW + nx];
-            if (nid !== undefined) adjRooms.add(nid);
+            if (nid !== undefined) {
+              adjRoomsAll.add(nid);
+              if (config.cellHeights && heightGap > wallHeight * 0.5) {
+                const nH = config.cellHeights[nz * gridW + nx];
+                if (nH >= heightMid) adjRoomsHigh.add(nid);
+                else adjRoomsLow.add(nid);
+              }
+            }
           }
         }
       }
 
       // Place wall tile at maxAdjacentH
+      const upperRoomIds = heightGap > wallHeight * 0.5 && adjRoomsHigh.size > 0 ? adjRoomsHigh : adjRoomsAll;
       const wallMesh = placeVoxReturn(wallVisualGroup, wx, wz, role, rot, wallMat, tileOverride, theme);
       if (wallMesh) {
         wallMesh.position.y = maxAdjacentH;
         wallMesh.userData.isWall = true;
-        if (ownership && adjRooms.size > 0) {
-          wallMesh.userData.roomIds = [...adjRooms];
+        if (ownership && upperRoomIds.size > 0) {
+          wallMesh.userData.roomIds = [...upperRoomIds];
           wallMeshList.push(wallMesh);
         }
       }
@@ -457,13 +471,14 @@ export async function loadVoxelDungeonVisuals(
       // If adjacent open cells span a height gap, add a lower-tier copy of the
       // same wall to fill the visual gap. Only affects this closed cell — no
       // open cells, doors, or entrances are touched.
-      if (maxAdjacentH - minAdjacentH > wallHeight * 0.5) {
+      if (heightGap > wallHeight * 0.5) {
+        const lowerRoomIds = adjRoomsLow.size > 0 ? adjRoomsLow : adjRoomsAll;
         const lowerWall = placeVoxReturn(wallVisualGroup, wx, wz, role, rot, wallMat, tileOverride, theme);
         if (lowerWall) {
           lowerWall.position.y = minAdjacentH;
           lowerWall.userData.isWall = true;
-          if (ownership && adjRooms.size > 0) {
-            lowerWall.userData.roomIds = [...adjRooms];
+          if (ownership && lowerRoomIds.size > 0) {
+            lowerWall.userData.roomIds = [...lowerRoomIds];
             wallMeshList.push(lowerWall);
           }
         }
@@ -517,6 +532,11 @@ export async function loadVoxelDungeonVisuals(
             for (const [adx, adz] of [[0, -1], [0, 1], [-1, 0], [1, 0]]) {
               const ax = nx + adx, az = nz + adz;
               if (ax >= 0 && ax < gridW && az >= 0 && az < gridD) {
+                // Filter by height: only include neighbors at similar height
+                if (config.cellHeights) {
+                  const nH = config.cellHeights[az * gridW + ax];
+                  if (Math.abs(nH - baseH) > wallHeight * 0.5) continue;
+                }
                 const rid = ownership[az * gridW + ax];
                 if (rid !== undefined) adjRooms.add(rid);
               }
@@ -534,6 +554,8 @@ export async function loadVoxelDungeonVisuals(
   // ── Pass 2d: Foundation walls under elevated floors ──
   // For every open cell above height 0, stack wall tiles downward to fill the
   // vertical gap. One column per exposed cardinal face (where neighbor is lower).
+  // All stacks inherit the room ID of the floor cell above them so they always
+  // match its visibility state (active/dimmed/hidden).
   if (config.cellHeights) {
     for (let gz = 0; gz < gridD; gz++) {
       for (let gx = 0; gx < gridW; gx++) {
@@ -544,6 +566,9 @@ export async function loadVoxelDungeonVisuals(
 
         const wx = toWorldX(gx);
         const wz = toWorldZ(gz);
+
+        // Use the floor cell's own room ID so stacks match the tile above
+        const cellRid = ownership ? ownership[idx] : undefined;
 
         for (const [dx, dz] of [[0, -1], [0, 1], [-1, 0], [1, 0]] as [number, number][]) {
           const nx = gx + dx, nz = gz + dz;
@@ -569,19 +594,10 @@ export async function loadVoxelDungeonVisuals(
             if (fMesh) {
               fMesh.position.y = y;
               fMesh.userData.isWall = true;
-              if (ownership) {
-                const adjRooms = new Set<number>();
-                for (const [adx, adz] of [[0, -1], [0, 1], [-1, 0], [1, 0]]) {
-                  const ax = gx + adx, az = gz + adz;
-                  if (ax >= 0 && ax < gridW && az >= 0 && az < gridD) {
-                    const rid = ownership[az * gridW + ax];
-                    if (rid !== undefined) adjRooms.add(rid);
-                  }
-                }
-                if (adjRooms.size > 0) {
-                  fMesh.userData.roomIds = [...adjRooms];
-                  wallMeshList.push(fMesh);
-                }
+              fMesh.userData.cellIndex = idx; // parent floor cell for stair landing lookup
+              if (cellRid !== undefined && cellRid !== -1) {
+                fMesh.userData.roomIds = [cellRid];
+                wallMeshList.push(fMesh);
               }
             }
           }

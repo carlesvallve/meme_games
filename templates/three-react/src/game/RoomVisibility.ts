@@ -34,6 +34,11 @@ export class RoomVisibility {
   // Mesh tracking: roomId → list of objects
   private roomObjects = new Map<number, THREE.Object3D[]>();
 
+  // Active-only room registrations: these room IDs can promote an object to
+  // 'active' but never to 'visited'. Used for stair peek tiles — visible when
+  // the lower level is active, but dimmed once the upper level has been visited.
+  private activeOnlyRoomObjects = new Map<number, THREE.Object3D[]>();
+
   // Material pairs: original → dim clone
   private dimClones = new Map<THREE.Material, THREE.Material>();
 
@@ -87,8 +92,10 @@ export class RoomVisibility {
     this.prevActiveKey = ''; // force re-apply
   }
 
-  /** Register a mesh (or group) under one or more room IDs */
-  registerMesh(obj: THREE.Object3D, roomIds: number[]): void {
+  /** Register a mesh (or group) under one or more room IDs.
+   *  @param activeOnlyIds Optional extra room IDs that can only promote to 'active',
+   *  never to 'visited'. Used for stair peek tiles. */
+  registerMesh(obj: THREE.Object3D, roomIds: number[], activeOnlyIds?: number[]): void {
     this.allRegistered.add(obj);
     this.prevActiveKey = ''; // force re-apply on next update
     for (const id of roomIds) {
@@ -99,6 +106,17 @@ export class RoomVisibility {
         this.roomObjects.set(id, list);
       }
       list.push(obj);
+    }
+    if (activeOnlyIds) {
+      for (const id of activeOnlyIds) {
+        if (id === -1) continue;
+        let list = this.activeOnlyRoomObjects.get(id);
+        if (!list) {
+          list = [];
+          this.activeOnlyRoomObjects.set(id, list);
+        }
+        list.push(obj);
+      }
     }
     this.storeOriginalMaterials(obj);
   }
@@ -305,6 +323,18 @@ export class RoomVisibility {
       }
     }
 
+    // Active-only rooms: can only promote hidden→active, never hidden→visited.
+    // Used for stair peek tiles — visible from below only when actively there.
+    for (const [roomId, objects] of this.activeOnlyRoomObjects) {
+      if (!this.activeRooms.has(roomId)) continue; // only contributes when active
+      for (const obj of objects) {
+        const prev = objState.get(obj);
+        if (!prev || prev === 'hidden') {
+          objState.set(obj, 'active');
+        }
+      }
+    }
+
     for (const [obj, state] of objState) {
       // Respect per-object disable flags (e.g. room labels toggled off in settings)
       if (obj.userData.labelsDisabled) { obj.visible = false; continue; }
@@ -351,6 +381,7 @@ export class RoomVisibility {
     }
     this.dimClones.clear();
     this.roomObjects.clear();
+    this.activeOnlyRoomObjects.clear();
     this.allRegistered.clear();
     this.originalMaterials.clear();
     this.visitedRooms.clear();

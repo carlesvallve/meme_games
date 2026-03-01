@@ -1784,16 +1784,21 @@ export class Terrain {
       }
 
       // Register door groups with room visibility — same as walls: use adjacent cell room IDs
+      // Filter by height similarity to avoid cross-level registration
+      const visHeightThreshold = wallVoxH * 0.5; // distinguishes level transitions from terrain unevenness
       if (this.doorSystem && this.roomVisibility && output.gridDoors) {
         const doorGroups = this.doorSystem.getDoorGroups();
         for (let i = 0; i < doorGroups.length && i < output.gridDoors.length; i++) {
           const d = output.gridDoors[i];
           const gx = Math.round(d.x);
           const gz = Math.round(d.z);
+          const cellH = cellHeightsArr[gz * gridW + gx];
           const adjRooms = new Set<number>();
           for (const [dx, dz] of [[0, -1], [0, 1], [-1, 0], [1, 0], [-1, -1], [1, -1], [-1, 1], [1, 1]]) {
             const nx = gx + dx, nz = gz + dz;
             if (nx >= 0 && nx < gridW && nz >= 0 && nz < gridD) {
+              const nH = cellHeightsArr[nz * gridW + nx];
+              if (Math.abs(nH - cellH) > visHeightThreshold) continue; // skip cross-level neighbors
               const rid = visOwnership[nz * gridW + nx];
               if (rid !== -1) adjRooms.add(rid);
             }
@@ -1802,15 +1807,51 @@ export class Terrain {
         }
       }
 
+      // Build stair dual-level map: cells that should be visible from both levels.
+      // Includes the stair cell, the landing tile at top, AND the foot tile at bottom.
+      // Maps cellIndex → extra rid (active-only) from the other level.
+      const stairDualLevel = new Map<number, number>(); // cellIdx → extra rid
+      for (const stair of stairs) {
+        const stairIdx = stair.gz * gridW + stair.gx;
+        const topGX = stair.gx + (stair.axis === 'x' ? stair.direction : 0);
+        const topGZ = stair.gz + (stair.axis === 'z' ? stair.direction : 0);
+        const botGX = stair.gx - (stair.axis === 'x' ? stair.direction : 0);
+        const botGZ = stair.gz - (stair.axis === 'z' ? stair.direction : 0);
+        if (topGX >= 0 && topGX < gridW && topGZ >= 0 && topGZ < gridD) {
+          const landingIdx = topGZ * gridW + topGX;
+          const lowerRid = visOwnership[stairIdx];
+          const upperRid = visOwnership[landingIdx];
+          // Landing tile (top): add lower-level rid so visible from below
+          if (lowerRid !== -1) stairDualLevel.set(landingIdx, lowerRid);
+          // Stair cell: add upper-level rid so visible from above
+          if (upperRid !== -1) stairDualLevel.set(stairIdx, upperRid);
+          // Foot tile (bottom): add upper-level rid so visible from above
+          if (botGX >= 0 && botGX < gridW && botGZ >= 0 && botGZ < gridD) {
+            const footIdx = botGZ * gridW + botGX;
+            if (upperRid !== -1) stairDualLevel.set(footIdx, upperRid);
+          }
+        }
+      }
+
       // Register visual meshes with room visibility system
       if (visualResult && this.roomVisibility) {
         for (const mesh of visualResult.groundMeshList) {
           const rid = mesh.userData.roomId;
-          if (rid !== undefined) this.roomVisibility.registerMesh(mesh, [rid]);
+          if (rid === undefined) continue;
+          const cellIdx = mesh.userData.cellIndex as number | undefined;
+          const extraRid = cellIdx !== undefined ? stairDualLevel.get(cellIdx) : undefined;
+          // Extra rid is active-only: can show tile as active from the other level,
+          // but won't promote to visited/dimmed (dimming follows the primary level)
+          const activeOnly = (extraRid !== undefined && extraRid !== rid) ? [extraRid] : undefined;
+          this.roomVisibility.registerMesh(mesh, [rid], activeOnly);
         }
         for (const mesh of visualResult.wallMeshList) {
           const rids = mesh.userData.roomIds as number[] | undefined;
-          if (rids && rids.length > 0) this.roomVisibility.registerMesh(mesh, rids);
+          if (!rids || rids.length === 0) continue;
+          const cellIdx = mesh.userData.cellIndex as number | undefined;
+          const extraRid = cellIdx !== undefined ? stairDualLevel.get(cellIdx) : undefined;
+          const activeOnly = (extraRid !== undefined && !rids.includes(extraRid)) ? [extraRid] : undefined;
+          this.roomVisibility.registerMesh(mesh, rids, activeOnly);
         }
       }
 
@@ -1834,17 +1875,23 @@ export class Terrain {
             const mgz = Math.floor((wz + halfW) / cellSize);
             if (mgx >= 0 && mgx < gridW && mgz >= 0 && mgz < gridD) {
               const rid = visOwnership[mgz * gridW + mgx];
+              const stairH = cellHeightsArr[mgz * gridW + mgx];
               const adjRooms = new Set<number>();
               if (rid !== -1) adjRooms.add(rid);
               for (const [dx, dz] of [[0, -1], [0, 1], [-1, 0], [1, 0]]) {
                 const nx = mgx + dx, nz = mgz + dz;
                 if (nx >= 0 && nx < gridW && nz >= 0 && nz < gridD) {
+                  const nH = cellHeightsArr[nz * gridW + nx];
+                  if (Math.abs(nH - stairH) > visHeightThreshold) continue; // skip cross-level
                   const nrid = visOwnership[nz * gridW + nx];
                   if (nrid !== -1) adjRooms.add(nrid);
                 }
               }
+              // Stairs span both levels — register under both as normal (not active-only)
+              const stairCellIdx = mgz * gridW + mgx;
+              const extraRid = stairDualLevel.get(stairCellIdx);
+              if (extraRid !== undefined) adjRooms.add(extraRid);
               const roomIds = adjRooms.size > 0 ? [...adjRooms] : undefined;
-              // Register each step mesh within this stair cell
               for (const stepMesh of stairCell.children) {
                 if (stepMesh instanceof THREE.Mesh && roomIds) {
                   this.roomVisibility.registerMesh(stepMesh, roomIds);
