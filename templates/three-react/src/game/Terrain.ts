@@ -12,7 +12,7 @@ import { DoorSystem } from './Door';
 import { generateNature, type NatureGeneratorResult } from './NatureGenerator';
 import { paletteBiome } from './ColorPalettes';
 import { buildVoxelDungeonCollision, loadVoxelDungeonVisuals } from './VoxelDungeon';
-import { computeCellHeights, buildStairMeshes, getStairCellSet, type StairDef } from './StairSystem';
+import { computeCellHeights, buildStairMeshes, getStairCellSet, type StairDef, type LadderHint } from './StairSystem';
 import { DUNGEON_VARIANTS } from './VoxDungeonDB';
 import { RoomVisibility } from './RoomVisibility';
 import { DungeonPropSystem, clearPropCache } from './DungeonProps';
@@ -151,6 +151,7 @@ export class Terrain {
   // Ladder data
   private ladderDefs: LadderDef[] = [];
   private ladderMeshes: THREE.Group[] = [];
+  private dungeonLadderHints: LadderHint[] = [];
   private rampCells: Set<number> = new Set();
 
   // NavGrid reference (set after buildNavGrid, used by getRandomPosition)
@@ -1600,6 +1601,7 @@ export class Terrain {
     this.dungeonGridD = gridD;
     this.stairMap.clear();
     for (const s of stairs) this.stairMap.set(s.gz * gridW + s.gx, s);
+    this.dungeonLadderHints = ladderHints;
 
     // Remove doors that overlap with stairs — stairs already serve as the room transition.
     // Filter both parallel arrays (gridDoors and doors) together.
@@ -1608,6 +1610,22 @@ export class Terrain {
       const gz = Math.round(output.gridDoors[i].z);
       if (gx < 0 || gx >= gridW || gz < 0 || gz >= gridD) continue;
       if (this.stairMap.has(gz * gridW + gx)) {
+        output.gridDoors.splice(i, 1);
+        output.doors.splice(i, 1);
+      }
+    }
+
+    // Remove doors that overlap with ladder hints — ladders replace doors at large height diffs
+    const ladderCells = new Set<number>();
+    for (const lh of ladderHints) {
+      ladderCells.add(lh.lowGZ * gridW + lh.lowGX);
+      ladderCells.add(lh.highGZ * gridW + lh.highGX);
+    }
+    for (let i = output.gridDoors.length - 1; i >= 0; i--) {
+      const gx = Math.round(output.gridDoors[i].x);
+      const gz = Math.round(output.gridDoors[i].z);
+      if (gx < 0 || gx >= gridW || gz < 0 || gz >= gridD) continue;
+      if (ladderCells.has(gz * gridW + gx)) {
         output.gridDoors.splice(i, 1);
         output.doors.splice(i, 1);
       }
@@ -2219,6 +2237,30 @@ export class Terrain {
       ladder.topCellGZ = top.gz;
 
       grid.addNavLink(bottom.gx, bottom.gz, top.gx, top.gz, LADDER_COST, i);
+    }
+
+    // ── Dungeon ladder hints: vertical ladders at height boundaries > 1 level ──
+    if (this.dungeonLadderHints.length > 0) {
+      const halfWorld = (this.effectiveGroundSize || this.groundSize) / 2;
+      const cs = this.dungeonCellSize;
+      for (const hint of this.dungeonLadderHints) {
+        // Convert dungeon grid coords to NavGrid coords
+        const lowWX = -halfWorld + (hint.lowGX + 0.5) * cs;
+        const lowWZ = -halfWorld + (hint.lowGZ + 0.5) * cs;
+        const highWX = -halfWorld + (hint.highGX + 0.5) * cs;
+        const highWZ = -halfWorld + (hint.highGZ + 0.5) * cs;
+
+        const lowNav = grid.worldToGrid(lowWX, lowWZ);
+        const highNav = grid.worldToGrid(highWX, highWZ);
+
+        const beforeCount = this.ladderDefs.length;
+        this.placeLadder(grid, LADDER_COST, NAV_LINK_OFFSET, lowNav.gx, lowNav.gz, highNav.gx, highNav.gz);
+        // Mark dungeon hint ladders as vertical
+        if (this.ladderDefs.length > beforeCount) {
+          this.ladderDefs[this.ladderDefs.length - 1].isVertical = true;
+        }
+      }
+      console.log(`[Terrain] Placed ${this.dungeonLadderHints.length} dungeon ladder hints`);
     }
 
     // ── NavGrid-level connectivity check ──
