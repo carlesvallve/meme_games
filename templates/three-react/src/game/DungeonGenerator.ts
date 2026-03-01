@@ -905,6 +905,23 @@ function detectCorridorDoors(
         continue; // corridor is wide or intersection — skip
       }
 
+      // Validate door placement: floor in front & behind, walls on each side.
+      // NS door (runs N-S, blocks E-W): floor east & west, walls north & south
+      // EW door (runs E-W, blocks N-S): floor north & south, walls east & west
+      if (orientation === 'NS') {
+        const floorE = gx + 1 < gridW && openGrid[gz * gridW + gx + 1];
+        const floorW = gx - 1 >= 0 && openGrid[gz * gridW + gx - 1];
+        const wallN = gz - 1 < 0 || !openGrid[(gz - 1) * gridW + gx];
+        const wallS = gz + 1 >= gridD || !openGrid[(gz + 1) * gridW + gx];
+        if (!floorE || !floorW || !wallN || !wallS) continue;
+      } else {
+        const floorN = gz - 1 >= 0 && openGrid[(gz - 1) * gridW + gx];
+        const floorS = gz + 1 < gridD && openGrid[(gz + 1) * gridW + gx];
+        const wallE = gx + 1 >= gridW || !openGrid[gz * gridW + gx + 1];
+        const wallW = gx - 1 < 0 || !openGrid[gz * gridW + gx - 1];
+        if (!floorN || !floorS || !wallE || !wallW) continue;
+      }
+
       seen.add(key);
 
       candidates.push({ x: gx, z: gz, orientation, gapWidth: 1 });

@@ -13,6 +13,8 @@ export class RoomVisibility {
   private gridD: number;
   private cellSize: number;
   private halfWorld: number;
+  private cellHeights: Float32Array | null = null;
+  private heightThreshold: number;
 
   // Door cell lookup: cellIndex → door index in DoorSystem
   private doorCellMap = new Map<number, number>();
@@ -42,6 +44,8 @@ export class RoomVisibility {
     cellSize: number,
     groundSize: number,
     gridDoors: DoorDef[],
+    cellHeights?: Float32Array,
+    heightThreshold = 0.4,
   ) {
     this.roomOwnership = roomOwnership;
     this.openGrid = openGrid;
@@ -49,6 +53,8 @@ export class RoomVisibility {
     this.gridD = gridD;
     this.cellSize = cellSize;
     this.halfWorld = groundSize / 2;
+    this.cellHeights = cellHeights ?? null;
+    this.heightThreshold = heightThreshold;
 
     // Build door cell map for flood-fill
     for (let di = 0; di < gridDoors.length; di++) {
@@ -160,6 +166,12 @@ export class RoomVisibility {
           if (!doorSystem || !doorSystem.isDoorOpen(doorIdx)) {
             continue;
           }
+        }
+
+        // Height boundary: blocks flood-fill at large height differences
+        if (this.cellHeights) {
+          const hDiff = Math.abs(this.cellHeights[nidx] - this.cellHeights[idx]);
+          if (hDiff > this.heightThreshold) continue;
         }
 
         reached.add(nidx);

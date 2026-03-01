@@ -168,6 +168,8 @@ export class Terrain {
   private dungeonGridW = 0;
   private dungeonGridD = 0;
   private stairMap: Map<number, StairDef> = new Map();
+  /** Dungeon cell indices that have ladder endpoints — cliff blocking allows movement here */
+  private ladderCellSet = new Set<number>();
 
   // Dynamic debris (e.g. doors) — checked by resolveMovement alongside static debris
   private dynamicDebris: DebrisBox[] = [];
@@ -1649,17 +1651,21 @@ export class Terrain {
       }
     }
 
-    // Remove doors that overlap with ladder hints — ladders replace doors at large height diffs
-    const ladderCells = new Set<number>();
-    for (const lh of ladderHints) {
-      ladderCells.add(lh.lowGZ * gridW + lh.lowGX);
-      ladderCells.add(lh.highGZ * gridW + lh.highGX);
-    }
+    // Remove doors at cells with large height differences — the height-based
+    // flood-fill blocking handles visibility, and doors look wrong at cliff edges.
     for (let i = output.gridDoors.length - 1; i >= 0; i--) {
       const gx = Math.round(output.gridDoors[i].x);
       const gz = Math.round(output.gridDoors[i].z);
       if (gx < 0 || gx >= gridW || gz < 0 || gz >= gridD) continue;
-      if (ladderCells.has(gz * gridW + gx)) {
+      const dh = cellHeightsArr[gz * gridW + gx];
+      let maxNeighborDiff = 0;
+      for (const [ddx, ddz] of [[0, -1], [0, 1], [-1, 0], [1, 0]] as [number, number][]) {
+        const nx = gx + ddx, nz = gz + ddz;
+        if (nx < 0 || nx >= gridW || nz < 0 || nz >= gridD) continue;
+        if (!visualOpenGrid[nz * gridW + nx]) continue;
+        maxNeighborDiff = Math.max(maxNeighborDiff, Math.abs(cellHeightsArr[nz * gridW + nx] - dh));
+      }
+      if (maxNeighborDiff > wallVoxH * 0.5) {
         output.gridDoors.splice(i, 1);
         output.doors.splice(i, 1);
       }
@@ -1708,6 +1714,7 @@ export class Terrain {
       gridW, gridD, cellSize,
       this.groundSize,
       output.gridDoors,
+      cellHeightsArr,
     );
 
     // Hide terrain group until onDungeonReady — prevents flash of unhidden rooms
@@ -1839,6 +1846,7 @@ export class Terrain {
             labelGroup.add(sprite);
           }
         }
+        labelGroup.visible = useGameStore.getState().roomLabels;
         this.group.add(labelGroup);
       }
 
@@ -1935,6 +1943,9 @@ export class Terrain {
   /** Show or hide voxel dungeon room name labels (e.g. from settings toggle). */
   setRoomLabelsVisible(visible: boolean): void {
     this.propSystem?.setRoomLabelsVisible(visible);
+    // Toggle debug grid coordinate labels
+    const labelGroup = this.group.getObjectByName('debugGridLabels');
+    if (labelGroup) labelGroup.visible = visible;
   }
 
   private createTerracedDebris(): void {
@@ -2296,6 +2307,8 @@ export class Terrain {
         if (this.ladderDefs.length > beforeCount) {
           const ld = this.ladderDefs[this.ladderDefs.length - 1];
           ld.isVertical = true;
+          this.ladderCellSet.add(hint.lowGZ * this.dungeonGridW + hint.lowGX);
+          this.ladderCellSet.add(hint.highGZ * this.dungeonGridW + hint.highGX);
 
           // Perfectly vertical: both endpoints at corridor cell XZ,
           // nudged 1.5 navgrid cells (0.375m) toward the wall.
@@ -2327,6 +2340,120 @@ export class Terrain {
         }
       }
       console.log(`[Terrain] Placed ${this.dungeonLadderHints.length} dungeon ladder hints`);
+    }
+
+    // ── Scan all adjacent open dungeon cells for height drops needing ladders ──
+    if (this.walkMask && this.cellHeights) {
+      const { openGrid, gridW, gridD, cellSize: dcs } = this.walkMask;
+      const ch = this.cellHeights;
+      const halfWorld = (this.effectiveGroundSize || this.groundSize) / 2;
+      const heightThreshold = stepHeight; // same as navgrid step threshold
+      const DIRS4: [number, number][] = [[0, -1], [0, 1], [-1, 0], [1, 0]];
+
+      // Collect all height-boundary edges as (lowIdx, highIdx, direction)
+      type Edge = { lowGX: number; lowGZ: number; highGX: number; highGZ: number; ddx: number; ddz: number };
+      const allEdges: Edge[] = [];
+      const stairCells = new Set(this.stairMap.keys());
+      const hintCells = new Set<number>();
+      for (const hint of this.dungeonLadderHints) {
+        hintCells.add(hint.lowGZ * gridW + hint.lowGX);
+        hintCells.add(hint.highGZ * gridW + hint.highGX);
+      }
+
+      for (let gz = 0; gz < gridD; gz++) {
+        for (let gx = 0; gx < gridW; gx++) {
+          const idx = gz * gridW + gx;
+          if (!openGrid[idx]) continue;
+          const h = ch[idx];
+          for (const [ddx, ddz] of DIRS4) {
+            const nx = gx + ddx, nz = gz + ddz;
+            if (nx < 0 || nx >= gridW || nz < 0 || nz >= gridD) continue;
+            const nidx = nz * gridW + nx;
+            if (!openGrid[nidx]) continue;
+            if (ch[nidx] <= h) continue; // only process low→high
+            if (Math.abs(ch[nidx] - h) < heightThreshold) continue;
+            if (stairCells.has(idx) || stairCells.has(nidx)) continue;
+            if (hintCells.has(idx) || hintCells.has(nidx)) continue;
+            allEdges.push({ lowGX: gx, lowGZ: gz, highGX: nx, highGZ: nz, ddx, ddz });
+          }
+        }
+      }
+
+      // Group connected boundary edges (same direction, adjacent along the perpendicular axis)
+      // and pick one ladder per group (the middle edge).
+      const usedEdges = new Set<number>();
+      let heightDropLadders = 0;
+
+      for (let ei = 0; ei < allEdges.length; ei++) {
+        if (usedEdges.has(ei)) continue;
+        const e = allEdges[ei];
+        // Flood-fill along perpendicular to find connected boundary cells
+        const group: number[] = [ei];
+        usedEdges.add(ei);
+        const perpX = e.ddz !== 0 ? 1 : 0; // perpendicular axis
+        const perpZ = e.ddx !== 0 ? 1 : 0;
+        // BFS along perp direction
+        const queue = [ei];
+        while (queue.length > 0) {
+          const ci = queue.pop()!;
+          const ce = allEdges[ci];
+          for (let ej = 0; ej < allEdges.length; ej++) {
+            if (usedEdges.has(ej)) continue;
+            const ne = allEdges[ej];
+            if (ne.ddx !== e.ddx || ne.ddz !== e.ddz) continue; // same direction
+            const dlx = ne.lowGX - ce.lowGX, dlz = ne.lowGZ - ce.lowGZ;
+            if (Math.abs(dlx * perpX + dlz * perpZ) === 1 &&
+                Math.abs(dlx * (1 - perpX) + dlz * (1 - perpZ)) === 0) {
+              usedEdges.add(ej);
+              group.push(ej);
+              queue.push(ej);
+            }
+          }
+        }
+
+        // Pick middle edge of the group
+        const mid = allEdges[group[Math.floor(group.length / 2)]];
+        const lowWX = -halfWorld + (mid.lowGX + 0.5) * dcs;
+        const lowWZ = -halfWorld + (mid.lowGZ + 0.5) * dcs;
+        const highWX = -halfWorld + (mid.highGX + 0.5) * dcs;
+        const highWZ = -halfWorld + (mid.highGZ + 0.5) * dcs;
+
+        const bottomNav = grid.worldToGrid(lowWX, lowWZ);
+        const topNav = grid.worldToGrid(highWX, highWZ);
+
+        const beforeCount = this.ladderDefs.length;
+        this.placeLadder(grid, LADDER_COST, NAV_LINK_OFFSET, bottomNav.gx, bottomNav.gz, topNav.gx, topNav.gz);
+
+        if (this.ladderDefs.length > beforeCount) {
+          const ld = this.ladderDefs[this.ladderDefs.length - 1];
+          ld.isVertical = true;
+          this.ladderCellSet.add(mid.lowGZ * gridW + mid.lowGX);
+          this.ladderCellSet.add(mid.highGZ * gridW + mid.highGX);
+
+          const navCell = 0.25;
+          const ladderX = lowWX + mid.ddx * navCell * 1.5;
+          const ladderZ = lowWZ + mid.ddz * navCell * 1.5;
+          ld.lowWorldX = ladderX;
+          ld.lowWorldZ = ladderZ;
+          ld.highWorldX = ladderX;
+          ld.highWorldZ = ladderZ;
+          ld.bottomX = ladderX;
+          ld.bottomZ = ladderZ;
+
+          const meshIdx = this.ladderDefs.length - 1;
+          if (this.ladderMeshes[meshIdx]) {
+            this.ladderMeshes[meshIdx].traverse((child) => {
+              if ((child as THREE.Mesh).geometry) (child as THREE.Mesh).geometry.dispose();
+            });
+            this.group.remove(this.ladderMeshes[meshIdx]);
+          }
+          this.createSingleLadderMesh(meshIdx);
+          heightDropLadders++;
+        }
+      }
+      if (heightDropLadders > 0) {
+        console.log(`[Terrain] Placed ${heightDropLadders} height-drop ladders (from ${allEdges.length} boundary edges)`);
+      }
     }
 
     // ── NavGrid-level connectivity check ──
@@ -2994,6 +3121,33 @@ export class Terrain {
 
     // Box-based: iterative push-out (static + dynamic debris)
     ({ x: rx, z: rz } = this.pushOutOfDebris(rx, rz, currentY, stepHeight, radius));
+
+    // Cliff blocking for dungeons: prevent walking across height boundaries
+    if (this.cellHeights && this.walkMask && oldX !== undefined && oldZ !== undefined) {
+      const hw = (this.effectiveGroundSize || this.groundSize) / 2;
+      const dcs = this.dungeonCellSize;
+      const gw = this.dungeonGridW;
+      const gd = this.dungeonGridD;
+      const oldGX = Math.floor((oldX + hw) / dcs);
+      const oldGZ = Math.floor((oldZ + hw) / dcs);
+      const newGX = Math.floor((rx + hw) / dcs);
+      const newGZ = Math.floor((rz + hw) / dcs);
+      if (oldGX >= 0 && oldGX < gw && oldGZ >= 0 && oldGZ < gd &&
+          newGX >= 0 && newGX < gw && newGZ >= 0 && newGZ < gd &&
+          (oldGX !== newGX || oldGZ !== newGZ)) {
+        const oldIdx = oldGZ * gw + oldGX;
+        const newIdx = newGZ * gw + newGX;
+        const oldH = this.cellHeights[oldIdx];
+        const newH = this.cellHeights[newIdx];
+        // Allow movement onto/off stair cells — stairs handle the height transition.
+        // Ladder cells are NOT exempted: cliff blocking triggers the ladder climb.
+        if (Math.abs(newH - oldH) > stepHeight &&
+            !this.stairMap.has(oldIdx) && !this.stairMap.has(newIdx)) {
+          // Block: stay at old position
+          return { x: oldX, z: oldZ, y: currentY };
+        }
+      }
+    }
 
     const terrainY = this.getTerrainY(rx, rz, radius * 0.5);
     const y = terrainY - currentY <= stepHeight ? terrainY : currentY;
