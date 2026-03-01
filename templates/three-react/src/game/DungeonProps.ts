@@ -469,6 +469,9 @@ export class DungeonPropSystem {
   private cellSize = 0.75;
   private torchLights: { light: THREE.PointLight; baseIntensity: number; phase: number }[] = [];
   private torchTime = 0;
+  /** All point lights in the dungeon (torches + portals) for proximity culling */
+  private allLights: THREE.PointLight[] = [];
+  private static readonly MAX_ACTIVE_LIGHTS = 6;
   private potionSystem: PotionEffectSystem | null = null;
   /** Positions of destroyed props — tracked for serialization */
   private destroyedPositions: Array<{ x: number; z: number }> = [];
@@ -522,6 +525,7 @@ export class DungeonPropSystem {
     light.castShadow = false;
     mesh.add(light);
     this.torchLights.push({ light, baseIntensity: intensity, phase: Math.random() * Math.PI * 2 });
+    this.allLights.push(light);
   }
 
   async populate(
@@ -1260,13 +1264,59 @@ export class DungeonPropSystem {
     for (const l of this.labels) l.visible = false;
   }
 
-  /** Update torch light flickering — call once per frame. */
-  update(dt: number): void {
+  /** Remove a point light attached to a prop mesh from all tracking arrays. */
+  private removeLightFromProp(mesh: THREE.Mesh): void {
+    const light = mesh.children.find(c => c instanceof THREE.PointLight) as THREE.PointLight | undefined;
+    if (!light) return;
+    const tlIdx = this.torchLights.findIndex(t => t.light === light);
+    if (tlIdx >= 0) this.torchLights.splice(tlIdx, 1);
+    const alIdx = this.allLights.indexOf(light);
+    if (alIdx >= 0) this.allLights.splice(alIdx, 1);
+    mesh.remove(light);
+    light.dispose();
+  }
+
+  /** Update torch light flickering and proximity culling — call once per frame. */
+  update(dt: number, playerPos?: THREE.Vector3): void {
+    // ── Proximity light culling: enable only the N closest lights to the player ──
+    // Also respect room visibility: lights whose parent torch mesh is hidden or
+    // in a visited (dimmed) room stay disabled.
+    if (playerPos) {
+      const _wpos = new THREE.Vector3();
+      const sorted = this.allLights
+        .map((light) => {
+          light.getWorldPosition(_wpos);
+          const dx = _wpos.x - playerPos.x;
+          const dz = _wpos.z - playerPos.z;
+          // Light is room-disabled if parent is hidden OR light was dimmed by room visibility
+          const roomDisabled = (light.parent && !light.parent.visible) || light.userData.roomDimmed === true;
+          return { light, dist2: dx * dx + dz * dz, roomDisabled };
+        })
+        .sort((a, b) => a.dist2 - b.dist2);
+
+      let activeCount = 0;
+      for (const entry of sorted) {
+        if (entry.roomDisabled) {
+          entry.light.visible = false;
+        } else if (activeCount < DungeonPropSystem.MAX_ACTIVE_LIGHTS) {
+          entry.light.visible = true;
+          activeCount++;
+        } else {
+          entry.light.visible = false;
+        }
+      }
+    } else {
+      for (const light of this.allLights) {
+        light.visible = !light.userData.roomDimmed && (light.parent ? light.parent.visible : true);
+      }
+    }
+
+    // ── Torch flickering ──
     if (this.torchLights.length === 0) return;
     this.torchTime += dt * 12;
     const flickerAmount = 0.15;
     for (const t of this.torchLights) {
-      if (!t.light.parent || !t.light.parent.visible) continue;
+      if (!t.light.visible || !t.light.parent || !t.light.parent.visible) continue;
       const time = this.torchTime + t.phase;
       const flicker = 1 + (
         Math.sin(time) * 0.5 +
@@ -1449,13 +1499,7 @@ export class DungeonPropSystem {
       const sortedRemove = [...toRemove].sort((a, b) => b - a);
       for (const idx of sortedRemove) {
         const p = this.props[idx];
-        const light = p.mesh.children.find(c => c instanceof THREE.PointLight) as THREE.PointLight | undefined;
-        if (light) {
-          const tlIdx = this.torchLights.findIndex(t => t.light === light);
-          if (tlIdx >= 0) this.torchLights.splice(tlIdx, 1);
-          p.mesh.remove(light);
-          light.dispose();
-        }
+        this.removeLightFromProp(p.mesh);
         this.parent.remove(p.mesh);
         if (p.mesh.material instanceof THREE.Material) p.mesh.material.dispose();
         this.props.splice(idx, 1);
@@ -1748,6 +1792,7 @@ export class DungeonPropSystem {
       const light = new THREE.PointLight(lightColor, 8, cellSize * 6, 1.5);
       light.position.set(wx, getFloorY(cell.gx, cell.gz) + wallHeight * 0.5, wz);
       this.parent.add(light);
+      this.allLights.push(light);
 
       // Debug: visible glowing sphere so we can spot entrance/exit
       const bulbGeo = new THREE.SphereGeometry(0.12, 8, 8);
@@ -1832,6 +1877,8 @@ export class DungeonPropSystem {
       (prop.potionLabel.material as THREE.SpriteMaterial).map?.dispose();
       (prop.potionLabel.material as THREE.SpriteMaterial).dispose();
     }
+    // Clean up any attached light
+    this.removeLightFromProp(prop.mesh);
     prop.entity.destroy();
     this.parent.remove(prop.mesh);
     (prop.mesh.material as THREE.Material).dispose();
@@ -1860,6 +1907,8 @@ export class DungeonPropSystem {
     // Track destroyed position for serialization
     this.destroyedPositions.push({ x: pos.x, z: pos.z });
 
+    // Clean up any attached light
+    this.removeLightFromProp(prop.mesh);
     prop.entity.destroy();
     this.parent.remove(prop.mesh);
     (prop.mesh.material as THREE.Material).dispose();

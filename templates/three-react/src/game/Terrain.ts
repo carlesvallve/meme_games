@@ -2574,8 +2574,8 @@ export class Terrain {
   }
 
   /** Update prop animations (torch flickering etc.) — call once per frame. */
-  updateProps(dt: number): void {
-    this.propSystem?.update(dt);
+  updateProps(dt: number, playerPos?: THREE.Vector3): void {
+    this.propSystem?.update(dt, playerPos);
   }
 
   /** Get the dungeon prop system (if any) — used by PropDestructionSystem */

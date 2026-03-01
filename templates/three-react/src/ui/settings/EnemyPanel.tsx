@@ -19,7 +19,7 @@ export function EnemyPanel() {
     <SettingsWindow>
       <Section label="Spawn" accent={accent} first>
         <Slider label="Enemy Density" value={ep.enemyDensity} min={0} max={0.08} step={0.005} accent={accent} onChange={(v) => set('enemyDensity', v)} />
-        <Slider label="Respawn Time" value={ep.spawnInterval} min={2} max={60} step={1} accent={accent} onChange={(v) => set('spawnInterval', v)} />
+        <Slider label="Respawn Time" value={ep.spawnInterval} min={0} max={60} step={1} accent={accent} onChange={(v) => set('spawnInterval', v)} />
         <MultiSelect
           label="Types"
           options={enemyTypeOptions}

@@ -469,8 +469,13 @@ export class EnemySystem {
 
       // In dungeons, skip ALL processing for enemies outside the active flood-fill area
       // UNLESS they are currently chasing (chase memory timer still running)
-      if (roomVis && !roomVis.isPositionActive(ex, ez) && !enemy.isCurrentlyChasing()) {
+      const isChasing = enemy.isCurrentlyChasing();
+      if (roomVis && !roomVis.isPositionActive(ex, ez) && !isChasing) {
+        enemy.mesh.visible = false;
         continue;
+      }
+      if (roomVis && !enemy.mesh.visible) {
+        enemy.mesh.visible = true;
       }
 
       let shouldChase = false;

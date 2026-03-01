@@ -198,10 +198,12 @@ export class LootSystem {
 
   spawnLoot(position: THREE.Vector3): void {
     const count = 2 + Math.floor(Math.random() * 3); // 2-4 items
+    let potionSpawned = false;
 
     for (let i = 0; i < count; i++) {
-      const isCoin = Math.random() < 0.7;
+      const isCoin = potionSpawned || Math.random() < 0.8; // max 1 potion per drop, 20% chance
       const type: 'coin' | 'potion' = isCoin ? 'coin' : 'potion';
+      if (!isCoin) potionSpawned = true;
 
       const colorIndex = Math.floor(Math.random() * 8);
       const geo = isCoin ? this.coinGeo : this.getPotionGeo(colorIndex);

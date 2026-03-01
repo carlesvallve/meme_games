@@ -27,6 +27,7 @@ import { entityRegistry } from './Entity';
 import type { GameInstance } from '../types';
 import type { LevelSnapshot } from './LevelState';
 import { PotionEffectSystem } from './PotionEffectSystem';
+import { findPath } from './AStar';
 import { PotionVFX } from './PotionVFX';
 
 /** Nav cell size: 0.25m for all presets. */
@@ -306,12 +307,37 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       useGameStore.getState().setCurrentTheme(opts.themeOverride);
     }
 
-    // Rebuild with optional seed
-    terrain = new Terrain(scene, terrainPreset, heightmapStyle, palPick, opts.seed);
+    // Rebuild with optional seed — dungeons validate entrance→exit path, retry if unsolvable
+    const MAX_DUNGEON_RETRIES = 10;
+    let retrySeed = opts.seed;
+    for (let attempt = 0; attempt <= MAX_DUNGEON_RETRIES; attempt++) {
+      if (attempt > 0) {
+        terrain.dispose();
+        scene.remove(terrain.group);
+        entityRegistry.clear();
+        retrySeed = undefined; // random seed on retry
+      }
+      terrain = new Terrain(scene, terrainPreset, heightmapStyle, palPick, retrySeed);
+      navGrid = terrain.buildNavGrid(pp.stepHeight, pp.capsuleRadius, navCellForPreset(terrainPreset), pp.slopeHeight);
+
+      // Validate dungeon: entrance must be pathable to exit
+      if (terrainPreset === 'voxelDungeon') {
+        const entrance = terrain.getEntrancePosition();
+        const exit = terrain.getExitPosition();
+        if (entrance && exit) {
+          const result = findPath(navGrid, entrance.x, entrance.z, exit.x, exit.z);
+          if (!result.found) {
+            console.log(`[Game] dungeon attempt ${attempt + 1} unsolvable — retrying`);
+            continue;
+          }
+        }
+      }
+      break; // valid or non-dungeon
+    }
+
     cam.terrainMesh = terrain.getTerrainMesh();
     useGameStore.getState().setPaletteActive(terrain.getPaletteName());
     sceneSky.setPalette(terrain.getPaletteName());
-    navGrid = terrain.buildNavGrid(pp.stepHeight, pp.capsuleRadius, navCellForPreset(terrainPreset), pp.slopeHeight);
     useGameStore.getState().setWalkableCells(navGrid.getWalkableCellCount());
     terrain.setGridOpacity(useGameStore.getState().gridOpacity);
     // Get player spawn position for exclusion zone (avoid spawning collectibles inside magnet radius)
@@ -1019,7 +1045,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     } else {
       const ep = useGameStore.getState().enemyParams;
       const walkableCells = navGrid.getWalkableCellCount();
-      const maxEnemies = Math.min(ep.maxEnemies, Math.max(1, Math.round(walkableCells * ep.enemyDensity)));
+      const maxEnemies = ep.enemyDensity <= 0 ? 0 : Math.min(ep.maxEnemies, Math.max(1, Math.round(walkableCells * ep.enemyDensity)));
       // Spawn ~half upfront, let the rest trickle in via wave spawning
       const initialCount = Math.max(1, Math.floor(maxEnemies * 0.5));
       if (maxEnemies > 0) {
@@ -1081,7 +1107,9 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       if (result.effect === 'heal') {
         const s = useGameStore.getState();
         const healAmount = 1 + Math.floor(Math.random() * 4); // 1-4 HP
-        s.setHP(Math.min(s.hp + healAmount, s.maxHp), s.maxHp);
+        const newHp = Math.min(s.hp + healAmount, s.maxHp);
+        s.setHP(newHp, s.maxHp);
+        activeCharacter.hp = newHp;
         potionVFX.spawnHealNumber(activeCharacter, healAmount);
       }
 
@@ -1269,6 +1297,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
             if (s.phase === 'player_dead') continue;
             const newHp = Math.max(0, s.hp - 1);
             s.setHP(newHp, s.maxHp);
+            playerChar.hp = newHp;
             potionVFX.spawnPoisonTick(playerChar);
             if (newHp <= 0) triggerPlayerDeath(playerChar);
           }
@@ -1401,6 +1430,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
             if (potionSystem.isShadow) potionSystem.breakShadow();
             const newHp = Math.max(0, s.hp - finalDamage);
             s.setHP(newHp, s.maxHp);
+            playerChar.hp = newHp;
             if (newHp <= 0) {
               triggerPlayerDeath(playerChar);
             }
@@ -1689,7 +1719,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
 
     update(dt);
     terrain.updateWater(dt, renderer, scene, cam.camera);
-    terrain.updateProps(dt);
+    terrain.updateProps(dt, activeCharacter?.mesh.position);
 
     // Update fade animation
     postProcess.updateFade(dt);
