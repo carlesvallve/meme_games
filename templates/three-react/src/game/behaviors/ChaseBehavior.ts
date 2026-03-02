@@ -80,6 +80,8 @@ export class ChaseBehavior extends Behavior {
       if (this.attackCooldownTimer <= 0) {
         this.state = 'attack';
         this.attackCooldownTimer = this.attackCooldown;
+      } else {
+        this.state = 'idle'; // cooling down — don't signal attack
       }
       this.waypoints = [];
       this.waypointIndex = 0;

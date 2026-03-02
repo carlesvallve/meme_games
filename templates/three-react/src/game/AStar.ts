@@ -180,10 +180,10 @@ export function findPath(
       // Debug: log if path uses any ladders
       const ladderSteps = meta.filter(m => m.ladderIndex !== null);
       if (ladderSteps.length > 0) {
-        console.log(`[A*] Path uses ${ladderSteps.length} ladder(s):`, ladderSteps.map((m, i) => {
-          const idx = meta.indexOf(m);
-          return `wp${idx}: ladder${m.ladderIndex} ${m.climbDirection}`;
-        }));
+        // console.log(`[A*] Path uses ${ladderSteps.length} ladder(s):`, ladderSteps.map((m, i) => {
+        //   const idx = meta.indexOf(m);
+        //   return `wp${idx}: ladder${m.ladderIndex} ${m.climbDirection}`;
+        // }));
       }
 
       return { found: true, path: worldPath, rawPath: worldPath, meta };

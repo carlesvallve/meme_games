@@ -41,6 +41,14 @@ export class CharacterCombat {
   private originalEmissive = new THREE.Color(0, 0, 0);
   private originalEmissiveIntensity = 0;
 
+  // Combo: alternate swing direction by mirroring mesh on X
+  private comboFlipped = false;
+
+  // Lunge: push character forward during attack
+  private lungeDist = 0; // current lunge offset
+  private lungeDir = { x: 0, z: 0 }; // facing direction at attack start
+  private static readonly LUNGE_MAX = 0.15; // max forward push in world units
+
   /** Fraction of attack duration for time-based fallback when VOX action has no frames. */
   private static readonly MELEE_HIT_WINDOW_RATIO = 0.5;
 
@@ -104,6 +112,16 @@ export class CharacterCombat {
       this.exhaustTimer = owner.params.exhaustDuration;
       this.attackCount = 0;
     }
+
+    // Combo: alternate swing direction on even attacks (mirror mesh on X)
+    this.comboFlipped = this.attackCount % 2 === 0;
+    owner.mesh.scale.x = this.comboFlipped ? -Math.abs(owner.mesh.scale.x) : Math.abs(owner.mesh.scale.x);
+
+    // Lunge: store facing direction, lunge will be applied in update
+    const facing = owner.mesh.rotation.y;
+    this.lungeDir.x = -Math.sin(facing);
+    this.lungeDir.z = -Math.cos(facing);
+    this.lungeDist = 0;
 
     owner.playActionAnim();
     return true;
@@ -183,13 +201,35 @@ export class CharacterCombat {
       }
     }
 
-    // Attack timer
+    // Attack timer + lunge
     if (this.isAttacking) {
       this.attackTimer -= dt;
+      const dur = owner.params.attackDuration;
+      const t = 1 - Math.max(0, this.attackTimer) / dur; // 0→1 over attack
+
+      // Lunge: quick forward push in first half, pull back in second half
+      const prevLunge = this.lungeDist;
+      if (t < 0.5) {
+        // Ease-out push: fast start, decelerate
+        const lt = t / 0.5;
+        this.lungeDist = CharacterCombat.LUNGE_MAX * (1 - (1 - lt) * (1 - lt));
+      } else {
+        // Ease-in pull back
+        const lt = (t - 0.5) / 0.5;
+        this.lungeDist = CharacterCombat.LUNGE_MAX * (1 - lt * lt);
+      }
+      const lungeDelta = this.lungeDist - prevLunge;
+      owner.mesh.position.x += this.lungeDir.x * lungeDelta;
+      owner.mesh.position.z += this.lungeDir.z * lungeDelta;
+
       if (this.attackTimer <= 0) {
         this.isAttacking = false;
         this.attackTimer = 0;
         this.attackHitApplied = false;
+        // Reset combo flip
+        owner.mesh.scale.x = Math.abs(owner.mesh.scale.x);
+        this.comboFlipped = false;
+        this.lungeDist = 0;
       }
     }
 

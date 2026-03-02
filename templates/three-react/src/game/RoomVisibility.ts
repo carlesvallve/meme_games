@@ -48,6 +48,9 @@ export class RoomVisibility {
   // All registered objects (for hiding unprocessed ones)
   private allRegistered = new Set<THREE.Object3D>();
 
+  // Cell count per visibility area (roomId → number of open cells)
+  readonly cellsPerArea = new Map<number, number>();
+
   constructor(
     roomOwnership: number[],
     openGrid: boolean[],
@@ -76,6 +79,13 @@ export class RoomVisibility {
       const gx = Math.round(door.x);
       const gz = Math.round(door.z);
       this.doorCellMap.set(gz * gridW + gx, di);
+    }
+
+    // Count open cells per visibility area
+    for (let i = 0; i < roomOwnership.length; i++) {
+      const rid = roomOwnership[i];
+      if (rid === -1 || !openGrid[i]) continue;
+      this.cellsPerArea.set(rid, (this.cellsPerArea.get(rid) ?? 0) + 1);
     }
   }
 

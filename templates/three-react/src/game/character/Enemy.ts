@@ -12,7 +12,7 @@ import type { CharacterType } from './characters';
 import { useGameStore, type EnemyParams } from '../../store';
 
 /** How long an enemy keeps chasing after losing sight of the player */
-const CHASE_MEMORY = 4.0;
+const CHASE_MEMORY = 2.0;
 
 export class Enemy extends Character {
   private chaseBehavior: ChaseBehavior | null = null;

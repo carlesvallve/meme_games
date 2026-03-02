@@ -130,29 +130,44 @@ interface DamageNumber {
   baseScaleY: number;
 }
 
-function createDamageNumber(scene: THREE.Scene, x: number, y: number, z: number, amount: number, dirX = 0, dirZ = 0): DamageNumber {
+function createDamageNumber(scene: THREE.Scene, x: number, y: number, z: number, amount: number, dirX = 0, dirZ = 0, isCrit = false): DamageNumber {
   const canvas = document.createElement('canvas');
-  canvas.width = 64;
-  canvas.height = 32;
+  canvas.width = isCrit ? 128 : 64;
+  canvas.height = isCrit ? 48 : 32;
   const ctx = canvas.getContext('2d')!;
-  ctx.font = 'bold 24px monospace';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillStyle = '#ff4444';
-  ctx.strokeStyle = '#000';
-  ctx.lineWidth = 3;
-  ctx.strokeText(`${amount}`, 32, 16);
-  ctx.fillText(`${amount}`, 32, 16);
+  if (isCrit) {
+    // Crit: larger, yellow-orange text with "CRIT" label
+    ctx.font = 'bold 32px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#ffaa22';
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 4;
+    const text = `${amount}!`;
+    ctx.strokeText(text, 64, 24);
+    ctx.fillText(text, 64, 24);
+  } else {
+    ctx.font = 'bold 24px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#ff4444';
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 3;
+    ctx.strokeText(`${amount}`, 32, 16);
+    ctx.fillText(`${amount}`, 32, 16);
+  }
 
   const texture = new THREE.CanvasTexture(canvas);
   const mat = new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false });
   const sprite = new THREE.Sprite(mat);
   sprite.position.set(x, y + 0.5, z);
-  sprite.scale.set(0.4, 0.2, 1);
+  const scaleX = isCrit ? 0.6 : 0.4;
+  const scaleY = isCrit ? 0.3 : 0.2;
+  sprite.scale.set(scaleX, scaleY, 1);
   sprite.renderOrder = 1002;
   scene.add(sprite);
 
-  return { sprite, age: 0, lifetime: 1.6, startY: y + 0.5, startX: x, startZ: z, dirX, dirZ, baseScaleX: 0.4, baseScaleY: 0.2 };
+  return { sprite, age: 0, lifetime: isCrit ? 2.0 : 1.6, startY: y + 0.5, startX: x, startZ: z, dirX, dirZ, baseScaleX: scaleX, baseScaleY: scaleY };
 }
 
 // ── Hit spark particles ──────────────────────────────────────────────
@@ -241,6 +256,23 @@ export class EnemySystem {
   private spawnInterval = 0; // 0 = disabled
   private maxEnemies = 0;
 
+  /** Staggered spawn queue: enemies spawn one-by-one with cooldowns */
+  private pendingSpawns = 0;
+  private staggerCooldown = 0;
+  private static readonly STAGGER_MIN = 2.0; // min seconds between spawns
+  private static readonly STAGGER_MAX = 5.0; // max seconds between spawns
+
+  /** Level transition exclusion zones (stairs + ladders world positions) */
+  private transitionExclusions: { x: number; z: number }[] = [];
+
+  // ── Crit chain dash state ──
+  private static readonly CRIT_CHANCE = 0.20; // 20% chance
+  private static readonly CRIT_RANGE_SQ = 4 * 4; // max range to find chain targets
+  private static readonly CRIT_CHAIN_MAX = 3; // max hits per chain
+  private static readonly CRIT_DASH_SPEED = 16; // world units/s dash speed
+  private static readonly CRIT_DASH_STOP_DIST = 0.4; // stop this far from enemy
+  private critChain: { targets: Enemy[]; index: number; dashing: boolean } | null = null;
+
   constructor(
     scene: THREE.Scene,
     terrain: Terrain,
@@ -277,9 +309,14 @@ export class EnemySystem {
     this.potionSystem = ps;
   }
 
+  /** Queue enemies for staggered spawning (one-by-one with cooldowns) */
   spawnEnemies(count: number): void {
-    for (let i = 0; i < count; i++) {
+    this.pendingSpawns += count;
+    // Spawn the very first enemy immediately so the level isn't empty
+    if (this.enemies.length === 0 && this.pendingSpawns > 0) {
       this.spawnOneEnemy();
+      this.pendingSpawns--;
+      this.staggerCooldown = EnemySystem.STAGGER_MIN + Math.random() * (EnemySystem.STAGGER_MAX - EnemySystem.STAGGER_MIN);
     }
   }
 
@@ -290,7 +327,13 @@ export class EnemySystem {
     this.spawnTimer = interval * 0.5; // first wave arrives sooner
   }
 
+  /** Set level transition exclusion zones (stairs + ladders) so enemies don't spawn near them */
+  setTransitionExclusions(positions: { x: number; z: number }[]): void {
+    this.transitionExclusions = positions;
+  }
+
   private static readonly MIN_ENTRANCE_DIST_SQ = 5 * 5; // min distance from entrance
+  private static readonly MIN_TRANSITION_DIST_SQ = 3 * 3; // min distance from stairs/ladders
   private playerExcludeX = 0;
   private playerExcludeZ = 0;
   private playerExcludeDistSq = 0;
@@ -302,14 +345,45 @@ export class EnemySystem {
     this.playerExcludeDistSq = radius * radius;
   }
 
+  /** Check if a position is too close to any level transition (stairs/ladders) */
+  private isNearTransition(x: number, z: number): boolean {
+    for (const t of this.transitionExclusions) {
+      const dx = x - t.x, dz = z - t.z;
+      if (dx * dx + dz * dz < EnemySystem.MIN_TRANSITION_DIST_SQ) return true;
+    }
+    return false;
+  }
+
+  /** Count living enemies per visibility area */
+  private countEnemiesPerArea(roomVis: import('./RoomVisibility').RoomVisibility): Map<number, number> {
+    const counts = new Map<number, number>();
+    for (const enemy of this.enemies) {
+      if (!enemy.isAlive) continue;
+      const rid = roomVis.getRoomAtWorld(enemy.mesh.position.x, enemy.mesh.position.z);
+      if (rid !== -1) counts.set(rid, (counts.get(rid) ?? 0) + 1);
+    }
+    return counts;
+  }
+
+  /** Max enemies allowed in a visibility area based on its cell count and enemyDensity */
+  private getAreaEnemyCap(roomVis: import('./RoomVisibility').RoomVisibility, areaId: number): number {
+    const cellCount = roomVis.cellsPerArea.get(areaId) ?? 0;
+    const density = useGameStore.getState().enemyParams.enemyDensity;
+    // At least 1 enemy per area, cap proportional to cell count
+    return Math.max(1, Math.round(cellCount * density));
+  }
+
   private spawnOneEnemy(): void {
     const roomVis = this.terrain.getRoomVisibility();
     const entrance = this.terrain.getEntrancePosition();
     const ex = entrance?.x ?? 0, ez = entrance?.z ?? 0;
     const hasEntrance = entrance !== null;
 
-    // Try to spawn away from player's active area and away from entrance
-    for (let attempt = 0; attempt < 15; attempt++) {
+    // Pre-compute enemy counts per area for density cap check
+    const areaCounts = roomVis ? this.countEnemiesPerArea(roomVis) : null;
+
+    // Try to spawn away from player's active area, entrance, and level transitions
+    for (let attempt = 0; attempt < 20; attempt++) {
       const pos = this.terrain.getRandomPosition(5);
       if (roomVis && roomVis.isPositionActive(pos.x, pos.z)) continue;
       if (hasEntrance) {
@@ -321,18 +395,182 @@ export class EnemySystem {
         const dx = pos.x - this.playerExcludeX, dz = pos.z - this.playerExcludeZ;
         if (dx * dx + dz * dz < this.playerExcludeDistSq) continue;
       }
+      // Avoid spawning near stairs/ladders so player doesn't face enemies on level change
+      if (this.isNearTransition(pos.x, pos.z)) continue;
+      // Per-area density cap: don't overpopulate any single visibility area
+      if (roomVis && areaCounts) {
+        const rid = roomVis.getRoomAtWorld(pos.x, pos.z);
+        if (rid !== -1) {
+          const current = areaCounts.get(rid) ?? 0;
+          const cap = this.getAreaEnemyCap(roomVis, rid);
+          if (current >= cap) continue;
+        }
+      }
       const enemy = new Enemy(this.scene, this.terrain, this.navGrid, pos, this.ladderDefs);
       enemy.initChaseBehavior(this.navGrid, this.ladderDefs, !!roomVis);
       if (roomVis) enemy.mesh.visible = false; // hidden until room visibility processes it
       this.enemies.push(enemy);
+      // Update area counts for subsequent spawns in same frame
+      if (roomVis && areaCounts) {
+        const rid = roomVis.getRoomAtWorld(pos.x, pos.z);
+        if (rid !== -1) areaCounts.set(rid, (areaCounts.get(rid) ?? 0) + 1);
+      }
       return;
     }
-    // Fallback: spawn anywhere (but still respect entrance distance if possible)
+    // Fallback: spawn anywhere (skip if all areas are at capacity)
     const pos = this.terrain.getRandomPosition(5);
+    if (roomVis) {
+      const rid = roomVis.getRoomAtWorld(pos.x, pos.z);
+      if (rid !== -1 && areaCounts) {
+        const current = areaCounts.get(rid) ?? 0;
+        const cap = this.getAreaEnemyCap(roomVis, rid);
+        if (current >= cap) return; // all areas full, skip this spawn
+      }
+    }
     const enemy = new Enemy(this.scene, this.terrain, this.navGrid, pos, this.ladderDefs);
     enemy.initChaseBehavior(this.navGrid, this.ladderDefs, !!roomVis);
     if (roomVis) enemy.mesh.visible = false;
     this.enemies.push(enemy);
+  }
+
+  /** Check if crit chain is currently active */
+  get isCritChainActive(): boolean { return this.critChain !== null; }
+
+  /** Try to start a crit chain (called on melee attack start). Returns true if crit triggers. */
+  tryCritChain(playerChar: Character): boolean {
+    if (this.critChain) return false; // already in chain
+    if (Math.random() >= EnemySystem.CRIT_CHANCE) return false;
+
+    const px = playerChar.mesh.position.x;
+    const pz = playerChar.mesh.position.z;
+
+    // Find nearby visible alive enemies, sorted by distance
+    const candidates: { enemy: Enemy; distSq: number }[] = [];
+    for (const enemy of this.enemies) {
+      if (!enemy.isAlive || !enemy.mesh.visible) continue;
+      const dx = enemy.mesh.position.x - px, dz = enemy.mesh.position.z - pz;
+      const distSq = dx * dx + dz * dz;
+      if (distSq < EnemySystem.CRIT_RANGE_SQ) {
+        candidates.push({ enemy, distSq });
+      }
+    }
+    if (candidates.length === 0) return false;
+
+    candidates.sort((a, b) => a.distSq - b.distSq);
+
+    // Build target list: up to 3 hits, reuse closest if not enough enemies
+    const targets: Enemy[] = [];
+    for (let i = 0; i < EnemySystem.CRIT_CHAIN_MAX; i++) {
+      targets.push(candidates[i % candidates.length].enemy);
+    }
+
+    this.critChain = { targets, index: 0, dashing: true };
+    return true;
+  }
+
+  /** Update crit chain dash — moves player toward each target, applies hit, moves to next.
+   *  Returns true while chain is active (caller should skip normal movement). */
+  updateCritChain(dt: number, playerChar: Character, onEnemyDied: () => void, showSlashEffect: boolean): boolean {
+    if (!this.critChain) return false;
+    const chain = this.critChain;
+
+    if (chain.index >= chain.targets.length) {
+      this.critChain = null;
+      return false;
+    }
+
+    const target = chain.targets[chain.index];
+    const px = playerChar.mesh.position.x;
+    const pz = playerChar.mesh.position.z;
+    const tx = target.mesh.position.x;
+    const tz = target.mesh.position.z;
+
+    // If target died (from earlier chain hit), skip to next
+    if (!target.isAlive) {
+      chain.index++;
+      chain.dashing = true;
+      return true;
+    }
+
+    if (chain.dashing) {
+      const dx = tx - px, dz = tz - pz;
+      const dist = Math.sqrt(dx * dx + dz * dz);
+
+      if (dist <= EnemySystem.CRIT_DASH_STOP_DIST) {
+        // Arrived — apply hit
+        chain.dashing = false;
+      } else {
+        // Dash toward target
+        const step = EnemySystem.CRIT_DASH_SPEED * dt;
+        const move = Math.min(step, dist - EnemySystem.CRIT_DASH_STOP_DIST * 0.5);
+        const nx = dx / dist, nz = dz / dist;
+        playerChar.mesh.position.x += nx * move;
+        playerChar.mesh.position.z += nz * move;
+        // Face target
+        playerChar.facing = Math.atan2(-nx, -nz);
+        playerChar.mesh.rotation.y = playerChar.facing;
+        // Update ground Y
+        playerChar.groundY = this.terrain.getTerrainY(playerChar.mesh.position.x, playerChar.mesh.position.z);
+        playerChar.mesh.position.y = playerChar.groundY;
+        return true;
+      }
+    }
+
+    // Apply guaranteed crit hit
+    const damage = this.playerDamage;
+    const ex = target.mesh.position.x;
+    const ey = target.mesh.position.y;
+    const ez = target.mesh.position.z;
+    const hdx = ex - playerChar.mesh.position.x;
+    const hdz = ez - playerChar.mesh.position.z;
+    const hdist = Math.sqrt(hdx * hdx + hdz * hdz) || 1;
+    const hitDirX = hdx / hdist, hitDirZ = hdz / hdist;
+
+    // Face target
+    playerChar.facing = Math.atan2(-hitDirX, -hitDirZ);
+    playerChar.mesh.rotation.y = playerChar.facing;
+
+    // Play attack animation + slash
+    playerChar.startAttack(false);
+    audioSystem.sfx('slash');
+    if (showSlashEffect) this.slashArcs.push(createSlashArc(playerChar.mesh));
+
+    // Guaranteed hit (skip arc check)
+    const hit = target.takeDamage(damage, playerChar.mesh.position.x, playerChar.mesh.position.z, playerChar.params.melee.knockback * 1.5);
+    if (hit) {
+      this.aggroTimers.set(target, EnemySystem.AGGRO_DURATION);
+      this.damageNumbers.push(createDamageNumber(this.scene, ex, ey + 0.3, ez, damage, hitDirX, hitDirZ, true));
+      audioSystem.sfxAt('fleshHit', ex, ez);
+      this.hitSparks.push(createHitSparks(this.scene, ex, ey, ez, hitDirX, hitDirZ));
+      if (this.goreSystem) {
+        this.goreSystem.spawnBloodSplash(ex, ey, ez, target.groundY, this.getAllCharacters(playerChar));
+      }
+      if (this.impactCallbacks) {
+        const isKill = !target.isAlive;
+        this.impactCallbacks.onHitstop(isKill ? 0.12 : 0.08);
+        this.impactCallbacks.onCameraShake(isKill ? 0.25 : 0.15, isKill ? 0.25 : 0.15, hitDirX, hitDirZ);
+      }
+
+      // Handle death
+      if (!target.isAlive) {
+        const pos = target.mesh.position;
+        if (this.goreSystem) {
+          this.goreSystem.spawnGore(target.mesh, target.groundY, this.getAllCharacters(playerChar), target.lastHitDirX, target.lastHitDirZ);
+        }
+        this.lootSystem.spawnLoot(pos.clone());
+        audioSystem.sfxAt('death', pos.x, pos.z);
+        this.aggroTimers.delete(target);
+        target.dispose();
+        const idx = this.enemies.indexOf(target);
+        if (idx >= 0) this.enemies.splice(idx, 1);
+        onEnemyDied();
+      }
+    }
+
+    // Move to next target
+    chain.index++;
+    chain.dashing = true;
+    return true;
   }
 
   update(
@@ -342,15 +580,22 @@ export class EnemySystem {
     onEnemyDied: () => void,
     showSlashEffect = true,
   ): void {
+    // ── Staggered spawn queue: spawn pending enemies one-by-one with cooldowns ──
+    if (this.pendingSpawns > 0) {
+      this.staggerCooldown -= dt;
+      if (this.staggerCooldown <= 0) {
+        this.spawnOneEnemy();
+        this.pendingSpawns--;
+        this.staggerCooldown = EnemySystem.STAGGER_MIN + Math.random() * (EnemySystem.STAGGER_MAX - EnemySystem.STAGGER_MIN);
+      }
+    }
+
     // ── Wave spawning: trickle in new enemies up to cap ──
-    if (this.spawnInterval > 0 && this.enemies.length < this.maxEnemies) {
+    if (this.spawnInterval > 0 && this.pendingSpawns === 0 && this.enemies.length < this.maxEnemies) {
       this.spawnTimer -= dt;
       if (this.spawnTimer <= 0) {
         this.spawnTimer = this.spawnInterval * (0.7 + Math.random() * 0.6);
-        const count = Math.random() < 0.2 ? 2 : 1; // 20% chance to spawn two
-        for (let i = 0; i < count && this.enemies.length < this.maxEnemies; i++) {
-          this.spawnOneEnemy();
-        }
+        this.spawnOneEnemy();
       }
     }
 
@@ -479,18 +724,21 @@ export class EnemySystem {
       }
 
       let shouldChase = false;
+      const dx = ex - px, dz = ez - pz;
+      const distSq = dx * dx + dz * dz;
 
       if (this.potionSystem?.isShadow) {
         // Shadow: enemies don't initiate chase
         shouldChase = false;
       } else if (roomVis) {
-        // Dungeon: enemy is already confirmed active; chase if player also active
-        shouldChase = roomVis.isPositionActive(px, pz);
+        // Dungeon: chase if both in active area AND within leash distance (~6 world units)
+        // This prevents enemies from chasing across large multi-room active areas
+        const DUNGEON_LEASH_SQ = 6 * 6;
+        shouldChase = roomVis.isPositionActive(px, pz) && distSq < DUNGEON_LEASH_SQ;
       } else {
         // Open maps: chase if within range
-        const dx = ex - px, dz = ez - pz;
         const chaseRange = useGameStore.getState().enemyParams.chaseRange * 0.25;
-        shouldChase = (dx * dx + dz * dz) < chaseRange * chaseRange;
+        shouldChase = distSq < chaseRange * chaseRange;
       }
 
       // Frenzy: force-aggro enemies (dungeon: already in active area; open: distance-based)
@@ -498,8 +746,7 @@ export class EnemySystem {
         if (roomVis) {
           shouldChase = true;
         } else {
-          const fdx = ex - px, fdz = ez - pz;
-          if (fdx * fdx + fdz * fdz < 64) shouldChase = true; // ~8 unit radius
+          if (distSq < 64) shouldChase = true; // ~8 unit radius
         }
       }
 
@@ -514,9 +761,8 @@ export class EnemySystem {
           if (roomVis) {
             clearAggro = roomVis.isPositionActive(px, pz);
           } else {
-            const dx = ex - px, dz = ez - pz;
             const chaseRange = useGameStore.getState().enemyParams.chaseRange * 0.25;
-            clearAggro = (dx * dx + dz * dz) < chaseRange * chaseRange;
+            clearAggro = distSq < chaseRange * chaseRange;
           }
         }
         if (clearAggro) {
@@ -531,8 +777,7 @@ export class EnemySystem {
 
       // Awareness fog: fade enemies based on distance on open maps
       if (!roomVis) {
-        const dx = ex - px, dz = ez - pz;
-        const dist = Math.sqrt(dx * dx + dz * dz);
+        const dist = Math.sqrt(distSq);
         const chaseRange = useGameStore.getState().enemyParams.chaseRange * 0.25;
         const visRange = chaseRange * 1.5;
         // Fully visible within chase range, fade out between chase and vis range, invisible beyond
@@ -838,6 +1083,8 @@ export class EnemySystem {
   }
 
   dispose(): void {
+    this.pendingSpawns = 0;
+    this.staggerCooldown = 0;
     for (const enemy of this.enemies) enemy.dispose();
     this.enemies = [];
 

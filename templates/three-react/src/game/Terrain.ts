@@ -2442,7 +2442,7 @@ export class Terrain {
         const bottomNav = grid.worldToGrid(bottomWX, bottomWZ);
         const topNav = grid.worldToGrid(topWX, topWZ);
 
-        console.log(`[Ladder hint] low=(${hint.lowGX},${hint.lowGZ}) h=${hint.lowH.toFixed(2)} → high=(${hint.highGX},${hint.highGZ}) h=${hint.highH.toFixed(2)} | bottomNav=(${bottomNav.gx},${bottomNav.gz}) topNav=(${topNav.gx},${topNav.gz}) | worldBottom=(${bottomWX.toFixed(2)},${bottomWZ.toFixed(2)}) worldTop=(${topWX.toFixed(2)},${topWZ.toFixed(2)})`);
+        // console.log(`[Ladder hint] low=(${hint.lowGX},${hint.lowGZ}) h=${hint.lowH.toFixed(2)} → high=(${hint.highGX},${hint.highGZ}) h=${hint.highH.toFixed(2)} | bottomNav=(${bottomNav.gx},${bottomNav.gz}) topNav=(${topNav.gx},${topNav.gz}) | worldBottom=(${bottomWX.toFixed(2)},${bottomWZ.toFixed(2)}) worldTop=(${topWX.toFixed(2)},${topWZ.toFixed(2)})`);
 
         const beforeCount = this.ladderDefs.length;
         this.placeLadder(grid, LADDER_COST, NAV_LINK_OFFSET, bottomNav.gx, bottomNav.gz, topNav.gx, topNav.gz);
@@ -2474,7 +2474,7 @@ export class Terrain {
           ld.bottomX = ladderX;
           ld.bottomZ = ladderZ;
 
-          console.log(`[Ladder placed] #${this.ladderDefs.length - 1} isVertical=true pos=(${ladderX.toFixed(2)},${ladderZ.toFixed(2)}) bottomY=${ld.bottomY.toFixed(2)} topY=${ld.topY.toFixed(2)} facing=(${ld.facingDX.toFixed(2)},${ld.facingDZ.toFixed(2)})`);
+          // console.log(`[Ladder placed] #${this.ladderDefs.length - 1} isVertical=true pos=(${ladderX.toFixed(2)},${ladderZ.toFixed(2)}) bottomY=${ld.bottomY.toFixed(2)} topY=${ld.topY.toFixed(2)} facing=(${ld.facingDX.toFixed(2)},${ld.facingDZ.toFixed(2)})`);
 
           // Recreate the mesh with corrected positions
           const meshIdx = this.ladderDefs.length - 1;
@@ -2486,10 +2486,10 @@ export class Terrain {
           }
           this.createSingleLadderMesh(meshIdx);
         } else {
-          console.log(`[Ladder hint SKIPPED] placeLadder rejected — cells may be impassable or height diff < 0.3`);
+          // console.log(`[Ladder hint SKIPPED] placeLadder rejected — cells may be impassable or height diff < 0.3`);
         }
       }
-      console.log(`[Terrain] Placed ${this.dungeonLadderHints.length} dungeon ladder hints`);
+      // console.log(`[Terrain] Placed ${this.dungeonLadderHints.length} dungeon ladder hints`);
     }
 
     // ── Scan all adjacent open dungeon cells for height drops needing ladders ──
@@ -2634,7 +2634,7 @@ export class Terrain {
         }
       }
       if (heightDropLadders > 0) {
-        console.log(`[Terrain] Placed ${heightDropLadders} height-drop ladders (from ${allEdges.length} boundary edges)`);
+        // console.log(`[Terrain] Placed ${heightDropLadders} height-drop ladders (from ${allEdges.length} boundary edges)`);
       }
     }
 
@@ -2770,7 +2770,7 @@ export class Terrain {
     const ladderIndex = this.ladderDefs.length;
     this.ladderDefs.push(ladderDef);
 
-    console.log(`[placeLadder] #${ladderIndex} nav=(${agx},${agz})→(${bgx},${bgz}) lowH=${lowCell.surfaceHeight.toFixed(2)} highH=${highCell.surfaceHeight.toFixed(2)} diff=${heightDiff.toFixed(2)} facing=(${fdx.toFixed(2)},${fdz.toFixed(2)}) world=(${lowWorld.x.toFixed(2)},${lowWorld.z.toFixed(2)})→(${highWorld.x.toFixed(2)},${highWorld.z.toFixed(2)})`);
+    // console.log(`[placeLadder] #${ladderIndex} nav=(${agx},${agz})→(${bgx},${bgz}) lowH=${lowCell.surfaceHeight.toFixed(2)} highH=${highCell.surfaceHeight.toFixed(2)} diff=${heightDiff.toFixed(2)} facing=(${fdx.toFixed(2)},${fdz.toFixed(2)}) world=(${lowWorld.x.toFixed(2)},${lowWorld.z.toFixed(2)})→(${highWorld.x.toFixed(2)},${highWorld.z.toFixed(2)})`);
 
     const bottomNavX = lowWorld.x + fdx * navLinkOffset;
     const bottomNavZ = lowWorld.z + fdz * navLinkOffset;
@@ -2828,7 +2828,7 @@ export class Terrain {
 
       if (iter === 0) {
         const disconnected = [...regionSizes.entries()].filter(([r, s]) => r !== spawnLabel && s >= 2);
-        console.log(`[NavGrid] ${regionCount} regions, spawn=${spawnLabel} (${spawnSize} cells), ${disconnected.length} disconnected`);
+        // console.log(`[NavGrid] ${regionCount} regions, spawn=${spawnLabel} (${spawnSize} cells), ${disconnected.length} disconnected`);
       }
 
       // Try ALL disconnected regions — find globally best candidate via cliff-walk
@@ -2942,6 +2942,25 @@ export class Terrain {
   /** Get the ladder definitions for this terrain */
   getLadderDefs(): ReadonlyArray<LadderDef> {
     return this.ladderDefs;
+  }
+
+  /** Get world positions of all level transitions (stairs + ladders) for spawn exclusion zones */
+  getLevelTransitionPositions(): { x: number; z: number }[] {
+    const positions: { x: number; z: number }[] = [];
+    const halfW = this.effectiveGroundSize > 0 ? this.effectiveGroundSize / 2 : this.groundSize / 2;
+    const cs = this.dungeonCellSize;
+    // Stair positions (grid → world)
+    if (cs > 0) {
+      for (const s of this.stairMap.values()) {
+        positions.push({ x: s.gx * cs - halfW + cs / 2, z: s.gz * cs - halfW + cs / 2 });
+      }
+    }
+    // Ladder positions (already in world coords)
+    for (const ld of this.ladderDefs) {
+      positions.push({ x: ld.bottomX, z: ld.bottomZ });
+      positions.push({ x: ld.highWorldX, z: ld.highWorldZ });
+    }
+    return positions;
   }
 
   /** Expose debris AABBs for camera collision */
