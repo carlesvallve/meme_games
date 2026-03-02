@@ -1,5 +1,5 @@
 import { Behavior, type BehaviorAgent, type BehaviorContext, type BehaviorStatus } from './Behavior';
-import type { WaypointMeta } from '../AStar';
+import type { WaypointMeta } from '../pathfinding';
 import type { MovementParams } from '../character';
 
 export interface RoamingBehaviorOptions {

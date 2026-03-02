@@ -1,5 +1,5 @@
 import { useGameStore } from '../store';
-import { POTION_HUES, EFFECT_META } from '../game/PotionEffectSystem';
+import { POTION_HUES, EFFECT_META } from '../game/combat';
 
 /** Convert HSL hue (0-1) to a CSS hex color for display */
 function hueToHex(hue: number): string {
@@ -44,7 +44,7 @@ export function PotionHotbar() {
         const color = SLOT_COLORS[slot.colorIndex] ?? '#888';
         // Check if this potion's effect is currently active
         const ps = (window as any).__potionEffectSystem as
-          import('../game/PotionEffectSystem').PotionEffectSystem | null;
+          import('../game/combat/PotionEffectSystem').PotionEffectSystem | null;
         const identified = ps?.isIdentified(slot.colorIndex) ?? false;
         const effect = ps?.colorMapping[slot.colorIndex];
         const meta = effect ? EFFECT_META[effect] : null;

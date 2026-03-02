@@ -1,7 +1,7 @@
-import type { NavGrid } from '../NavGrid';
-import type { PathResult } from '../AStar';
-import { findPath } from '../AStar';
-import type { LadderDef } from '../Ladder';
+import type { NavGrid } from '../pathfinding';
+import type { PathResult } from '../pathfinding';
+import { findPath } from '../pathfinding';
+import type { LadderDef } from '../dungeon';
 
 /** Minimal interface a behavior needs from its owner */
 export interface BehaviorAgent {

@@ -1,12 +1,19 @@
 import * as THREE from 'three';
 import { Character } from './Character';
-import type { Terrain } from '../Terrain';
-import type { NavGrid } from '../NavGrid';
-import type { LadderDef } from '../Ladder';
+import type { Environment } from '../environment';
+import type { NavGrid } from '../pathfinding';
+import type { LadderDef } from '../dungeon';
 import type { VoxCharEntry } from './VoxCharacterDB';
-import { getFilteredEnemies, getArchetype, getMonsterStats, randomInRange } from './VoxCharacterDB';
+import {
+  getFilteredEnemies,
+  getArchetype,
+  getMonsterStats,
+  randomInRange,
+} from './VoxCharacterDB';
+import { getFloorConfig } from '../dungeon';
 import { ChaseBehavior } from '../behaviors/ChaseBehavior';
 import { Roaming } from '../behaviors/Roaming';
+import { FleeBehavior } from '../behaviors/FleeBehavior';
 import type { BehaviorContext } from '../behaviors/Behavior';
 import type { CharacterType } from './characters';
 import { useGameStore, type EnemyParams } from '../../store';
@@ -14,10 +21,16 @@ import { useGameStore, type EnemyParams } from '../../store';
 /** How long an enemy keeps chasing after losing sight of the player */
 const CHASE_MEMORY = 2.0;
 
+/** HP ratio thresholds for flee/recover behavior. */
+const FLEE_THRESHOLD = 0.3;
+const RECOVER_THRESHOLD = 0.6;
+
 export class Enemy extends Character {
   private chaseBehavior: ChaseBehavior | null = null;
   private roamBehavior: Roaming | null = null;
+  private fleeBehavior: FleeBehavior | null = null;
   private isChasing = false;
+  private isFleeing = false;
   private chaseMemoryTimer = 0;
 
   /** Base movement speed (before status effects like slow). */
@@ -28,12 +41,22 @@ export class Enemy extends Character {
 
   constructor(
     scene: THREE.Scene,
-    terrain: Terrain,
+    terrain: Environment,
     navGrid: NavGrid,
     position: THREE.Vector3,
     ladderDefs: ReadonlyArray<LadderDef> = [],
+    /** Pre-selected entry — if provided, skip random pool selection */
+    preselectedEntry?: VoxCharEntry,
   ) {
-    super(scene, terrain, navGrid, 'slot0' as CharacterType, position, ladderDefs, true);
+    super(
+      scene,
+      terrain,
+      navGrid,
+      'slot0' as CharacterType,
+      position,
+      ladderDefs,
+      true,
+    );
 
     const ep = useGameStore.getState().enemyParams;
     this.isEnemy = true;
@@ -54,25 +77,45 @@ export class Enemy extends Character {
     scene.remove(this.torchLight);
     scene.remove(this.fillLight);
 
-    // Apply random enemy VOX skin (filtered by allowed types)
-    const pool = getFilteredEnemies(ep.allowedTypes);
-    const entry = pool[Math.floor(Math.random() * pool.length)];
+    // Apply enemy VOX skin: use preselected entry or pick from filtered pool
+    const entry =
+      preselectedEntry ??
+      (() => {
+        const pool = getFilteredEnemies(ep.allowedTypes);
+        return pool[Math.floor(Math.random() * pool.length)];
+      })();
     this.applyVoxSkin(entry);
 
-    // Apply per-monster stats based on archetype
+    // Apply per-monster stats based on archetype, scaled by floor multipliers
     const stats = getMonsterStats(getArchetype(entry.name));
-    this.hp = this.maxHp = Math.round(randomInRange(stats.hp));
+    const floorCfg = getFloorConfig(useGameStore.getState().floor);
+    this.hp = this.maxHp = Math.round(
+      randomInRange(stats.hp) * floorCfg.hpMult,
+    );
     this.mp = this.maxMp = Math.round(randomInRange(stats.mp));
-    this.params.attackDamage = Math.floor(randomInRange(stats.damage));
+    this.params.attackDamage = Math.max(
+      1,
+      Math.floor(randomInRange(stats.damage) * floorCfg.damageMult),
+    );
     this.params.attackCooldown = 1 / randomInRange(stats.atkSpeed);
     this.params.speed = randomInRange(stats.movSpeed);
     this.baseSpeed = this.params.speed;
     this.critChance = stats.critChance;
     this.armour = stats.armour;
+
+    // Regen: scale by tier (low=0.5×, mid=1×, high=1.5×)
+    const tierScale =
+      stats.tier === 'low' ? 0.5 : stats.tier === 'high' ? 1.5 : 1.0;
+    this.regenDelay = ep.regenDelay ?? 5.0;
+    this.regenRate = (ep.regenRate ?? 0.1) * tierScale;
   }
 
   /** Initialize chase behavior — call after construction */
-  initChaseBehavior(navGrid: NavGrid, ladderDefs: ReadonlyArray<LadderDef>, isDungeon = false): void {
+  initChaseBehavior(
+    navGrid: NavGrid,
+    ladderDefs: ReadonlyArray<LadderDef>,
+    isDungeon = false,
+  ): void {
     const ctx: BehaviorContext = { navGrid, ladderDefs };
     // In dungeons, chase range is infinite — chasing is controlled by flood-fill visibility
     const behaviorChaseRange = isDungeon ? Infinity : this.params.chaseRange;
@@ -89,12 +132,34 @@ export class Enemy extends Character {
       idleMin: 2,
       idleMax: 5,
     });
+    this.fleeBehavior = new FleeBehavior(ctx, this.params);
     this.behavior = this.roamBehavior;
   }
 
   /** Set the chase target each frame */
   setChaseTarget(target: Character | null, dt: number): void {
     if (!this.chaseBehavior) return;
+
+    // Flee check: if HP is low, flee instead of chasing
+    if (this.isFleeing) {
+      // Recover check: HP above threshold → stop fleeing, return to roam
+      if (this.hp / this.maxHp >= RECOVER_THRESHOLD) {
+        this.isFleeing = false;
+        this.isChasing = false;
+        this.behavior = this.roamBehavior!;
+      }
+      return; // don't override flee behavior with chase
+    }
+
+    // Start fleeing if HP drops low while aware of a target
+    if (target && this.hp / this.maxHp < FLEE_THRESHOLD && this.fleeBehavior) {
+      this.isFleeing = true;
+      this.isChasing = false;
+      this.fleeBehavior.setThreat(target);
+      this.behavior = this.fleeBehavior;
+      return;
+    }
+
     if (target) {
       this.chaseBehavior.setTarget(target, target.isAlive);
       this.chaseMemoryTimer = CHASE_MEMORY;
@@ -115,6 +180,11 @@ export class Enemy extends Character {
   /** Check if this enemy is currently in chase mode (active chase or memory timer) */
   isCurrentlyChasing(): boolean {
     return this.isChasing;
+  }
+
+  /** Check if this enemy is fleeing (low HP, running away) */
+  isCurrentlyFleeing(): boolean {
+    return this.isFleeing;
   }
 
   /** Check if the chase behavior is in attack state (wants to attack) */

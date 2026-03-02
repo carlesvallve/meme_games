@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { Terrain } from '../Terrain';
+import type { Environment } from '../environment';
 import type { MovementParams } from './CharacterSettings';
 
 /** Owner interface — fields the combat module reads/writes on the character. */
@@ -8,7 +8,7 @@ export interface CombatOwner {
   groundY: number;
   isEnemy: boolean;
   params: MovementParams;
-  terrain: Terrain;
+  terrain: Environment;
   /** Trigger VOX action animation */
   playActionAnim(): void;
   /** Get number of action frames from current VOX data (0 = no action frames) */
@@ -36,6 +36,28 @@ export class CharacterCombat {
   exhaustTimer = 0;
   private timeSinceLastAttack = 0;
   stunTimer = 0;
+
+  // ── Regeneration ──────────────────────────────────────────────────
+  /** Seconds after last damage before regen activates. */
+  regenDelay = 5.0;
+  /** HP per second once regen is active. */
+  regenRate = 0.1;
+  /** Seconds since last damage was taken. */
+  timeSinceLastDamage = 999;
+
+  // ── Hunger (non-enemy characters only) ─────────────────────────────
+  /** Whether hunger is enabled (non-enemy characters). */
+  hungerEnabled = false;
+  /** Current hunger level 0–100. */
+  hunger = 80;
+  /** Maximum hunger. */
+  maxHunger = 100;
+  /** Hunger points lost per second. */
+  hungerDecayRate = 0.15;
+  /** HP lost per second when hunger ≤ starvation threshold. */
+  starvationDamage = 0.2;
+  /** Hunger threshold below which starvation damage kicks in. */
+  starvationThreshold = 15;
   lastHitDirX = 0;
   lastHitDirZ = 0;
   private originalEmissive = new THREE.Color(0, 0, 0);
@@ -52,13 +74,24 @@ export class CharacterCombat {
   /** Fraction of attack duration for time-based fallback when VOX action has no frames. */
   private static readonly MELEE_HIT_WINDOW_RATIO = 0.5;
 
+  /** Restore hunger by the given amount (clamped to maxHunger). */
+  restoreHunger(amount: number): void {
+    this.hunger = Math.min(this.maxHunger, this.hunger + amount);
+  }
+
   consumeJustTookDamage(): boolean {
     const v = this.justTookDamage;
     this.justTookDamage = false;
     return v;
   }
 
-  takeDamage(owner: CombatOwner, amount: number, fromX: number, fromZ: number, knockback: number): boolean {
+  takeDamage(
+    owner: CombatOwner,
+    amount: number,
+    fromX: number,
+    fromZ: number,
+    knockback: number,
+  ): boolean {
     if (!this.isAlive || this.invulnTimer > 0) return false;
 
     this.hp -= amount;
@@ -67,6 +100,7 @@ export class CharacterCombat {
       this.isAlive = false;
     }
     this.justTookDamage = true;
+    this.timeSinceLastDamage = 0;
 
     const dx = owner.mesh.position.x - fromX;
     const dz = owner.mesh.position.z - fromZ;
@@ -96,7 +130,13 @@ export class CharacterCombat {
   }
 
   startAttack(owner: CombatOwner, exhaustionEnabled = false): boolean {
-    if (!this.isAlive || this.isAttacking || this.exhaustTimer > 0 || this.stunTimer > 0) return false;
+    if (
+      !this.isAlive ||
+      this.isAttacking ||
+      this.exhaustTimer > 0 ||
+      this.stunTimer > 0
+    )
+      return false;
 
     if (this.timeSinceLastAttack > 1.0) {
       this.attackCount = 0;
@@ -115,7 +155,9 @@ export class CharacterCombat {
 
     // Combo: alternate swing direction on even attacks (mirror mesh on X)
     this.comboFlipped = this.attackCount % 2 === 0;
-    owner.mesh.scale.x = this.comboFlipped ? -Math.abs(owner.mesh.scale.x) : Math.abs(owner.mesh.scale.x);
+    owner.mesh.scale.x = this.comboFlipped
+      ? -Math.abs(owner.mesh.scale.x)
+      : Math.abs(owner.mesh.scale.x);
 
     // Lunge: store facing direction, lunge will be applied in update
     const facing = owner.mesh.rotation.y;
@@ -132,9 +174,15 @@ export class CharacterCombat {
     const actionFrameCount = owner.getActionFrameCount();
     if (actionFrameCount > 0) {
       const climaxFrameIndex = actionFrameCount - 1;
-      return owner.getVoxAnimState() === 'action' && owner.getVoxFrameIndex() === climaxFrameIndex;
+      return (
+        owner.getVoxAnimState() === 'action' &&
+        owner.getVoxFrameIndex() === climaxFrameIndex
+      );
     }
-    return this.attackTimer <= owner.params.attackDuration * CharacterCombat.MELEE_HIT_WINDOW_RATIO;
+    return (
+      this.attackTimer <=
+      owner.params.attackDuration * CharacterCombat.MELEE_HIT_WINDOW_RATIO
+    );
   }
 
   markAttackHitApplied(): void {
@@ -149,7 +197,10 @@ export class CharacterCombat {
     this.timeSinceLastAttack += dt;
 
     // Knockback decay
-    if (Math.abs(this.knockbackVX) > 0.01 || Math.abs(this.knockbackVZ) > 0.01) {
+    if (
+      Math.abs(this.knockbackVX) > 0.01 ||
+      Math.abs(this.knockbackVZ) > 0.01
+    ) {
       const kbX = this.knockbackVX * dt;
       const kbZ = this.knockbackVZ * dt;
       const resolved = owner.terrain.resolveMovement(
@@ -246,6 +297,33 @@ export class CharacterCombat {
     if (this.stunTimer > 0) {
       this.stunTimer -= dt;
       if (this.stunTimer <= 0) this.stunTimer = 0;
+    }
+
+    // ── Hunger decay (non-enemy characters) ───────────────────────────
+    if (this.hungerEnabled && this.isAlive) {
+      this.hunger = Math.max(0, this.hunger - this.hungerDecayRate * dt);
+
+      // Starvation: slow HP drain when very hungry (never kills — floor at 1)
+      if (this.hunger <= this.starvationThreshold) {
+        this.hp = Math.max(1, this.hp - this.starvationDamage * dt);
+      }
+    }
+
+    // ── HP Regeneration ───────────────────────────────────────────────
+    this.timeSinceLastDamage += dt;
+    if (
+      this.isAlive &&
+      this.hp < this.maxHp &&
+      this.timeSinceLastDamage >= this.regenDelay
+    ) {
+      let effectiveRate = this.regenRate;
+      // Gate regen by hunger (non-enemy characters)
+      if (this.hungerEnabled) {
+        effectiveRate *= Math.min(1, this.hunger / 50);
+      }
+      if (effectiveRate > 0) {
+        this.hp = Math.min(this.maxHp, this.hp + effectiveRate * dt);
+      }
     }
   }
 }

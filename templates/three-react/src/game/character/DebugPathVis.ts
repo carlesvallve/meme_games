@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { Terrain } from '../Terrain';
+import type { Environment } from '../environment';
 import type { Behavior } from '../behaviors/Behavior';
 
 const DEBUG_LINE_COLOR = 0x00ffaa;
@@ -22,7 +22,7 @@ function getGoalGeo(): THREE.SphereGeometry {
 
 export class DebugPathVis {
   private scene: THREE.Scene;
-  private terrain: Terrain;
+  private terrain: Environment;
   private debugLine: THREE.Line | null = null;
   private debugNodes: THREE.Mesh[] = [];
   private debugGoal: THREE.Mesh | null = null;
@@ -31,12 +31,24 @@ export class DebugPathVis {
   private debugGoalMat: THREE.MeshBasicMaterial;
   private lastDebugWaypointCount = 0;
 
-  constructor(scene: THREE.Scene, terrain: Terrain) {
+  constructor(scene: THREE.Scene, terrain: Environment) {
     this.scene = scene;
     this.terrain = terrain;
-    this.debugLineMat = new THREE.LineBasicMaterial({ color: DEBUG_LINE_COLOR, transparent: true, opacity: 0.6 });
-    this.debugNodeMat = new THREE.MeshBasicMaterial({ color: DEBUG_NODE_COLOR, transparent: true, opacity: 0.7 });
-    this.debugGoalMat = new THREE.MeshBasicMaterial({ color: DEBUG_GOAL_COLOR, transparent: true, opacity: 0.8 });
+    this.debugLineMat = new THREE.LineBasicMaterial({
+      color: DEBUG_LINE_COLOR,
+      transparent: true,
+      opacity: 0.6,
+    });
+    this.debugNodeMat = new THREE.MeshBasicMaterial({
+      color: DEBUG_NODE_COLOR,
+      transparent: true,
+      opacity: 0.7,
+    });
+    this.debugGoalMat = new THREE.MeshBasicMaterial({
+      color: DEBUG_GOAL_COLOR,
+      transparent: true,
+      opacity: 0.8,
+    });
   }
 
   sync(behavior: Behavior, meshPosition: THREE.Vector3): void {
@@ -66,7 +78,10 @@ export class DebugPathVis {
     this.lastDebugWaypointCount = remaining.length;
   }
 
-  private build(remaining: ReadonlyArray<{ x: number; z: number }>, meshPosition: THREE.Vector3): void {
+  private build(
+    remaining: ReadonlyArray<{ x: number; z: number }>,
+    meshPosition: THREE.Vector3,
+  ): void {
     this.clear();
     if (remaining.length === 0) return;
 
@@ -93,20 +108,28 @@ export class DebugPathVis {
     this.scene.add(this.debugGoal);
   }
 
-  private updateLine(remaining: ReadonlyArray<{ x: number; z: number }>, meshPosition: THREE.Vector3): void {
+  private updateLine(
+    remaining: ReadonlyArray<{ x: number; z: number }>,
+    meshPosition: THREE.Vector3,
+  ): void {
     if (!this.debugLine) return;
     const points = this.buildLinePoints(remaining, meshPosition);
     const geo = this.debugLine.geometry as THREE.BufferGeometry;
     geo.setFromPoints(points);
   }
 
-  private buildLinePoints(remaining: ReadonlyArray<{ x: number; z: number }>, meshPosition: THREE.Vector3): THREE.Vector3[] {
+  private buildLinePoints(
+    remaining: ReadonlyArray<{ x: number; z: number }>,
+    meshPosition: THREE.Vector3,
+  ): THREE.Vector3[] {
     const points: THREE.Vector3[] = [];
-    points.push(new THREE.Vector3(
-      meshPosition.x,
-      meshPosition.y + DEBUG_Y_OFFSET,
-      meshPosition.z,
-    ));
+    points.push(
+      new THREE.Vector3(
+        meshPosition.x,
+        meshPosition.y + DEBUG_Y_OFFSET,
+        meshPosition.z,
+      ),
+    );
     for (const wp of remaining) {
       const wy = this.terrain.getTerrainY(wp.x, wp.z) + DEBUG_Y_OFFSET;
       points.push(new THREE.Vector3(wp.x, wy, wp.z));

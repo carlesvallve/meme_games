@@ -1,8 +1,14 @@
 import * as THREE from 'three';
-import type { LadderDef } from '../Ladder';
-import type { Terrain } from '../Terrain';
+import type { LadderDef } from '../dungeon';
+import type { Environment } from '../environment';
 import { lerpAngle } from '../../utils/math';
-import { CLIMB_SPEED, MOUNT_SPEED, DISMOUNT_SPEED, CLIMB_WALL_OFFSET, STEP_UP_RATE } from './CharacterSettings';
+import {
+  CLIMB_SPEED,
+  MOUNT_SPEED,
+  DISMOUNT_SPEED,
+  CLIMB_WALL_OFFSET,
+  STEP_UP_RATE,
+} from './CharacterSettings';
 
 const RUNG_SPACING = 0.4;
 /** Pause at each rung (seconds) */
@@ -23,10 +29,15 @@ interface ClimbState {
   targetFacing: number;
   leanAngle: number;
   /** Actual cliff geometry used for climb path */
-  cLowX: number; cLowZ: number; cLowY: number;
-  cHighX: number; cHighZ: number; cHighY: number;
+  cLowX: number;
+  cLowZ: number;
+  cLowY: number;
+  cHighX: number;
+  cHighZ: number;
+  cHighY: number;
   /** Cliff-derived facing direction */
-  cfDX: number; cfDZ: number;
+  cfDX: number;
+  cfDZ: number;
   /** Rung stepping state */
   rungCount: number;
   currentRung: number;
@@ -40,7 +51,7 @@ export interface ClimbOwner {
   groundY: number;
   visualGroundY: number;
   velocityY: number;
-  terrain: Terrain;
+  terrain: Environment;
   updateTorch(dt: number): void;
   playClimbStep?: () => void;
 }
@@ -63,8 +74,13 @@ export class CharacterClimbing {
     let cfDX = cLowX - cHighX;
     let cfDZ = cLowZ - cHighZ;
     const cfLen = Math.sqrt(cfDX * cfDX + cfDZ * cfDZ);
-    if (cfLen > 0.001) { cfDX /= cfLen; cfDZ /= cfLen; }
-    else { cfDX = ladder.facingDX; cfDZ = ladder.facingDZ; }
+    if (cfLen > 0.001) {
+      cfDX /= cfLen;
+      cfDZ /= cfLen;
+    } else {
+      cfDX = ladder.facingDX;
+      cfDZ = ladder.facingDZ;
+    }
 
     const targetFacing = Math.atan2(cfDX, cfDZ);
 
@@ -73,17 +89,21 @@ export class CharacterClimbing {
     const entryX = (direction === 'up' ? cLowX : cHighX) + offX;
     const entryZ = (direction === 'up' ? cLowZ : cHighZ) + offZ;
     const mountDist = Math.sqrt(
-      (owner.mesh.position.x - entryX) ** 2 + (owner.mesh.position.z - entryZ) ** 2,
+      (owner.mesh.position.x - entryX) ** 2 +
+        (owner.mesh.position.z - entryZ) ** 2,
     );
     const mountDuration = Math.max(0.05, mountDist / MOUNT_SPEED);
     const dismountDuration = Math.max(0.05, 0.4 / DISMOUNT_SPEED);
 
     const cLowY = ladder.cliffLowY ?? ladder.bottomY;
     const cHighY = ladder.cliffHighY ?? ladder.topY;
-    const leanAngle = -(ladder.leanAngle ?? Math.atan2(
-      Math.sqrt((cHighX - cLowX) ** 2 + (cHighZ - cLowZ) ** 2),
-      cHighY - cLowY,
-    ));
+    const leanAngle = -(
+      ladder.leanAngle ??
+      Math.atan2(
+        Math.sqrt((cHighX - cLowX) ** 2 + (cHighZ - cLowZ) ** 2),
+        cHighY - cLowY,
+      )
+    );
 
     const dy = Math.abs(cHighY - cLowY);
     const horizDist = Math.sqrt((cHighX - cLowX) ** 2 + (cHighZ - cLowZ) ** 2);
@@ -102,9 +122,14 @@ export class CharacterClimbing {
       startY: owner.visualGroundY,
       targetFacing,
       leanAngle,
-      cLowX, cLowZ, cLowY,
-      cHighX, cHighZ, cHighY,
-      cfDX, cfDZ,
+      cLowX,
+      cLowZ,
+      cLowY,
+      cHighX,
+      cHighZ,
+      cHighY,
+      cfDX,
+      cfDZ,
       rungCount,
       currentRung: 0,
       rungPauseTimer: 0,
@@ -122,7 +147,7 @@ export class CharacterClimbing {
       case 'face':
         cs.phase = 'mount';
         cs.phaseTime = 0;
-        // fallthrough
+      // fallthrough
 
       case 'mount': {
         const t = Math.min(1, cs.phaseTime / cs.mountDuration);
@@ -132,7 +157,11 @@ export class CharacterClimbing {
         const targetZ = (cs.direction === 'up' ? cs.cLowZ : cs.cHighZ) + oZ;
         owner.mesh.position.x = cs.startX + (targetX - cs.startX) * t;
         owner.mesh.position.z = cs.startZ + (targetZ - cs.startZ) * t;
-        owner.facing = lerpAngle(owner.facing, cs.targetFacing, 1 - Math.exp(-8 * dt));
+        owner.facing = lerpAngle(
+          owner.facing,
+          cs.targetFacing,
+          1 - Math.exp(-8 * dt),
+        );
         owner.mesh.rotation.order = 'YXZ';
         owner.mesh.rotation.y = owner.facing;
         owner.mesh.rotation.x = THREE.MathUtils.lerp(0, cs.leanAngle, t);
@@ -158,7 +187,7 @@ export class CharacterClimbing {
         // Time per rung = distance per rung / speed
         const horizDist = Math.sqrt(dxW * dxW + dzW * dzW);
         const totalLen = Math.sqrt(horizDist * horizDist + dy * dy);
-        const timePerRung = (totalLen / cs.rungCount) / CLIMB_SPEED;
+        const timePerRung = totalLen / cs.rungCount / CLIMB_SPEED;
 
         // Handle rung pause
         if (cs.rungPauseTimer > 0) {
@@ -184,8 +213,14 @@ export class CharacterClimbing {
         // Smoothly interpolate Y between rungs using fractional progress
         const t = Math.min(1, rungProgress / cs.rungCount);
         const frac = rungProgress - Math.floor(rungProgress); // 0..1 within current rung
-        const smoothFrac = frac < 0.5 ? 4 * frac * frac * frac : 1 - Math.pow(-2 * frac + 2, 3) / 2; // easeInOutCubic
-        const smoothRungT = Math.min(1, (Math.floor(rungProgress) + smoothFrac) / cs.rungCount);
+        const smoothFrac =
+          frac < 0.5
+            ? 4 * frac * frac * frac
+            : 1 - Math.pow(-2 * frac + 2, 3) / 2; // easeInOutCubic
+        const smoothRungT = Math.min(
+          1,
+          (Math.floor(rungProgress) + smoothFrac) / cs.rungCount,
+        );
 
         if (cs.direction === 'up') {
           owner.mesh.position.x = cs.cLowX + dxW * t + oX;
@@ -203,7 +238,11 @@ export class CharacterClimbing {
           owner.mesh.position.y = y;
         }
 
-        owner.facing = lerpAngle(owner.facing, cs.targetFacing, 1 - Math.exp(-20 * dt));
+        owner.facing = lerpAngle(
+          owner.facing,
+          cs.targetFacing,
+          1 - Math.exp(-20 * dt),
+        );
         owner.mesh.rotation.order = 'YXZ';
         owner.mesh.rotation.y = owner.facing;
         owner.mesh.rotation.x = cs.leanAngle;
@@ -244,7 +283,9 @@ export class CharacterClimbing {
         const terrainY = owner.terrain.getTerrainY(exitX, exitZ);
         owner.groundY = terrainY;
         owner.visualGroundY = THREE.MathUtils.lerp(
-          owner.visualGroundY, terrainY, 1 - Math.exp(-STEP_UP_RATE * dt),
+          owner.visualGroundY,
+          terrainY,
+          1 - Math.exp(-STEP_UP_RATE * dt),
         );
         owner.mesh.position.y = owner.visualGroundY;
 
@@ -263,7 +304,10 @@ export class CharacterClimbing {
           if (cs.direction === 'down') {
             owner.facing = cs.targetFacing + Math.PI;
             // Normalize to [-PI, PI]
-            owner.facing = Math.atan2(Math.sin(owner.facing), Math.cos(owner.facing));
+            owner.facing = Math.atan2(
+              Math.sin(owner.facing),
+              Math.cos(owner.facing),
+            );
           }
           owner.velocityY = 0;
           owner.mesh.rotation.order = 'XYZ';

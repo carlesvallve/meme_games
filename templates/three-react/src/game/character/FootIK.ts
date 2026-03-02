@@ -9,7 +9,7 @@
  *   footIK.apply(mesh, groundY);              // every frame, after animation
  */
 import * as THREE from 'three';
-import type { Terrain } from '../Terrain';
+import type { Environment } from '../environment';
 import type { VoxCharacterData } from '../../utils/VoxModelLoader';
 
 // ── Constants ────────────────────────────────────────────────────────
@@ -27,20 +27,20 @@ const NUDGE = 0.03;
 // ── Types ────────────────────────────────────────────────────────────
 
 interface VertexData {
-  indices: Uint16Array;      // vertex indices in position attribute
-  originalX: Float32Array;   // local X (for world-space rotation)
-  originalY: Float32Array;   // local Y (to restore before re-deforming)
-  originalZ: Float32Array;   // local Z (for world-space rotation)
-  weights: Float32Array;     // blend: 1.0 at Y=0, tapering to 0.0 at BLEND_HEIGHT
+  indices: Uint16Array; // vertex indices in position attribute
+  originalX: Float32Array; // local X (for world-space rotation)
+  originalY: Float32Array; // local Y (to restore before re-deforming)
+  originalZ: Float32Array; // local Z (for world-space rotation)
+  weights: Float32Array; // blend: 1.0 at Y=0, tapering to 0.0 at BLEND_HEIGHT
 }
 
 // ── FootIK class ─────────────────────────────────────────────────────
 
 export class FootIK {
   private map: Map<THREE.BufferGeometry, VertexData> | null = null;
-  private terrain: Terrain;
+  private terrain: Environment;
 
-  constructor(terrain: Terrain) {
+  constructor(terrain: Environment) {
     this.terrain = terrain;
   }
 
@@ -104,7 +104,9 @@ export class FootIK {
     const ikData = this.map.get(mesh.geometry as THREE.BufferGeometry);
     if (!ikData) return;
 
-    const posAttr = mesh.geometry.getAttribute('position') as THREE.BufferAttribute;
+    const posAttr = mesh.geometry.getAttribute(
+      'position',
+    ) as THREE.BufferAttribute;
     const { indices, originalX, originalY, originalZ, weights } = ikData;
 
     // Mesh Y-rotation: rotate local vertex XZ to world space
@@ -139,10 +141,12 @@ export class FootIK {
       const t2 = this.terrain.getTerrainY(worldX - NUDGE, worldZ);
       const t3 = this.terrain.getTerrainY(worldX, worldZ + NUDGE);
       const t4 = this.terrain.getTerrainY(worldX, worldZ - NUDGE);
-      if (Math.abs(t1 - tY) > DISCONTINUITY ||
-          Math.abs(t2 - tY) > DISCONTINUITY ||
-          Math.abs(t3 - tY) > DISCONTINUITY ||
-          Math.abs(t4 - tY) > DISCONTINUITY) {
+      if (
+        Math.abs(t1 - tY) > DISCONTINUITY ||
+        Math.abs(t2 - tY) > DISCONTINUITY ||
+        Math.abs(t3 - tY) > DISCONTINUITY ||
+        Math.abs(t4 - tY) > DISCONTINUITY
+      ) {
         return; // step detected — originals already restored
       }
     }
