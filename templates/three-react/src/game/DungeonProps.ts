@@ -411,26 +411,45 @@ export interface PlacedProp {
 
 /** Create a small floating label sprite for a potion/bottle prop */
 function createPropPotionLabel(text: string, color: string): THREE.Sprite {
+  const isUnknown = text === '?';
   const canvas = document.createElement('canvas');
-  canvas.width = 128;
-  canvas.height = 32;
+  canvas.width = isUnknown ? 96 : 192;
+  canvas.height = isUnknown ? 96 : 48;
   const ctx = canvas.getContext('2d')!;
-  ctx.font = 'bold 16px monospace';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  const metrics = ctx.measureText(text);
-  const pw = Math.min(metrics.width + 12, 120);
-  const px = (128 - pw) / 2;
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
-  ctx.roundRect(px, 2, pw, 28, 6);
-  ctx.fill();
-  ctx.fillStyle = color;
-  ctx.fillText(text, 64, 17);
+
+  if (isUnknown) {
+    ctx.font = 'bold 52px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+    ctx.beginPath();
+    ctx.arc(48, 48, 34, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = color;
+    ctx.fillText('?', 48, 51);
+  } else {
+    ctx.font = 'bold 26px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const metrics = ctx.measureText(text);
+    const pw = Math.min(metrics.width + 18, 180);
+    const px = (192 - pw) / 2;
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+    ctx.roundRect(px, 3, pw, 42, 10);
+    ctx.fill();
+    ctx.fillStyle = color;
+    ctx.fillText(text, 96, 26);
+  }
+
   const texture = new THREE.CanvasTexture(canvas);
   texture.minFilter = THREE.LinearFilter;
   const mat = new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false });
   const sprite = new THREE.Sprite(mat);
-  sprite.scale.set(0.3, 0.075, 1);
+  if (isUnknown) {
+    sprite.scale.set(0.20, 0.20, 1);
+  } else {
+    sprite.scale.set(0.42, 0.105, 1);
+  }
   sprite.renderOrder = 2;
   sprite.raycast = () => {}; // exclude from raycaster
   return sprite;
@@ -441,24 +460,25 @@ function updatePropPotionLabel(sprite: THREE.Sprite, text: string, color: string
   const mat = sprite.material as THREE.SpriteMaterial;
   const oldTex = mat.map;
   const canvas = document.createElement('canvas');
-  canvas.width = 128;
-  canvas.height = 32;
+  canvas.width = 192;
+  canvas.height = 48;
   const ctx = canvas.getContext('2d')!;
-  ctx.font = 'bold 16px monospace';
+  ctx.font = 'bold 26px monospace';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   const metrics = ctx.measureText(text);
-  const pw = Math.min(metrics.width + 12, 120);
-  const px = (128 - pw) / 2;
+  const pw = Math.min(metrics.width + 18, 180);
+  const px = (192 - pw) / 2;
   ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
-  ctx.roundRect(px, 2, pw, 28, 6);
+  ctx.roundRect(px, 3, pw, 42, 10);
   ctx.fill();
   ctx.fillStyle = color;
-  ctx.fillText(text, 64, 17);
+  ctx.fillText(text, 96, 26);
   const texture = new THREE.CanvasTexture(canvas);
   texture.minFilter = THREE.LinearFilter;
   mat.map = texture;
   mat.needsUpdate = true;
+  sprite.scale.set(0.42, 0.105, 1);
   if (oldTex) oldTex.dispose();
 }
 
@@ -771,20 +791,28 @@ export class DungeonPropSystem {
           // Assign random potion color index and tint geometry
           let potionColorIndex: number | undefined;
           if (isPotion) {
-            potionColorIndex = rng.int(0, 8);
+            potionColorIndex = rng.int(0, POTION_HUES.length);
             geo = tintGeometry(geo, POTION_HUES[potionColorIndex], 1.2);
           }
 
           let openGeo: THREE.BufferGeometry | undefined;
           if (isChest && entry.voxPathClosed) {
-            const voxScale = await getClosedVoxelScale(entry, cellSize);
-            if (voxScale) {
-              // Load open model using closed model's voxel scale
-              const { model: openModel } = await loadVoxModel(entry.voxPath);
-              const openTargetHeight = openModel.size.z * voxScale; // same per-voxel scale
-              openGeo = await loadPropGeo(entry, cellSize, false, openTargetHeight) ?? undefined;
-            } else {
-              openGeo = await loadPropGeo(entry, cellSize, false) ?? undefined;
+            try {
+              const voxScale = await getClosedVoxelScale(entry, cellSize);
+              if (voxScale) {
+                // Load open model using closed model's voxel scale
+                const { model: openModel } = await loadVoxModel(entry.voxPath);
+                const openTargetHeight = openModel.size.z * voxScale; // same per-voxel scale
+                openGeo = await loadPropGeo(entry, cellSize, false, openTargetHeight) ?? undefined;
+              } else {
+                openGeo = await loadPropGeo(entry, cellSize, false) ?? undefined;
+              }
+            } catch (err) {
+              console.warn(`[DungeonProps] Failed to load open geo for ${entry.id}:`, err);
+              // Fallback: try loading open variant without height matching
+              try {
+                openGeo = await loadPropGeo(entry, cellSize, false) ?? undefined;
+              } catch { /* give up */ }
             }
           }
 
@@ -829,7 +857,7 @@ export class DungeonPropSystem {
             mesh.userData.colorIndex = potionColorIndex;
             const ps = this.potionSystem;
             const identified = ps ? ps.isIdentified(potionColorIndex) : false;
-            const text = identified ? (ps?.getLabel(potionColorIndex) ?? '???') : '???';
+            const text = identified ? (ps?.getLabel(potionColorIndex) ?? '?') : '?';
             const positive = ps ? ps.isPositive(potionColorIndex) : true;
             const color = identified ? (positive ? '#44ff66' : '#ff4444') : '#ffffff';
             const propHeight = entry.baseHeight * propScale;
@@ -965,7 +993,7 @@ export class DungeonPropSystem {
 
             // Tint potion/bottle geometry
             if (isSmallPotion) {
-              smallPotionColorIndex = rng.int(0, 8);
+              smallPotionColorIndex = rng.int(0, POTION_HUES.length);
               geo = tintGeometry(geo, POTION_HUES[smallPotionColorIndex], 1.2);
             }
 
@@ -999,7 +1027,7 @@ export class DungeonPropSystem {
               mesh.userData.colorIndex = smallPotionColorIndex;
               const ps = this.potionSystem;
               const identified = ps ? ps.isIdentified(smallPotionColorIndex) : false;
-              const text = identified ? (ps?.getLabel(smallPotionColorIndex) ?? '???') : '???';
+              const text = identified ? (ps?.getLabel(smallPotionColorIndex) ?? '?') : '?';
               const positive = ps ? ps.isPositive(smallPotionColorIndex) : true;
               const color = identified ? (positive ? '#44ff66' : '#ff4444') : '#ffffff';
               const propScale = entry.scalesWithDungeon ? cellSize : 1;
@@ -1022,7 +1050,7 @@ export class DungeonPropSystem {
 
             // Tint potion/bottle geometry
             if (isSmallPotion) {
-              smallPotionColorIndex = rng.int(0, 8);
+              smallPotionColorIndex = rng.int(0, POTION_HUES.length);
               geo = tintGeometry(geo, POTION_HUES[smallPotionColorIndex], 1.2);
             }
 
@@ -1041,7 +1069,7 @@ export class DungeonPropSystem {
               mesh.userData.colorIndex = smallPotionColorIndex;
               const ps = this.potionSystem;
               const identified = ps ? ps.isIdentified(smallPotionColorIndex) : false;
-              const text = identified ? (ps?.getLabel(smallPotionColorIndex) ?? '???') : '???';
+              const text = identified ? (ps?.getLabel(smallPotionColorIndex) ?? '?') : '?';
               const positive = ps ? ps.isPositive(smallPotionColorIndex) : true;
               const color = identified ? (positive ? '#44ff66' : '#ff4444') : '#ffffff';
               const propScale = entry.scalesWithDungeon ? cellSize : 1;
@@ -1237,8 +1265,26 @@ export class DungeonPropSystem {
       const entry = getRandomProp(category, () => rng.next());
       if (!entry) continue;
 
-      const geo = await loadPropGeo(entry, cellSize, entry.category === 'chest');
+      const isCorridorChest = entry.category === 'chest';
+      const geo = await loadPropGeo(entry, cellSize, isCorridorChest);
       if (!geo) continue;
+
+      // Load open geometry for corridor chests (same logic as room chests)
+      let openGeo: THREE.BufferGeometry | undefined;
+      if (isCorridorChest && entry.voxPathClosed) {
+        try {
+          const voxScale = await getClosedVoxelScale(entry, cellSize);
+          if (voxScale) {
+            const { model: openModel } = await loadVoxModel(entry.voxPath);
+            const openTargetHeight = openModel.size.z * voxScale;
+            openGeo = await loadPropGeo(entry, cellSize, false, openTargetHeight) ?? undefined;
+          } else {
+            openGeo = await loadPropGeo(entry, cellSize, false) ?? undefined;
+          }
+        } catch {
+          try { openGeo = await loadPropGeo(entry, cellSize, false) ?? undefined; } catch { /* give up */ }
+        }
+      }
 
       occupied.add(`${cell.gx},${cell.gz}`);
 
@@ -1269,6 +1315,11 @@ export class DungeonPropSystem {
 
       mesh.castShadow = true;
       mesh.receiveShadow = true;
+      if (isCorridorChest) {
+        const mat = mesh.material as THREE.MeshStandardMaterial;
+        mat.emissive.setHex(0x330808);
+        mat.emissiveIntensity = 0.4;
+      }
       this.parent.add(mesh);
       this.attachLight(mesh, entry);
 
@@ -1277,7 +1328,7 @@ export class DungeonPropSystem {
         radius: entry.radius * (entry.scalesWithDungeon ? cellSize : 1),
         weight: Infinity,
       });
-      this.props.push({ mesh, entity: propEntity, entry, gridCell: { gx: cell.gx, gz: cell.gz } });
+      this.props.push({ mesh, entity: propEntity, entry, gridCell: { gx: cell.gx, gz: cell.gz }, openGeo });
     }
 
     // Balance lights per flood-fill region: cull excess, seed missing

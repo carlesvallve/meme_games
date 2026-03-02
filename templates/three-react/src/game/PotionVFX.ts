@@ -49,44 +49,89 @@ function createCanvasSprite(
   return sprite;
 }
 
-/** Create a sprite with emoji + optional small number overlay (e.g. 🛡️ with "3") */
-function createEmojiWithNumber(
-  emoji: string,
-  num: number | null,
-  emojiFontSize = 24,
-  size = 48,
+/** SVG path data for clean flat status icons (16×16 viewBox) */
+const STATUS_SVG: Record<string, { path: string; color: string }> = {
+  heal:    { path: 'M8 2C6.3 2 4 3.6 4 6.4c0 3.2 4 7.6 4 7.6s4-4.4 4-7.6C12 3.6 9.7 2 8 2z', color: '#ff4466' },
+  poison:  { path: 'M8 1a2 2 0 0 0-2 2v2.5L4 8v1h1v4a3 3 0 0 0 6 0V9h1V8l-2-2.5V3a2 2 0 0 0-2-2zM7 10a1 1 0 1 1 0-2 1 1 0 0 1 0 2zm2.5 2a1 1 0 1 1 0-2 1 1 0 0 1 0 2z', color: '#88dd44' },
+  speed:   { path: 'M13 3L7 8h4l-5 6 2-4.5H5L9 3h4z', color: '#ffcc22' },
+  slow:    { path: 'M8 1C4.1 1 1 4.1 1 8s3.1 7 7 7 7-3.1 7-7-3.1-7-7-7zm0 12.5c-3 0-5.5-2.5-5.5-5.5S5 2.5 8 2.5 13.5 5 13.5 8 11 13.5 8 13.5zM8.5 4H7v5l4 2.4.8-1.2-3.3-2V4z', color: '#8888cc' },
+  armor:   { path: 'M8 1L2 4v4c0 4 2.7 6.6 6 8 3.3-1.4 6-4 6-8V4L8 1z', color: '#55aaff' },
+  fragile: { path: 'M8 14s-6-4.4-6-8.4C2 3.3 4.3 1 7 1c1 0 1.8.5 1 1.2C7.2.5 8 0 9 1c2.7 0 5 2.3 5 4.6 0 4-6 8.4-6 8.4zM6 6l4 4M10 6l-4 4', color: '#dd6644' },
+  shadow:  { path: 'M8 2C5.2 2 3 4.2 3 7c0 1.6.8 3 2 4v2a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1v-2c1.2-1 2-2.4 2-4 0-2.8-2.2-5-5-5zm0 2a3 3 0 0 1 3 3c0 1-.5 1.8-1.3 2.4l-.7.5V12H7v-2.1l-.7-.5C5.5 8.8 5 8 5 7a3 3 0 0 1 3-3z', color: '#aa88ff' },
+  frenzy:    { path: 'M8 1c-.6 2-2.5 3.5-2.5 6C5.5 9.5 6.6 11 8 11s2.5-1.5 2.5-4C10.5 4.5 8.6 3 8 1zM8 13c-1 0-1.8-.5-2.2-1.2C4 12.5 3 13.8 3 15h10c0-1.2-1-2.5-2.8-3.2-.4.7-1.2 1.2-2.2 1.2z', color: '#ff6622' },
+  clarity:   { path: 'M8 3C5.8 3 4 4.8 4 7s1.8 4 4 4 4-1.8 4-4-1.8-4-4-4zm0 6.5a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5zM8 5.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zM3 2l1.5 1.5M13 2l-1.5 1.5M3 12l1.5-1.5M13 12l-1.5-1.5', color: '#44ddff' },
+  confusion: { path: 'M8 2C6 2 5 3.5 5.5 5c.3.8 1 1.2 1 2s-.5 1.5-1 2.5C5 10.5 5.5 12 7 13c1 .7 2.5.5 3-.5.3-.6 0-1.2-.5-1.5s-1-.5-1-1.2c0-.5.5-1 1-1.5s1.5-1 2-2c.7-1.3.3-3-1-4C10 1.5 9 2 8 2zm0 12a1 1 0 1 0 0 2 1 1 0 0 0 0-2z', color: '#dd44ff' },
+};
+
+/** Render an SVG path to a canvas-based Three.js sprite with optional number badge */
+function createSvgIconSprite(
+  effect: string,
+  num: number | null = null,
+  size = 64,
 ): THREE.Sprite {
   const canvas = document.createElement('canvas');
   canvas.width = size;
   canvas.height = size;
   const ctx = canvas.getContext('2d')!;
-  // Emoji
-  ctx.font = `${emojiFontSize}px serif`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(emoji, size / 2, size / 2);
-  // Number badge
-  if (num !== null) {
-    ctx.font = `bold ${Math.round(emojiFontSize * 0.5)}px monospace`;
-    ctx.strokeStyle = '#000';
-    ctx.lineWidth = 2.5;
-    ctx.strokeText(`${num}`, size * 0.72, size * 0.75);
+  const svg = STATUS_SVG[effect];
+  if (!svg) {
+    // Fallback: draw first letter
+    ctx.font = `bold ${size * 0.5}px monospace`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
     ctx.fillStyle = '#fff';
-    ctx.fillText(`${num}`, size * 0.72, size * 0.75);
+    ctx.fillText(effect[0].toUpperCase(), size / 2, size / 2);
+  } else {
+    // Draw circular background
+    const cx = size / 2;
+    const cy = size / 2;
+    const r = size * 0.42;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fill();
+    ctx.strokeStyle = svg.color;
+    ctx.lineWidth = size * 0.04;
+    ctx.stroke();
+
+    // Draw SVG path scaled to fit inside the circle
+    const iconScale = size / 16 * 0.55;
+    const offsetX = (size - 16 * iconScale) / 2;
+    const offsetY = (size - 16 * iconScale) / 2;
+    // Scale the path to fit inside the circle
+    ctx.save();
+    ctx.translate(offsetX, offsetY);
+    ctx.scale(iconScale, iconScale);
+    const p = new Path2D(svg.path);
+    ctx.fillStyle = svg.color;
+    ctx.fill(p);
+    ctx.restore();
+  }
+
+  // Number badge (for armor hits)
+  if (num !== null) {
+    const badgeR = size * 0.20;
+    const bx = size * 0.76;
+    const by = size * 0.76;
+    ctx.beginPath();
+    ctx.arc(bx, by, badgeR, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(0,0,0,0.85)';
+    ctx.fill();
+    ctx.font = `bold ${Math.round(size * 0.28)}px monospace`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#fff';
+    ctx.fillText(`${num}`, bx, by);
   }
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.minFilter = THREE.LinearFilter;
   const mat = new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false });
   const sprite = new THREE.Sprite(mat);
-  sprite.scale.set(0.25, 0.25, 1);
+  sprite.scale.set(0.20, 0.20, 1);
   sprite.renderOrder = 1001;
   sprite.raycast = () => {};
   return sprite;
-}
-
-function createEmojiSprite(emoji: string, fontSize = 28, size = 48): THREE.Sprite {
-  return createEmojiWithNumber(emoji, null, fontSize, size);
 }
 
 // ── Persistent status icon ──
@@ -98,8 +143,8 @@ interface StatusIcon {
 }
 
 // Icon spacing for horizontal row layout
-const ICON_SIZE = 0.22;
-const ICON_GAP = 0.04;
+const ICON_SIZE = 0.18;
+const ICON_GAP = 0.03;
 const ICON_BASE_Y = 0.6;
 
 // ── System ──
@@ -129,13 +174,13 @@ export class PotionVFX {
 
   spawnPoisonTick(char: Character): void {
     const pos = char.mesh.position;
-    // Skull icon
-    const skull = createEmojiSprite('☠️', 20, 32);
+    // Poison icon
+    const icon = createSvgIconSprite('poison', null, 32);
     const y = pos.y + 0.55;
-    skull.position.set(pos.x - 0.08, y, pos.z);
-    skull.scale.set(0.18, 0.18, 1);
-    this.scene.add(skull);
-    this.floatingNumbers.push({ sprite: skull, startY: y, age: 0, lifetime: 1.4, baseScaleX: 0.18, baseScaleY: 0.18 });
+    icon.position.set(pos.x - 0.08, y, pos.z);
+    icon.scale.set(0.18, 0.18, 1);
+    this.scene.add(icon);
+    this.floatingNumbers.push({ sprite: icon, startY: y, age: 0, lifetime: 1.4, baseScaleX: 0.18, baseScaleY: 0.18 });
 
     // -1 number
     const num = createCanvasSprite('-1', '#dd4444');
@@ -147,19 +192,9 @@ export class PotionVFX {
   // ── Status icons ──
 
   private createIconForEffect(effect: PotionEffect, armorHits?: number): THREE.Sprite | null {
-    switch (effect) {
-      case 'armor':   return createEmojiWithNumber('🛡️', armorHits ?? 3, 22, 40);
-      case 'shadow':  return createEmojiSprite('👻', 22, 40);
-      case 'frenzy':  return createEmojiSprite('❗', 22, 40);
-      case 'speed':   return createEmojiSprite('⚡', 22, 40);
-      case 'slow':    return createEmojiSprite('🐌', 22, 40);
-      case 'fragile': {
-        const s = createCanvasSprite('x2', '#dd4444', 18, 40, 24);
-        s.scale.set(0.22, 0.11, 1);
-        return s;
-      }
-      default: return null;
-    }
+    if (!STATUS_SVG[effect]) return null;
+    const num = effect === 'armor' ? (armorHits ?? 3) : null;
+    return createSvgIconSprite(effect, num);
   }
 
   /** Called when a potion is drunk — spawn appropriate VFX */
@@ -201,7 +236,7 @@ export class PotionVFX {
       return;
     }
 
-    const sprite = createEmojiWithNumber('🛡️', hitsRemaining, 22, 40);
+    const sprite = createSvgIconSprite('armor', hitsRemaining);
     sprite.position.copy(old.sprite.position);
     this.scene.add(sprite);
     this.statusIcons[idx] = { effect: 'armor', sprite, age: old.age };
@@ -221,7 +256,10 @@ export class PotionVFX {
 
   // ── Update ──
 
-  update(dt: number, char: Character, shadowActive = false): void {
+  /** Reusable camera-right vector for horizontal icon layout */
+  private static _camRight = new THREE.Vector3();
+
+  update(dt: number, char: Character, shadowActive = false, camera?: THREE.Camera): void {
     // Auto-detect shadow state
     this.targetOpacity = shadowActive ? 0.5 : 1.0;
     const pos = char.mesh.position;
@@ -261,29 +299,39 @@ export class PotionVFX {
     }
 
     // Extra Y offset when HP bar is visible (so icons sit above it)
-    const hpBarBump = char.showingHpBar ? 0.12 : 0;
+    const hpBarBump = char.showingHpBar ? 0.22 : 0;
 
     // Status icons — arrange in centered horizontal row above character
+    // Use camera-right vector so the row is always screen-horizontal
     const count = this.statusIcons.length;
     const totalWidth = count > 0 ? count * ICON_SIZE + (count - 1) * ICON_GAP : 0;
-    const startX = -totalWidth / 2 + ICON_SIZE / 2;
+    const startOff = -totalWidth / 2 + ICON_SIZE / 2;
+
+    const camRight = PotionVFX._camRight;
+    if (camera) {
+      camRight.set(1, 0, 0).applyQuaternion(camera.quaternion);
+    } else {
+      camRight.set(1, 0, 0);
+    }
 
     for (let i = 0; i < this.statusIcons.length; i++) {
       const icon = this.statusIcons[i];
       icon.age += dt;
 
-      const ox = startX + i * (ICON_SIZE + ICON_GAP);
-      let oy = ICON_BASE_Y + hpBarBump;
+      const off = startOff + i * (ICON_SIZE + ICON_GAP);
+      const oy = ICON_BASE_Y + hpBarBump + Math.sin(icon.age * 2) * 0.02;
 
       // Frenzy: pulsing scale
       if (icon.effect === 'frenzy') {
         const pulse = 1 + Math.sin(icon.age * 6) * 0.15;
-        icon.sprite.scale.set(0.25 * pulse, 0.25 * pulse, 1);
+        icon.sprite.scale.set(0.20 * pulse, 0.20 * pulse, 1);
       }
 
-      // Gentle bob
-      oy += Math.sin(icon.age * 2) * 0.02;
-      icon.sprite.position.set(pos.x + ox, pos.y + oy, pos.z);
+      icon.sprite.position.set(
+        pos.x + camRight.x * off,
+        pos.y + oy,
+        pos.z + camRight.z * off,
+      );
     }
 
     // Shadow opacity lerp

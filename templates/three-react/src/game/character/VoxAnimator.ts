@@ -13,6 +13,8 @@ export interface VoxAnimOwner {
   groundY: number;
   footSfxTimer: number;
   params: MovementParams;
+  /** Multiplier for walk animation FPS and hop frequency (1.0 = default rhythm). */
+  animSpeedScale: number;
 }
 
 export class VoxAnimator {
@@ -113,7 +115,9 @@ export class VoxAnimator {
     const frames = this.voxData.frames[this.voxAnimState];
     if (frames.length === 0) return;
 
-    const fps = VOX_FPS[this.voxAnimState] ?? 4;
+    const baseFps = VOX_FPS[this.voxAnimState] ?? 4;
+    // Scale walk animation speed with movement speed (idle/action stay at base rate)
+    const fps = this.voxAnimState === 'walk' ? baseFps * owner.animSpeedScale : baseFps;
     this.voxFrameTimer += dt;
 
     if (this.voxFrameTimer >= 1 / fps) {

@@ -201,27 +201,27 @@ const ALL_PROPS: DungeonPropEntry[] = [
   // ── Destroyable ──
 
   // Barrels
-  { id: 'barrel_a',   category: 'barrel', voxPath: `${P}/Barrel/Barrel%20A%20(Wood)/VOX/barrel_a_closed.vox`,             baseHeight: 0.22, radius: 0.1, placement: 'wall', destroyable: true },
-  { id: 'barrel_b',   category: 'barrel', voxPath: `${P}/Barrel/Barrel%20B%20(Dark%20Wood)/VOX/barrel_b_closed.vox`,       baseHeight: 0.22, radius: 0.1, placement: 'wall', destroyable: true },
-  { id: 'barrel_c',   category: 'barrel', voxPath: `${P}/Barrel/Barrel%20C%20(Darkest%20Wood)/VOX/barrel_c_closed.vox`,   baseHeight: 0.22, radius: 0.1, placement: 'wall', destroyable: true },
-  { id: 'barrel_tnt', category: 'barrel', voxPath: `${P}/Barrel/TNT%20Barrel/VOX/tnt_barrel.vox`,                          baseHeight: 0.22, radius: 0.1, placement: 'wall', destroyable: true },
-  { id: 'beer_barrel_a', category: 'barrel', voxPath: `${P}/Barrel/Beer%20Barrel%20A%20(Wood)/VOX/beer_barrel_a.vox`,          baseHeight: 0.22, radius: 0.1, placement: 'wall', destroyable: true },
-  { id: 'beer_barrel_b', category: 'barrel', voxPath: `${P}/Barrel/Beer%20Barrel%20B%20(Dark%20Wood)/VOX/beer_barrel_b.vox`,    baseHeight: 0.22, radius: 0.1, placement: 'wall', destroyable: true },
-  { id: 'beer_barrel_c', category: 'barrel', voxPath: `${P}/Barrel/Beer%20Barrel%20C%20(Darkest%20Wood)/VOX/beer_barrel_c.vox`, baseHeight: 0.22, radius: 0.1, placement: 'wall', destroyable: true },
+  { id: 'barrel_a',   category: 'barrel', voxPath: `${P}/Barrel/Barrel%20A%20(Wood)/VOX/barrel_a_closed.vox`,             baseHeight: 0.22, radius: 0.16, placement: 'wall', destroyable: true},
+  { id: 'barrel_b',   category: 'barrel', voxPath: `${P}/Barrel/Barrel%20B%20(Dark%20Wood)/VOX/barrel_b_closed.vox`,       baseHeight: 0.22, radius: 0.16, placement: 'wall', destroyable: true},
+  { id: 'barrel_c',   category: 'barrel', voxPath: `${P}/Barrel/Barrel%20C%20(Darkest%20Wood)/VOX/barrel_c_closed.vox`,   baseHeight: 0.22, radius: 0.16, placement: 'wall', destroyable: true},
+  { id: 'barrel_tnt', category: 'barrel', voxPath: `${P}/Barrel/TNT%20Barrel/VOX/tnt_barrel.vox`,                          baseHeight: 0.22, radius: 0.16, placement: 'wall', destroyable: true},
+  { id: 'beer_barrel_a', category: 'barrel', voxPath: `${P}/Barrel/Beer%20Barrel%20A%20(Wood)/VOX/beer_barrel_a.vox`,          baseHeight: 0.22, radius: 0.16, placement: 'wall', destroyable: true},
+  { id: 'beer_barrel_b', category: 'barrel', voxPath: `${P}/Barrel/Beer%20Barrel%20B%20(Dark%20Wood)/VOX/beer_barrel_b.vox`,    baseHeight: 0.22, radius: 0.16, placement: 'wall', destroyable: true},
+  { id: 'beer_barrel_c', category: 'barrel', voxPath: `${P}/Barrel/Beer%20Barrel%20C%20(Darkest%20Wood)/VOX/beer_barrel_c.vox`, baseHeight: 0.22, radius: 0.16, placement: 'wall', destroyable: true},
 
   // Boxes / crates
-  { id: 'box_a_a', category: 'box', voxPath: `${P}/Box/Box%20A%20(Wood)/VOX/box_a_a.vox`,             baseHeight: 0.18, radius: 0.1, placement: 'wall', destroyable: true },
-  { id: 'box_a_b', category: 'box', voxPath: `${P}/Box/Box%20A%20(Wood)/VOX/box_a_b.vox`,             baseHeight: 0.18, radius: 0.1, placement: 'wall', destroyable: true },
-  { id: 'box_b_a', category: 'box', voxPath: `${P}/Box/Box%20B%20(Dark%20Wood)/VOX/box_b_a.vox`,       baseHeight: 0.18, radius: 0.1, placement: 'wall', destroyable: true },
-  { id: 'box_b_b', category: 'box', voxPath: `${P}/Box/Box%20B%20(Dark%20Wood)/VOX/box_b_b.vox`,       baseHeight: 0.18, radius: 0.1, placement: 'wall', destroyable: true },
-  { id: 'box_c_a', category: 'box', voxPath: `${P}/Box/Box%20C%20(Darkest%20Wood)/VOX/box_c_a.vox`,   baseHeight: 0.18, radius: 0.1, placement: 'wall', destroyable: true },
-  { id: 'box_c_b', category: 'box', voxPath: `${P}/Box/Box%20C%20(Darkest%20Wood)/VOX/box_c_b.vox`,   baseHeight: 0.18, radius: 0.1, placement: 'wall', destroyable: true },
+  { id: 'box_a_a', category: 'box', voxPath: `${P}/Box/Box%20A%20(Wood)/VOX/box_a_a.vox`,             baseHeight: 0.18, radius: 0.14, placement: 'wall', destroyable: true},
+  { id: 'box_a_b', category: 'box', voxPath: `${P}/Box/Box%20A%20(Wood)/VOX/box_a_b.vox`,             baseHeight: 0.18, radius: 0.14, placement: 'wall', destroyable: true},
+  { id: 'box_b_a', category: 'box', voxPath: `${P}/Box/Box%20B%20(Dark%20Wood)/VOX/box_b_a.vox`,       baseHeight: 0.18, radius: 0.14, placement: 'wall', destroyable: true},
+  { id: 'box_b_b', category: 'box', voxPath: `${P}/Box/Box%20B%20(Dark%20Wood)/VOX/box_b_b.vox`,       baseHeight: 0.18, radius: 0.14, placement: 'wall', destroyable: true},
+  { id: 'box_c_a', category: 'box', voxPath: `${P}/Box/Box%20C%20(Darkest%20Wood)/VOX/box_c_a.vox`,   baseHeight: 0.18, radius: 0.14, placement: 'wall', destroyable: true},
+  { id: 'box_c_b', category: 'box', voxPath: `${P}/Box/Box%20C%20(Darkest%20Wood)/VOX/box_c_b.vox`,   baseHeight: 0.18, radius: 0.14, placement: 'wall', destroyable: true},
 
   // Pots
-  { id: 'pot_a', category: 'pot', voxPath: `${P}/Pot/Pot%20A%20(Clay)/VOX/pot_a.vox`,             baseHeight: 0.16, radius: 0.06, placement: 'wall', destroyable: true },
-  { id: 'pot_b', category: 'pot', voxPath: `${P}/Pot/Pot%20B%20(Dark%20Clay)/VOX/pot_b.vox`,       baseHeight: 0.16, radius: 0.06, placement: 'wall', destroyable: true },
-  { id: 'pot_c', category: 'pot', voxPath: `${P}/Pot/Pot%20C%20(Darkest%20Clay)/VOX/pot_c.vox`,   baseHeight: 0.16, radius: 0.06, placement: 'wall', destroyable: true },
-  { id: 'pot_d', category: 'pot', voxPath: `${P}/Pot/Pot%20D%20(Metal)/VOX/pot_d.vox`,             baseHeight: 0.16, radius: 0.06, placement: 'wall', destroyable: true },
+  { id: 'pot_a', category: 'pot', voxPath: `${P}/Pot/Pot%20A%20(Clay)/VOX/pot_a.vox`,             baseHeight: 0.16, radius: 0.12, placement: 'wall', destroyable: true},
+  { id: 'pot_b', category: 'pot', voxPath: `${P}/Pot/Pot%20B%20(Dark%20Clay)/VOX/pot_b.vox`,       baseHeight: 0.16, radius: 0.12, placement: 'wall', destroyable: true},
+  { id: 'pot_c', category: 'pot', voxPath: `${P}/Pot/Pot%20C%20(Darkest%20Clay)/VOX/pot_c.vox`,   baseHeight: 0.16, radius: 0.12, placement: 'wall', destroyable: true},
+  { id: 'pot_d', category: 'pot', voxPath: `${P}/Pot/Pot%20D%20(Metal)/VOX/pot_d.vox`,             baseHeight: 0.16, radius: 0.12, placement: 'wall', destroyable: true},
 
   // ── Scales with dungeon (architectural) ──
 

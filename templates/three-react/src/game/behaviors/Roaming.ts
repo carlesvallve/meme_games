@@ -38,6 +38,9 @@ export class Roaming extends Behavior {
   private movementParams: MovementParams;
   private opts: Required<RoamingBehaviorOptions>;
   private state: RoamState = 'idle';
+
+  /** When true, movement directions are randomly scrambled */
+  public confusionActive = false;
   private idleTimer = 0;
   private waypoints: { x: number; z: number }[] = [];
   private rawWaypoints: { x: number; z: number }[] = [];
@@ -188,8 +191,17 @@ export class Roaming extends Behavior {
       }
     }
 
-    const nx = dx / dist;
-    const nz = dz / dist;
+    let nx = dx / dist;
+    let nz = dz / dist;
+    // Confusion: randomly rotate movement direction
+    if (this.confusionActive && Math.random() < 0.15) {
+      const angles = [Math.PI / 2, Math.PI, -Math.PI / 2];
+      const rot = angles[Math.floor(Math.random() * 3)];
+      const c = Math.cos(rot), s = Math.sin(rot);
+      const onx = nx;
+      nx = onx * c - nz * s;
+      nz = onx * s + nz * c;
+    }
     // Clamp speed so the character decelerates into the final waypoint
     // and never overshoots it
     let speed = mp.speed;

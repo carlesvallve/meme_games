@@ -3000,6 +3000,11 @@ export class Terrain {
     return this.roomVisibility;
   }
 
+  /** Door center world positions + orientation (for frenzy spawn positioning) */
+  getDoorCenters(): { x: number; z: number; orientation: 'NS' | 'EW' }[] {
+    return this.doorCenters;
+  }
+
   /** World position where the player should spawn (cell center, in front of portal). */
   getEntrancePosition(): THREE.Vector3 | null {
     return this.propSystem?.getEntrancePosition() ?? this.entranceRoomCenter;

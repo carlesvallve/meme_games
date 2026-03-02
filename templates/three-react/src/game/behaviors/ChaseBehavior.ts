@@ -15,6 +15,9 @@ export class ChaseBehavior extends Behavior {
   private attackCooldown: number;
   private chaseRange: number;
 
+  /** When true, movement directions are randomly scrambled */
+  public confusionActive = false;
+
   private state: ChaseState = 'idle';
   private target: BehaviorAgent | null = null;
   private targetAlive = true;
@@ -118,8 +121,11 @@ export class ChaseBehavior extends Behavior {
     } else {
       // No path - try direct movement
       if (dist > 0.1) {
-        const nx = dx / dist;
-        const nz = dz / dist;
+        let nx = dx / dist;
+        let nz = dz / dist;
+        if (this.confusionActive && Math.random() < 0.15) {
+          [nx, nz] = ChaseBehavior.scrambleDir(nx, nz);
+        }
         agent.move(nx, nz, this.movementParams.speed, this.movementParams.stepHeight, this.movementParams.capsuleRadius, dt, this.movementParams.slopeHeight);
         agent.applyHop(this.movementParams.hopHeight);
       } else {
@@ -194,11 +200,22 @@ export class ChaseBehavior extends Behavior {
       }
     }
 
-    const nx = dx / dist;
-    const nz = dz / dist;
+    let nx = dx / dist;
+    let nz = dz / dist;
+    if (this.confusionActive && Math.random() < 0.15) {
+      [nx, nz] = ChaseBehavior.scrambleDir(nx, nz);
+    }
     const mp = this.movementParams;
     agent.move(nx, nz, mp.speed, mp.stepHeight, mp.capsuleRadius, dt, mp.slopeHeight);
     agent.applyHop(mp.hopHeight);
+  }
+
+  /** Rotate a direction vector by a random 90/180/270° */
+  private static scrambleDir(nx: number, nz: number): [number, number] {
+    const angles = [Math.PI / 2, Math.PI, -Math.PI / 2];
+    const rot = angles[Math.floor(Math.random() * 3)];
+    const c = Math.cos(rot), s = Math.sin(rot);
+    return [nx * c - nz * s, nx * s + nz * c];
   }
 
   private resetStuck(agent: BehaviorAgent): void {

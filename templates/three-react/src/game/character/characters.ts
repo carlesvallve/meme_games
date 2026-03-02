@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { ALL_VOX_CHARACTERS, type VoxCharEntry } from './VoxCharacterDB';
+import { ALL_VOX_CHARACTERS, getArchetype, type VoxCharEntry } from './VoxCharacterDB';
 
 // ── Character slots ──
 // One slot per hero; all VOX_HEROES are shown on the start screen grid.
@@ -14,10 +14,25 @@ const ALL_SLOTS: CharacterType[] = [
 ];
 
 // ── VOX Roster ──
-// Each slot maps to a random character from the full roster (heroes + monsters).
+// Each slot maps to a unique character *type* (archetype).
+// If a type has variants (e.g. Blob A/B/C/D), one is picked at random.
 
 function pickRoster(): Record<CharacterType, VoxCharEntry> {
-  const shuffled = [...ALL_VOX_CHARACTERS].sort(() => Math.random() - 0.5);
+  // Group all characters by base archetype
+  const groups = new Map<string, VoxCharEntry[]>();
+  for (const entry of ALL_VOX_CHARACTERS) {
+    const archetype = getArchetype(entry.name);
+    let group = groups.get(archetype);
+    if (!group) { group = []; groups.set(archetype, group); }
+    group.push(entry);
+  }
+
+  // Pick one random variant per archetype, then shuffle
+  const uniqueTypes = [...groups.values()].map(
+    variants => variants[Math.floor(Math.random() * variants.length)],
+  );
+  const shuffled = uniqueTypes.sort(() => Math.random() - 0.5);
+
   return Object.fromEntries(
     ALL_SLOTS.map((slot, i) => [slot, shuffled[i % shuffled.length]]),
   ) as Record<CharacterType, VoxCharEntry>;

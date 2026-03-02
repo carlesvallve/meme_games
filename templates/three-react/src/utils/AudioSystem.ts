@@ -19,6 +19,10 @@ import { sfxFireball } from './sfx/fireball';
 import { sfxWoodBreak } from './sfx/woodBreak';
 import { sfxCeramicBreak } from './sfx/ceramicBreak';
 import { sfxDrink } from './sfx/drink';
+import { sfxDeathJingle } from './sfx/deathJingle';
+import { sfxUISelect, sfxUIAccept, sfxUICancel } from './sfx/uiSelect';
+import { sfxGem } from './sfx/gem';
+import { sfxClank } from './sfx/clank';
 
 /**
  * Spatial audio attenuation
@@ -150,6 +154,12 @@ class AudioSystemClass {
         case 'woodBreak':    sfxWoodBreak(ctx, dest); break;
         case 'ceramicBreak': sfxCeramicBreak(ctx, dest); break;
         case 'drink':        sfxDrink(ctx, dest); break;
+        case 'deathJingle':  sfxDeathJingle(ctx, dest); break;
+        case 'gem':          sfxGem(ctx, dest); break;
+        case 'uiSelect':     sfxUISelect(ctx, dest); break;
+        case 'uiAccept':     sfxUIAccept(ctx, dest); break;
+        case 'uiCancel':     sfxUICancel(ctx, dest); break;
+        case 'clank':        sfxClank(ctx, dest); break;
         default:             playTone(ctx, 440, 0.1, 'sine', 0.08); break;
       }
     } catch {

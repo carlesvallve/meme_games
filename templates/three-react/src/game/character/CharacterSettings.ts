@@ -124,6 +124,8 @@ export const VOX_FPS: Record<string, number> = {
 
 /** Default hop frequency (hops per second while walking) */
 export const DEFAULT_HOP_FREQUENCY = 4;
+/** Reference speed for animation scaling (1x hop frequency at this speed) */
+export const ANIM_REFERENCE_SPEED = 3.0;
 
 // ── Climbing ────────────────────────────────────────────────────────────
 

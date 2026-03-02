@@ -1,5 +1,5 @@
 // ── Potion Effect System ──────────────────────────────────────────────
-// 8 distinct effects (4 positive/negative pairs), randomized color mapping per run,
+// 10 distinct effects (5 positive/negative pairs), randomized color mapping per run,
 // timed buffs, identification tracking, and modifier getters.
 
 import * as THREE from 'three';
@@ -11,7 +11,8 @@ export type PotionEffect =
   | 'heal' | 'poison'
   | 'speed' | 'slow'
   | 'armor' | 'fragile'
-  | 'shadow' | 'frenzy';
+  | 'shadow' | 'frenzy'
+  | 'clarity' | 'confusion';
 
 export interface EffectMeta {
   label: string;
@@ -24,18 +25,20 @@ export interface EffectMeta {
 
 export const EFFECT_META: Record<PotionEffect, EffectMeta> = {
   heal:    { label: 'Heal',    positive: true,  duration: 0,  opposite: 'poison'  },
-  poison:  { label: 'Poison',  positive: false, duration: 30, opposite: 'heal'    },
+  poison:  { label: 'Poison',  positive: false, duration: 12, opposite: 'heal'    },
   speed:   { label: 'Speed',   positive: true,  duration: 45, opposite: 'slow'    },
-  slow:    { label: 'Slow',    positive: false, duration: 30, opposite: 'speed'   },
+  slow:    { label: 'Slow',    positive: false, duration: 12, opposite: 'speed'   },
   armor:   { label: 'Armor',   positive: true,  duration: 60, opposite: 'fragile' },
   fragile: { label: 'Fragile', positive: false, duration: 40, opposite: 'armor'   },
-  shadow:  { label: 'Shadow',  positive: true,  duration: 45, opposite: 'frenzy'  },
-  frenzy:  { label: 'Frenzy',  positive: false, duration: 25, opposite: 'shadow'  },
+  shadow:    { label: 'Shadow',    positive: true,  duration: 45, opposite: 'frenzy'    },
+  frenzy:    { label: 'Frenzy',    positive: false, duration: 25, opposite: 'shadow'    },
+  clarity:   { label: 'Clarity',   positive: true,  duration: 30, opposite: 'confusion' },
+  confusion: { label: 'Confusion', positive: false, duration: 20, opposite: 'clarity'   },
 };
 
-// ── 8 distinct hue values for tinting ──
+// ── 10 distinct hue values for tinting ──
 
-/** HSL hue values (0-1) for the 8 potion colors. */
+/** HSL hue values (0-1) for the 10 potion colors. */
 export const POTION_HUES: number[] = [
   0.0,    // red
   0.08,   // orange
@@ -45,6 +48,8 @@ export const POTION_HUES: number[] = [
   0.75,   // purple
   0.88,   // pink
   0.16,   // yellow
+  0.42,   // teal
+  0.92,   // magenta
 ];
 
 /** Display colors (THREE.Color) for sparkles, labels, etc. */
@@ -80,7 +85,7 @@ const ARMOR_HITS = 3; // number of hits absorbed
 // ── System ──
 
 export class PotionEffectSystem {
-  /** Maps colorIndex (0-7) → PotionEffect. Shuffled per run. */
+  /** Maps colorIndex (0-9) → PotionEffect. Shuffled per run. */
   readonly colorMapping: PotionEffect[];
 
   /** Currently active timed effects */
@@ -102,7 +107,7 @@ export class PotionEffectSystem {
   constructor(baseSeed: number) {
     // Build shuffled mapping: 8 effects → 8 color indices
     const effects: PotionEffect[] = [
-      'heal', 'poison', 'speed', 'slow', 'armor', 'fragile', 'shadow', 'frenzy',
+      'heal', 'poison', 'speed', 'slow', 'armor', 'fragile', 'shadow', 'frenzy', 'clarity', 'confusion',
     ];
     const rng = new SeededRandom(baseSeed ^ 0x504F5449); // 'POTI' xor for unique seed stream
     rng.shuffle(effects);
@@ -125,9 +130,9 @@ export class PotionEffectSystem {
     return this.identified.has(colorIndex);
   }
 
-  /** Get the effect label for a color index (or "???" if unidentified) */
+  /** Get the effect label for a color index (or "?" if unidentified) */
   getLabel(colorIndex: number): string {
-    if (!this.identified.has(colorIndex)) return '???';
+    if (!this.identified.has(colorIndex)) return '?';
     const effect = this.colorMapping[colorIndex];
     return EFFECT_META[effect].label;
   }
@@ -136,6 +141,16 @@ export class PotionEffectSystem {
   isPositive(colorIndex: number): boolean {
     const effect = this.colorMapping[colorIndex];
     return EFFECT_META[effect].positive;
+  }
+
+  /** Get whether the effect for a color is negative */
+  isNegative(colorIndex: number): boolean {
+    return !this.isPositive(colorIndex);
+  }
+
+  /** Check if a color is identified AND its effect is negative */
+  isIdentifiedBad(colorIndex: number): boolean {
+    return this.identified.has(colorIndex) && this.isNegative(colorIndex);
   }
 
   /** Drink a potion of the given color index */
@@ -250,6 +265,21 @@ export class PotionEffectSystem {
     return this.activeEffects.has('frenzy');
   }
 
+  /** Whether clarity is active (crit bonus) */
+  get isClarity(): boolean {
+    return this.activeEffects.has('clarity');
+  }
+
+  /** Whether confusion is active (movement scramble) */
+  get isConfusion(): boolean {
+    return this.activeEffects.has('confusion');
+  }
+
+  /** Crit chance bonus from clarity (0.15 when active, 0 otherwise) */
+  get critBonus(): number {
+    return this.activeEffects.has('clarity') ? 0.15 : 0;
+  }
+
   /** Check if any timed effect is active */
   hasActiveEffect(effect: PotionEffect): boolean {
     return this.activeEffects.has(effect);
@@ -274,6 +304,12 @@ export class PotionEffectSystem {
     return result;
   }
 
+  /** Clear a single effect early (e.g. poison stops at 1 HP) */
+  clearEffect(effect: PotionEffect): void {
+    this.activeEffects.delete(effect);
+    if (effect === 'armor') this.armorHits = 0;
+  }
+
   /** Reset all effects (e.g. on death). Keeps identification. */
   clearEffects(): void {
     this.activeEffects.clear();
@@ -287,7 +323,7 @@ export class PotionEffectSystem {
     this.identified.clear();
     // Re-shuffle mapping
     const effects: PotionEffect[] = [
-      'heal', 'poison', 'speed', 'slow', 'armor', 'fragile', 'shadow', 'frenzy',
+      'heal', 'poison', 'speed', 'slow', 'armor', 'fragile', 'shadow', 'frenzy', 'clarity', 'confusion',
     ];
     const rng = new SeededRandom(baseSeed ^ 0x504F5449);
     rng.shuffle(effects);

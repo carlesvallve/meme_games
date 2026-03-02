@@ -12,6 +12,7 @@ import type { PropDestructionSystem } from './PropDestructionSystem';
 import { useGameStore } from '../store';
 import type { SavedEnemy } from './LevelState';
 import type { PotionEffectSystem } from './PotionEffectSystem';
+import { findPath } from './AStar';
 
 // ── Character collision constants ────────────────────────────────────
 
@@ -158,7 +159,7 @@ function createDamageNumber(scene: THREE.Scene, x: number, y: number, z: number,
   }
 
   const texture = new THREE.CanvasTexture(canvas);
-  const mat = new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false });
+  const mat = new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false, depthWrite: false });
   const sprite = new THREE.Sprite(mat);
   sprite.position.set(x, y + 0.5, z);
   const scaleX = isCrit ? 0.6 : 0.4;
@@ -168,6 +169,34 @@ function createDamageNumber(scene: THREE.Scene, x: number, y: number, z: number,
   scene.add(sprite);
 
   return { sprite, age: 0, lifetime: isCrit ? 2.0 : 1.6, startY: y + 0.5, startX: x, startZ: z, dirX, dirZ, baseScaleX: scaleX, baseScaleY: scaleY };
+}
+
+function createFloatingLabel(scene: THREE.Scene, x: number, y: number, z: number, text: string, color = '#ffffff', size: 'sm' | 'md' = 'sm'): DamageNumber {
+  const canvas = document.createElement('canvas');
+  const isMd = size === 'md';
+  canvas.width = isMd ? 160 : 128;
+  canvas.height = isMd ? 40 : 32;
+  const ctx = canvas.getContext('2d')!;
+  ctx.font = isMd ? 'bold 24px monospace' : 'bold 20px monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = color;
+  ctx.strokeStyle = '#000';
+  ctx.lineWidth = 3;
+  ctx.strokeText(text, canvas.width / 2, canvas.height / 2);
+  ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  const mat = new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false, depthWrite: false });
+  const sprite = new THREE.Sprite(mat);
+  sprite.position.set(x, y + 0.5, z);
+  const scaleX = isMd ? 0.65 : 0.55;
+  const scaleY = isMd ? 0.19 : 0.16;
+  sprite.scale.set(scaleX, scaleY, 1);
+  sprite.renderOrder = 1002;
+  scene.add(sprite);
+
+  return { sprite, age: 0, lifetime: 1.2, startY: y + 0.5, startX: x, startZ: z, dirX: 0, dirZ: 0, baseScaleX: scaleX, baseScaleY: scaleY };
 }
 
 // ── Hit spark particles ──────────────────────────────────────────────
@@ -214,6 +243,47 @@ function createHitSparks(scene: THREE.Scene, x: number, y: number, z: number, di
   return { points, velocities, age: 0, lifetime: 0.3 };
 }
 
+/** Metallic sparks for armour deflects — brighter, more spread, longer lived than blood sparks */
+function createMetalSparks(scene: THREE.Scene, x: number, y: number, z: number, dirX: number, dirZ: number): HitSparks {
+  const count = 12;
+  const positions = new Float32Array(count * 3);
+  const velocities = new Float32Array(count * 3);
+
+  for (let i = 0; i < count; i++) {
+    positions[i * 3] = x;
+    positions[i * 3 + 1] = y + 0.3;
+    positions[i * 3 + 2] = z;
+
+    const spread = (Math.random() - 0.5) * 3;
+    const speed = 3 + Math.random() * 4;
+    velocities[i * 3] = (dirX + spread * 0.6) * speed;
+    velocities[i * 3 + 1] = (Math.random() * 2 + 1) * speed * 0.4;
+    velocities[i * 3 + 2] = (dirZ + spread * 0.6) * speed;
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+  const material = new THREE.PointsMaterial({
+    color: 0xffeedd,
+    size: 0.07,
+    transparent: true,
+    opacity: 1,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+
+  const points = new THREE.Points(geometry, material);
+  scene.add(points);
+  return { points, velocities, age: 0, lifetime: 0.4 };
+}
+
+/** Random deflect onomatopoeia */
+const DEFLECT_LABELS = ['CLANK!', 'TINK!', 'CLANG!', 'KLING!', 'TONK!'];
+function randomDeflectLabel(): string {
+  return DEFLECT_LABELS[Math.floor(Math.random() * DEFLECT_LABELS.length)];
+}
+
 // ── EnemySystem ──────────────────────────────────────────────────────
 
 export interface HitImpactCallbacks {
@@ -221,11 +291,24 @@ export interface HitImpactCallbacks {
   onCameraShake: (intensity: number, duration: number, dirX: number, dirZ: number) => void;
 }
 
+// ── Enemy status effects (from kicked potions) ──
+
+interface EnemyStatusEffect {
+  remaining: number;
+  tickTimer?: number; // for poison DoT
+}
+
+const ENEMY_POISON_TICK = 2.0;
+const ENEMY_POISON_DAMAGE = 1;
+
 export class EnemySystem {
   private enemies: Enemy[] = [];
   private damageNumbers: DamageNumber[] = [];
   private slashArcs: SlashArc[] = [];
   private hitSparks: HitSparks[] = [];
+
+  /** Status effects on enemies (from kicked potions) */
+  private enemyStatusEffects = new Map<Enemy, Map<string, EnemyStatusEffect>>();
 
   private readonly scene: THREE.Scene;
   private readonly terrain: Terrain;
@@ -235,9 +318,9 @@ export class EnemySystem {
   private goreSystem: GoreSystem | null = null;
   private propDestructionSystem: PropDestructionSystem | null = null;
 
-  // Player attack damage (read from store each frame)
-  private get playerDamage(): number {
-    return useGameStore.getState().enemyParams.playerDamage;
+  // Player attack damage — now reads from the active character's per-archetype stats
+  private getPlayerDamage(playerChar: Character): number {
+    return playerChar.params.attackDamage;
   }
 
   /** Optional list of allied characters (non-enemies) for collision */
@@ -265,9 +348,21 @@ export class EnemySystem {
   /** Level transition exclusion zones (stairs + ladders world positions) */
   private transitionExclusions: { x: number; z: number }[] = [];
 
+  // ── Taunt (kicked frenzy) state ──
+  private tauntTarget: Enemy | null = null;
+  private tauntTimer = 0;
+  private tauntAlertIcon: THREE.Sprite | null = null;
+
+  // ── Frenzy-spawned enemy tracking ──
+  private frenzyEnemies = new Set<Enemy>();
+  private frenzyAlertIcons = new Map<Enemy, THREE.Sprite>();
+  private static readonly FRENZY_SPEED_MULT = 1.8; // speed boost for frenzy-spawned enemies
+  private static readonly FRENZY_ALERT_Y = 0.75; // Y offset for ! icon above enemy
+
   // ── Crit chain dash state ──
   private static readonly CRIT_CHANCE = 0.20; // 20% chance
-  private static readonly CRIT_RANGE_SQ = 4 * 4; // max range to find chain targets
+  private static readonly CRIT_RANGE_SQ = 4 * 4; // max geometric range to find candidates
+  private static readonly CRIT_MAX_PATH_STEPS = 12; // max nav path steps to be reachable
   private static readonly CRIT_CHAIN_MAX = 3; // max hits per chain
   private static readonly CRIT_DASH_SPEED = 16; // world units/s dash speed
   private static readonly CRIT_DASH_STOP_DIST = 0.4; // stop this far from enemy
@@ -330,6 +425,179 @@ export class EnemySystem {
   /** Set level transition exclusion zones (stairs + ladders) so enemies don't spawn near them */
   setTransitionExclusions(positions: { x: number; z: number }[]): void {
     this.transitionExclusions = positions;
+  }
+
+  // ── Frenzy spawn + taunt methods ──
+
+  /** Spawn a single enemy at a specific world position, optionally force-chasing a target */
+  spawnEnemyAt(x: number, z: number, chaseTarget?: Character, isFrenzy = false): Enemy {
+    const y = this.terrain.getTerrainY(x, z);
+    const pos = new THREE.Vector3(x, y, z);
+    const roomVis = this.terrain.getRoomVisibility();
+    const enemy = new Enemy(this.scene, this.terrain, this.navGrid, pos, this.ladderDefs);
+    enemy.initChaseBehavior(this.navGrid, this.ladderDefs, !!roomVis);
+    enemy.mesh.visible = true; // frenzy enemies spawn visible
+    if (chaseTarget) {
+      enemy.setChaseTarget(chaseTarget, 0);
+    }
+    // Frenzy boost: speed up + track + alert icon
+    if (isFrenzy) {
+      enemy.params.speed *= EnemySystem.FRENZY_SPEED_MULT;
+      enemy.baseSpeed = enemy.params.speed;
+      this.frenzyEnemies.add(enemy);
+      this.spawnAlertIcon(enemy);
+    }
+    this.enemies.push(enemy);
+    return enemy;
+  }
+
+  /** Create a "!" alert sprite with given scale and color */
+  private createAlertSprite(scaleX: number, scaleY: number, color = '#ff2222'): THREE.Sprite {
+    const canvas = document.createElement('canvas');
+    canvas.width = 32;
+    canvas.height = 48;
+    const ctx = canvas.getContext('2d')!;
+    ctx.font = 'bold 40px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = color;
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 4;
+    ctx.strokeText('!', 16, 24);
+    ctx.fillText('!', 16, 24);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    const mat = new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false, depthWrite: false });
+    const sprite = new THREE.Sprite(mat);
+    sprite.scale.set(scaleX, scaleY, 1);
+    sprite.renderOrder = 1001;
+    return sprite;
+  }
+
+  /** Create a "!" alert icon sprite above a frenzy enemy */
+  private spawnAlertIcon(enemy: Enemy): void {
+    const sprite = this.createAlertSprite(0.25, 0.35, '#ff2222');
+    this.scene.add(sprite);
+    this.frenzyAlertIcons.set(enemy, sprite);
+  }
+
+  /** Spawn a wave of frenzy enemies at nearby door positions (or in a ring on open maps) */
+  triggerFrenzySpawn(
+    playerChar: Character,
+    doorCenters: { x: number; z: number }[],
+    roomVis: import('./RoomVisibility').RoomVisibility | null,
+    count = 4,
+  ): void {
+    const px = playerChar.mesh.position.x;
+    const pz = playerChar.mesh.position.z;
+
+    // Collect candidate spawn positions — wide search radius
+    let candidates: { x: number; z: number }[] = [];
+
+    // Sort doors by distance and take a generous radius (~20 units)
+    const doorsWithDist = doorCenters.map(d => {
+      const dx = d.x - px, dz = d.z - pz;
+      return { ...d, distSq: dx * dx + dz * dz };
+    }).filter(d => d.distSq < 400) // 20^2
+      .sort((a, b) => a.distSq - b.distSq);
+
+    // Pick distinct spread positions: try to space them apart
+    for (const d of doorsWithDist) {
+      // Skip if too close to an already-picked candidate (min 2 units apart)
+      const tooClose = candidates.some(c => {
+        const dx = c.x - d.x, dz = c.z - d.z;
+        return dx * dx + dz * dz < 4; // 2^2
+      });
+      if (!tooClose) candidates.push(d);
+      if (candidates.length >= count) break;
+    }
+
+    // Fallback: ring around the player (for open maps or no/few nearby doors)
+    if (candidates.length < count) {
+      const ringRadius = 6 + Math.random() * 2; // 6-8 units
+      const needed = count - candidates.length;
+      for (let i = 0; i < needed; i++) {
+        const angle = (Math.PI * 2 * i) / needed + (Math.random() - 0.5) * 0.5;
+        candidates.push({
+          x: px + Math.cos(angle) * ringRadius,
+          z: pz + Math.sin(angle) * ringRadius,
+        });
+      }
+    }
+
+    // Spawn enemies — one per candidate position
+    for (let i = 0; i < count; i++) {
+      const pos = candidates[i % candidates.length];
+      // Add slight jitter so enemies don't stack
+      const jx = pos.x + (Math.random() - 0.5) * 0.8;
+      const jz = pos.z + (Math.random() - 0.5) * 0.8;
+      this.spawnEnemyAt(jx, jz, playerChar, true);
+    }
+
+    audioSystem.sfx('damage');
+  }
+
+  /** Remove frenzy tracking + alert icon for an enemy */
+  private cleanupFrenzyEnemy(enemy: Enemy): void {
+    this.frenzyEnemies.delete(enemy);
+    const icon = this.frenzyAlertIcons.get(enemy);
+    if (icon) {
+      this.scene.remove(icon);
+      (icon.material as THREE.SpriteMaterial).map?.dispose();
+      (icon.material as THREE.SpriteMaterial).dispose();
+      this.frenzyAlertIcons.delete(enemy);
+    }
+  }
+
+  /** Update alert icon positions (call from update loop) */
+  private updateFrenzyAlertIcons(camera: THREE.Camera): void {
+    for (const [enemy, sprite] of this.frenzyAlertIcons) {
+      if (!enemy.isAlive) {
+        this.cleanupFrenzyEnemy(enemy);
+        continue;
+      }
+      sprite.position.set(
+        enemy.mesh.position.x,
+        enemy.mesh.position.y + EnemySystem.FRENZY_ALERT_Y,
+        enemy.mesh.position.z,
+      );
+      sprite.visible = enemy.mesh.visible;
+      sprite.quaternion.copy(camera.quaternion);
+    }
+    // Taunt target icon
+    if (this.tauntAlertIcon && this.tauntTarget) {
+      if (!this.tauntTarget.isAlive) {
+        this.cleanupTauntIcon();
+      } else {
+        this.tauntAlertIcon.position.set(
+          this.tauntTarget.mesh.position.x,
+          this.tauntTarget.mesh.position.y + EnemySystem.FRENZY_ALERT_Y,
+          this.tauntTarget.mesh.position.z,
+        );
+        this.tauntAlertIcon.visible = this.tauntTarget.mesh.visible;
+        this.tauntAlertIcon.quaternion.copy(camera.quaternion);
+      }
+    }
+  }
+
+  /** Set a taunt target — nearby enemies will attack this enemy instead of the player */
+  setTauntTarget(enemy: Enemy): void {
+    // Clean up previous taunt icon
+    this.cleanupTauntIcon();
+    this.tauntTarget = enemy;
+    this.tauntTimer = 25; // frenzy duration
+    // Spawn a smaller "!" icon for the taunt target
+    this.tauntAlertIcon = this.createAlertSprite(0.18, 0.25, '#44dd66');
+    this.scene.add(this.tauntAlertIcon);
+  }
+
+  private cleanupTauntIcon(): void {
+    if (this.tauntAlertIcon) {
+      this.scene.remove(this.tauntAlertIcon);
+      (this.tauntAlertIcon.material as THREE.SpriteMaterial).map?.dispose();
+      (this.tauntAlertIcon.material as THREE.SpriteMaterial).dispose();
+      this.tauntAlertIcon = null;
+    }
   }
 
   private static readonly MIN_ENTRANCE_DIST_SQ = 5 * 5; // min distance from entrance
@@ -436,25 +704,40 @@ export class EnemySystem {
   /** Check if crit chain is currently active */
   get isCritChainActive(): boolean { return this.critChain !== null; }
 
-  /** Try to start a crit chain (called on melee attack start). Returns true if crit triggers. */
-  tryCritChain(playerChar: Character): boolean {
-    if (this.critChain) return false; // already in chain
-    if (Math.random() >= EnemySystem.CRIT_CHANCE) return false;
+  /** Roll for crit (just the dice). Returns true if crit triggers. */
+  private rollCrit(): boolean {
+    const critChance = EnemySystem.CRIT_CHANCE + (this.potionSystem?.critBonus ?? 0);
+    return Math.random() < critChance;
+  }
+
+  /** Start a crit chain dash to nearby enemies (called after a confirmed crit hit). */
+  private startCritChain(playerChar: Character): void {
+    if (this.critChain) return; // already in chain
 
     const px = playerChar.mesh.position.x;
     const pz = playerChar.mesh.position.z;
 
-    // Find nearby visible alive enemies, sorted by distance
-    const candidates: { enemy: Enemy; distSq: number }[] = [];
+    // Find nearby visible alive enemies within geometric range
+    const prefiltered: { enemy: Enemy; distSq: number }[] = [];
     for (const enemy of this.enemies) {
       if (!enemy.isAlive || !enemy.mesh.visible) continue;
       const dx = enemy.mesh.position.x - px, dz = enemy.mesh.position.z - pz;
       const distSq = dx * dx + dz * dz;
       if (distSq < EnemySystem.CRIT_RANGE_SQ) {
-        candidates.push({ enemy, distSq });
+        prefiltered.push({ enemy, distSq });
       }
     }
-    if (candidates.length === 0) return false;
+    if (prefiltered.length === 0) return;
+
+    // Validate reachability via pathfinding — reject enemies behind walls/on other levels
+    const candidates: { enemy: Enemy; distSq: number }[] = [];
+    for (const c of prefiltered) {
+      const result = findPath(this.navGrid, px, pz, c.enemy.mesh.position.x, c.enemy.mesh.position.z, 200);
+      if (result.found && result.path.length <= EnemySystem.CRIT_MAX_PATH_STEPS) {
+        candidates.push(c);
+      }
+    }
+    if (candidates.length === 0) return;
 
     candidates.sort((a, b) => a.distSq - b.distSq);
 
@@ -465,7 +748,6 @@ export class EnemySystem {
     }
 
     this.critChain = { targets, index: 0, dashing: true };
-    return true;
   }
 
   /** Update crit chain dash — moves player toward each target, applies hit, moves to next.
@@ -517,7 +799,7 @@ export class EnemySystem {
     }
 
     // Apply guaranteed crit hit
-    const damage = this.playerDamage;
+    const damage = this.getPlayerDamage(playerChar);
     const ex = target.mesh.position.x;
     const ey = target.mesh.position.y;
     const ez = target.mesh.position.z;
@@ -535,35 +817,48 @@ export class EnemySystem {
     audioSystem.sfx('slash');
     if (showSlashEffect) this.slashArcs.push(createSlashArc(playerChar.mesh));
 
-    // Guaranteed hit (skip arc check)
-    const hit = target.takeDamage(damage, playerChar.mesh.position.x, playerChar.mesh.position.z, playerChar.params.melee.knockback * 1.5);
-    if (hit) {
+    // Armour deflect check (crit chain can be deflected too)
+    if (target.armour > 0 && Math.random() < target.armour) {
       this.aggroTimers.set(target, EnemySystem.AGGRO_DURATION);
-      this.damageNumbers.push(createDamageNumber(this.scene, ex, ey + 0.3, ez, damage, hitDirX, hitDirZ, true));
-      audioSystem.sfxAt('fleshHit', ex, ez);
-      this.hitSparks.push(createHitSparks(this.scene, ex, ey, ez, hitDirX, hitDirZ));
-      if (this.goreSystem) {
-        this.goreSystem.spawnBloodSplash(ex, ey, ez, target.groundY, this.getAllCharacters(playerChar));
-      }
+      audioSystem.sfxAt('clank', ex, ez);
+      this.hitSparks.push(createMetalSparks(this.scene, ex, ey, ez, hitDirX, hitDirZ));
+      this.damageNumbers.push(createFloatingLabel(this.scene, ex, ey + 0.3, ez, randomDeflectLabel(), '#ccddff', 'md'));
       if (this.impactCallbacks) {
-        const isKill = !target.isAlive;
-        this.impactCallbacks.onHitstop(isKill ? 0.12 : 0.08);
-        this.impactCallbacks.onCameraShake(isKill ? 0.25 : 0.15, isKill ? 0.25 : 0.15, hitDirX, hitDirZ);
+        this.impactCallbacks.onHitstop(0.08);
+        this.impactCallbacks.onCameraShake(0.15, 0.12, -hitDirX, -hitDirZ);
       }
-
-      // Handle death
-      if (!target.isAlive) {
-        const pos = target.mesh.position;
+    } else {
+      // Guaranteed hit (skip arc check)
+      const hit = target.takeDamage(damage, playerChar.mesh.position.x, playerChar.mesh.position.z, playerChar.params.melee.knockback * 1.5);
+      if (hit) {
+        this.aggroTimers.set(target, EnemySystem.AGGRO_DURATION);
+        this.damageNumbers.push(createDamageNumber(this.scene, ex, ey + 0.3, ez, damage, hitDirX, hitDirZ, true));
+        audioSystem.sfxAt('fleshHit', ex, ez);
+        this.hitSparks.push(createHitSparks(this.scene, ex, ey, ez, hitDirX, hitDirZ));
         if (this.goreSystem) {
-          this.goreSystem.spawnGore(target.mesh, target.groundY, this.getAllCharacters(playerChar), target.lastHitDirX, target.lastHitDirZ);
+          this.goreSystem.spawnBloodSplash(ex, ey, ez, target.groundY, this.getAllCharacters(playerChar));
         }
-        this.lootSystem.spawnLoot(pos.clone());
-        audioSystem.sfxAt('death', pos.x, pos.z);
-        this.aggroTimers.delete(target);
-        target.dispose();
-        const idx = this.enemies.indexOf(target);
-        if (idx >= 0) this.enemies.splice(idx, 1);
-        onEnemyDied();
+        if (this.impactCallbacks) {
+          const isKill = !target.isAlive;
+          this.impactCallbacks.onHitstop(isKill ? 0.12 : 0.08);
+          this.impactCallbacks.onCameraShake(isKill ? 0.25 : 0.15, isKill ? 0.25 : 0.15, hitDirX, hitDirZ);
+        }
+
+        // Handle death
+        if (!target.isAlive) {
+          const pos = target.mesh.position;
+          if (this.goreSystem) {
+            this.goreSystem.spawnGore(target.mesh, target.groundY, this.getAllCharacters(playerChar), target.lastHitDirX, target.lastHitDirZ);
+          }
+          this.lootSystem.spawnLoot(pos.clone());
+          audioSystem.sfxAt('death', pos.x, pos.z);
+          this.aggroTimers.delete(target);
+          this.enemyStatusEffects.delete(target);
+          target.dispose();
+          const idx = this.enemies.indexOf(target);
+          if (idx >= 0) this.enemies.splice(idx, 1);
+          onEnemyDied();
+        }
       }
     }
 
@@ -579,6 +874,7 @@ export class EnemySystem {
     onPlayerHit: (damage: number) => void,
     onEnemyDied: () => void,
     showSlashEffect = true,
+    camera?: THREE.Camera,
   ): void {
     // ── Staggered spawn queue: spawn pending enemies one-by-one with cooldowns ──
     if (this.pendingSpawns > 0) {
@@ -622,36 +918,61 @@ export class EnemySystem {
         for (const enemy of this.enemies) {
           if (!enemy.isAlive || !enemy.mesh.visible || hitThisFrame.has(enemy)) continue;
           if (isInAttackArc(px, playerChar.groundY, pz, playerChar.facing, enemy.mesh.position.x, enemy.groundY, enemy.mesh.position.z, playerChar.params.attackReach, playerChar.params.attackArcHalf)) {
-            const hit = enemy.takeDamage(this.playerDamage, px, pz, playerChar.params.melee.knockback);
-            if (hit) {
+            const ex = enemy.mesh.position.x;
+            const ey = enemy.mesh.position.y;
+            const ez = enemy.mesh.position.z;
+            const hdx = ex - px, hdz = ez - pz;
+            const hdist = Math.sqrt(hdx * hdx + hdz * hdz) || 1;
+            const hitDirX = hdx / hdist, hitDirZ = hdz / hdist;
+
+            // Armour deflect check
+            if (enemy.armour > 0 && Math.random() < enemy.armour) {
               hitEnemy = true;
-              this.aggroTimers.set(enemy, EnemySystem.AGGRO_DURATION);
               playerChar.markAttackHitApplied();
               hitThisFrame.add(enemy);
-              const ex = enemy.mesh.position.x;
-              const ey = enemy.mesh.position.y;
-              const ez = enemy.mesh.position.z;
-              const hdx = ex - px, hdz = ez - pz;
-              const hdist = Math.sqrt(hdx * hdx + hdz * hdz) || 1;
-              const hitDirX = hdx / hdist, hitDirZ = hdz / hdist;
-              this.damageNumbers.push(createDamageNumber(this.scene, ex, ey + 0.3, ez, this.playerDamage, hitDirX, hitDirZ));
-              audioSystem.sfxAt('fleshHit', ex, ez);
-
-              this.hitSparks.push(createHitSparks(this.scene, ex, ey, ez, hitDirX, hitDirZ));
-
-              if (this.goreSystem) {
-                const nearby = this.getAllCharacters(playerChar);
-                this.goreSystem.spawnBloodSplash(ex, ey, ez, enemy.groundY, nearby);
-              }
-
+              this.aggroTimers.set(enemy, EnemySystem.AGGRO_DURATION);
+              // Clank VFX: metallic sparks + label + SFX + slight player knockback
+              audioSystem.sfxAt('clank', ex, ez);
+              this.hitSparks.push(createMetalSparks(this.scene, ex, ey, ez, hitDirX, hitDirZ));
+              this.damageNumbers.push(createFloatingLabel(this.scene, ex, ey + 0.3, ez, randomDeflectLabel(), '#ccddff', 'md'));
+              // Push player back slightly
+              playerChar.mesh.position.x -= hitDirX * 0.15;
+              playerChar.mesh.position.z -= hitDirZ * 0.15;
               if (this.impactCallbacks) {
-                const isKill = !enemy.isAlive;
-                this.impactCallbacks.onHitstop(isKill ? 0.1 : 0.06);
-                this.impactCallbacks.onCameraShake(isKill ? 0.2 : 0.12, isKill ? 0.2 : 0.12, hitDirX, hitDirZ);
-                // Shadow breaks on hit without kill
-                if (!isKill && this.potionSystem?.isShadow) {
-                  this.potionSystem.breakShadow();
+                this.impactCallbacks.onHitstop(0.08);
+                this.impactCallbacks.onCameraShake(0.15, 0.12, -hitDirX, -hitDirZ);
+              }
+            } else {
+              // Normal hit
+              const isCrit = !this.critChain && this.rollCrit();
+              const baseDmg = this.getPlayerDamage(playerChar);
+              const damage = isCrit ? baseDmg * 2 : baseDmg;
+              const hit = enemy.takeDamage(damage, px, pz, playerChar.params.melee.knockback);
+              if (hit) {
+                hitEnemy = true;
+                this.aggroTimers.set(enemy, EnemySystem.AGGRO_DURATION);
+                playerChar.markAttackHitApplied();
+                hitThisFrame.add(enemy);
+                this.damageNumbers.push(createDamageNumber(this.scene, ex, ey + 0.3, ez, damage, hitDirX, hitDirZ, isCrit));
+                audioSystem.sfxAt('fleshHit', ex, ez);
+
+                this.hitSparks.push(createHitSparks(this.scene, ex, ey, ez, hitDirX, hitDirZ));
+
+                if (this.goreSystem) {
+                  const nearby = this.getAllCharacters(playerChar);
+                  this.goreSystem.spawnBloodSplash(ex, ey, ez, enemy.groundY, nearby);
                 }
+
+                if (this.impactCallbacks) {
+                  const isKill = !enemy.isAlive;
+                  this.impactCallbacks.onHitstop(isKill ? 0.1 : 0.06);
+                  this.impactCallbacks.onCameraShake(isKill ? 0.2 : 0.12, isKill ? 0.2 : 0.12, hitDirX, hitDirZ);
+                  if (!isKill && this.potionSystem?.isShadow) {
+                    this.potionSystem.breakShadow();
+                  }
+                }
+
+                if (isCrit) this.startCritChain(playerChar);
               }
             }
           }
@@ -698,6 +1019,8 @@ export class EnemySystem {
         this.lootSystem.spawnLoot(pos.clone());
         audioSystem.sfxAt('death', pos.x, pos.z);
         this.aggroTimers.delete(enemy);
+        this.enemyStatusEffects.delete(enemy);
+        this.cleanupFrenzyEnemy(enemy);
         enemy.dispose();
         this.enemies.splice(i, 1);
         onEnemyDied();
@@ -772,7 +1095,21 @@ export class EnemySystem {
         }
       }
 
-      enemy.setChaseTarget(shouldChase ? playerChar : null, dt);
+      // Taunt: nearby enemies attack the taunt target instead of the player
+      let tauntOverride = false;
+      if (this.tauntTarget && this.tauntTarget.isAlive && this.tauntTimer > 0 && enemy !== this.tauntTarget) {
+        const ttx = this.tauntTarget.mesh.position.x - ex;
+        const ttz = this.tauntTarget.mesh.position.z - ez;
+        const ttDistSq = ttx * ttx + ttz * ttz;
+        if (ttDistSq < 36) { // ~6 units
+          enemy.setChaseTarget(this.tauntTarget, dt);
+          tauntOverride = true;
+        }
+      }
+
+      if (!tauntOverride) {
+        enemy.setChaseTarget(shouldChase ? playerChar : null, dt);
+      }
       enemy.update(dt);
 
       // Awareness fog: fade enemies based on distance on open maps
@@ -810,19 +1147,44 @@ export class EnemySystem {
         }
       }
       if (enemy.mesh.visible && enemy.isAttacking && enemy.canApplyAttackHit()) {
-        const ex = enemy.mesh.position.x;
-        const ez = enemy.mesh.position.z;
-        if (isInAttackArc(ex, enemy.groundY, ez, enemy.facing, playerChar.mesh.position.x, playerChar.groundY, playerChar.mesh.position.z, enemy.params.attackReach, enemy.params.attackArcHalf)) {
-          const hit = playerChar.takeDamage(enemy.params.attackDamage, ex, ez, enemy.params.melee.knockback);
+        const eax = enemy.mesh.position.x;
+        const eaz = enemy.mesh.position.z;
+
+        // Roll crit once per attack swing
+        const isCrit = Math.random() < enemy.critChance;
+        const attackDamage = isCrit ? enemy.params.attackDamage * 2 : enemy.params.attackDamage;
+
+        // Taunt: enemies attacking the taunt target deal damage to it
+        if (tauntOverride && this.tauntTarget && this.tauntTarget.isAlive) {
+          const tt = this.tauntTarget;
+          if (isInAttackArc(eax, enemy.groundY, eaz, enemy.facing, tt.mesh.position.x, tt.groundY, tt.mesh.position.z, enemy.params.attackReach, enemy.params.attackArcHalf)) {
+            const hit = tt.takeDamage(attackDamage, eax, eaz, enemy.params.melee.knockback * 0.5);
+            if (hit) {
+              enemy.markAttackHitApplied();
+              const tx = tt.mesh.position.x, ty = tt.mesh.position.y, tz = tt.mesh.position.z;
+              audioSystem.sfxAt('fleshHit', tx, tz);
+              this.damageNumbers.push(createDamageNumber(this.scene, tx, ty + 0.3, tz, attackDamage, 0, 0, isCrit));
+              const hitDirX = tx - eax, hitDirZ = tz - eaz;
+              const hitDist = Math.sqrt(hitDirX * hitDirX + hitDirZ * hitDirZ) || 1;
+              this.hitSparks.push(createHitSparks(this.scene, tx, ty, tz, hitDirX / hitDist, hitDirZ / hitDist));
+              if (this.goreSystem) {
+                this.goreSystem.spawnBloodSplash(tx, ty, tz, tt.groundY, this.getAllCharacters(playerChar));
+              }
+            }
+          }
+        } else if (this.hasConfusion(enemy) && Math.random() < 0.30 && this.tryConfusionFriendlyFire(enemy, eax, eaz, playerChar)) {
+          // Confused enemy redirected attack to a nearby ally
+        } else if (isInAttackArc(eax, enemy.groundY, eaz, enemy.facing, playerChar.mesh.position.x, playerChar.groundY, playerChar.mesh.position.z, enemy.params.attackReach, enemy.params.attackArcHalf)) {
+          const hit = playerChar.takeDamage(attackDamage, eax, eaz, enemy.params.melee.knockback);
           if (hit) {
             enemy.markAttackHitApplied();
-            onPlayerHit(enemy.params.attackDamage);
+            onPlayerHit(attackDamage);
             const px = playerChar.mesh.position.x;
             const py = playerChar.mesh.position.y;
             const pz = playerChar.mesh.position.z;
             audioSystem.sfxAt('fleshHit', px, pz);
-            const hitDirX = px - ex;
-            const hitDirZ = pz - ez;
+            const hitDirX = px - eax;
+            const hitDirZ = pz - eaz;
             const hitDist = Math.sqrt(hitDirX * hitDirX + hitDirZ * hitDirZ) || 1;
             this.hitSparks.push(createHitSparks(this.scene, px, py, pz, hitDirX / hitDist, hitDirZ / hitDist));
             if (this.goreSystem) {
@@ -839,6 +1201,24 @@ export class EnemySystem {
 
     // ── Character-character collision ──
     this.resolveCharacterCollisions(dt, playerChar);
+
+    // ── Enemy status effects (poison/slow/fragile from kicked potions) ──
+    this.tickEnemyStatusEffects(dt);
+
+    // ── Taunt timer tick ──
+    if (this.tauntTimer > 0) {
+      this.tauntTimer -= dt;
+      if (this.tauntTimer <= 0 || !this.tauntTarget || !this.tauntTarget.isAlive) {
+        this.tauntTarget = null;
+        this.tauntTimer = 0;
+        this.cleanupTauntIcon();
+      }
+    }
+
+    // ── Frenzy alert icons ──
+    if (camera && (this.frenzyAlertIcons.size > 0 || this.tauntAlertIcon)) {
+      this.updateFrenzyAlertIcons(camera);
+    }
 
     // ── Update effects ──
     this.updateSlashArcs(dt);
@@ -1011,8 +1391,16 @@ export class EnemySystem {
   }
 
   /** Spawn a floating damage number at a world position (used by ProjectileSystem) */
-  spawnDamageNumber(x: number, y: number, z: number, amount: number, dirX = 0, dirZ = 0): void {
-    this.damageNumbers.push(createDamageNumber(this.scene, x, y + 0.3, z, amount, dirX, dirZ));
+  spawnDamageNumber(x: number, y: number, z: number, amount: number, dirX = 0, dirZ = 0, isCrit = false): void {
+    this.damageNumbers.push(createDamageNumber(this.scene, x, y + 0.3, z, amount, dirX, dirZ, isCrit));
+  }
+
+  /** Spawn a floating pickup label at a world position (jittered to reduce overlap) */
+  spawnPickupLabel(x: number, y: number, z: number, text: string, color = '#ffffff', size: 'sm' | 'md' = 'sm'): void {
+    const jx = (Math.random() - 0.5) * 0.3;
+    const jy = (Math.random() - 0.5) * 0.2;
+    const jz = (Math.random() - 0.5) * 0.3;
+    this.damageNumbers.push(createFloatingLabel(this.scene, x + jx, y + 0.3 + jy, z + jz, text, color, size));
   }
 
   /** Spawn hit sparks at a world position (used by ProjectileSystem) */
@@ -1027,6 +1415,12 @@ export class EnemySystem {
       const nearby = playerChar ? this.getAllCharacters(playerChar) : undefined;
       this.goreSystem.spawnBloodSplash(x, y, z, groundY, nearby);
     }
+  }
+
+  /** Spawn armour deflect VFX: metallic sparks + clank label (used by Game.ts for projectile deflects) */
+  spawnDeflectVFX(x: number, y: number, z: number, dirX: number, dirZ: number): void {
+    this.hitSparks.push(createMetalSparks(this.scene, x, y, z, dirX, dirZ));
+    this.damageNumbers.push(createFloatingLabel(this.scene, x, y + 0.3, z, randomDeflectLabel(), '#ccddff', 'md'));
   }
 
   /** Collect all characters (player, allies, enemies) for blood splash staining */
@@ -1082,9 +1476,131 @@ export class EnemySystem {
     }
   }
 
+  /** Apply a status effect to an enemy (from kicked potions) */
+  applyStatusEffect(enemy: Enemy, effectName: string, duration: number): void {
+    if (!enemy.isAlive) return;
+    let effects = this.enemyStatusEffects.get(enemy);
+    if (!effects) {
+      effects = new Map();
+      this.enemyStatusEffects.set(enemy, effects);
+    }
+    const existing = effects.get(effectName);
+    if (existing) {
+      existing.remaining = Math.max(existing.remaining, duration);
+    } else {
+      const entry: EnemyStatusEffect = { remaining: duration };
+      if (effectName === 'poison') entry.tickTimer = ENEMY_POISON_TICK;
+      effects.set(effectName, entry);
+    }
+
+    // Apply immediate modifiers
+    if (effectName === 'slow') {
+      enemy.params.speed *= 0.4;
+    }
+    if (effectName === 'fragile') {
+      // Fragile enemies take double damage — tracked via the effect map
+    }
+    if (effectName === 'confusion') {
+      enemy.setConfused(true);
+    }
+  }
+
+  /** Tick enemy status effects each frame */
+  private tickEnemyStatusEffects(dt: number): void {
+    for (const [enemy, effects] of this.enemyStatusEffects) {
+      if (!enemy.isAlive) {
+        this.enemyStatusEffects.delete(enemy);
+        continue;
+      }
+      for (const [name, state] of effects) {
+        state.remaining -= dt;
+
+        // Poison DoT
+        if (name === 'poison' && state.tickTimer !== undefined) {
+          state.tickTimer -= dt;
+          if (state.tickTimer <= 0) {
+            state.tickTimer += ENEMY_POISON_TICK;
+            const ex = enemy.mesh.position.x;
+            const ey = enemy.mesh.position.y;
+            const ez = enemy.mesh.position.z;
+            enemy.takeDamage(ENEMY_POISON_DAMAGE, ex, ez, 0);
+            this.damageNumbers.push(createFloatingLabel(this.scene, ex, ey + 0.3, ez, `${ENEMY_POISON_DAMAGE}`, '#88ff44'));
+          }
+        }
+
+        // Expired
+        if (state.remaining <= 0) {
+          effects.delete(name);
+          // Restore speed for slow
+          if (name === 'slow') {
+            enemy.params.speed = enemy.baseSpeed;
+          }
+          // Clear confusion
+          if (name === 'confusion') {
+            enemy.setConfused(false);
+          }
+        }
+      }
+      if (effects.size === 0) {
+        this.enemyStatusEffects.delete(enemy);
+      }
+    }
+  }
+
+  /** Check if enemy has fragile debuff (takes extra damage) */
+  hasFragile(enemy: Enemy): boolean {
+    return this.enemyStatusEffects.get(enemy)?.has('fragile') ?? false;
+  }
+
+  /** Check if enemy has confusion debuff */
+  hasConfusion(enemy: Enemy): boolean {
+    return this.enemyStatusEffects.get(enemy)?.has('confusion') ?? false;
+  }
+
+  /** Confused enemy redirects attack to a random nearby alive enemy. Returns true if redirected. */
+  private tryConfusionFriendlyFire(attacker: Enemy, eax: number, eaz: number, playerChar: Character): boolean {
+    const candidates: Enemy[] = [];
+    for (const other of this.enemies) {
+      if (other === attacker || !other.isAlive || !other.mesh.visible) continue;
+      const dx = other.mesh.position.x - eax;
+      const dz = other.mesh.position.z - eaz;
+      if (dx * dx + dz * dz < 9) { // within 3 units
+        candidates.push(other);
+      }
+    }
+    if (candidates.length === 0) return false;
+    const target = candidates[Math.floor(Math.random() * candidates.length)];
+    const hit = target.takeDamage(attacker.params.attackDamage, eax, eaz, attacker.params.melee.knockback * 0.5);
+    if (hit) {
+      attacker.markAttackHitApplied();
+      const tx = target.mesh.position.x, ty = target.mesh.position.y, tz = target.mesh.position.z;
+      audioSystem.sfxAt('fleshHit', tx, tz);
+      this.damageNumbers.push(createDamageNumber(this.scene, tx, ty + 0.3, tz, attacker.params.attackDamage, 0, 0));
+      const hitDirX = tx - eax, hitDirZ = tz - eaz;
+      const hitDist = Math.sqrt(hitDirX * hitDirX + hitDirZ * hitDirZ) || 1;
+      this.hitSparks.push(createHitSparks(this.scene, tx, ty, tz, hitDirX / hitDist, hitDirZ / hitDist));
+      if (this.goreSystem) {
+        this.goreSystem.spawnBloodSplash(tx, ty, tz, target.groundY, this.getAllCharacters(playerChar));
+      }
+    }
+    return true;
+  }
+
   dispose(): void {
     this.pendingSpawns = 0;
     this.staggerCooldown = 0;
+    this.tauntTarget = null;
+    this.tauntTimer = 0;
+    this.cleanupTauntIcon();
+    // Cleanup frenzy alert icons
+    for (const [, icon] of this.frenzyAlertIcons) {
+      this.scene.remove(icon);
+      (icon.material as THREE.SpriteMaterial).map?.dispose();
+      (icon.material as THREE.SpriteMaterial).dispose();
+    }
+    this.frenzyAlertIcons.clear();
+    this.frenzyEnemies.clear();
+    this.enemyStatusEffects.clear();
     for (const enemy of this.enemies) enemy.dispose();
     this.enemies = [];
 

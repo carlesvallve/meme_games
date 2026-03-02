@@ -8,6 +8,7 @@ export interface PlayerControlDeps {
   getInput: () => InputState;
   getCameraAngleY: () => number;
   getParams: () => MovementParams;
+  isConfused?: () => boolean;
 }
 
 /**
@@ -26,6 +27,13 @@ export class PlayerControl extends Behavior {
   private settleSpeed = 0;
   /** Current movement speed (smoothed) */
   private currentSpeed = 0;
+  /** Fixed rotation offset applied for the duration of confusion */
+  private confusionRotation = 0;
+  private wasConfused = false;
+  /** Time since last confusion re-roll */
+  private confusionTimer = 0;
+  /** Re-roll interval in seconds */
+  private static readonly CONFUSION_REROLL = 5;
 
   constructor(ctx: ConstructorParameters<typeof Behavior>[0], deps: PlayerControlDeps) {
     super(ctx);
@@ -57,6 +65,28 @@ export class PlayerControl extends Behavior {
     if (inputState.backward) { mx += Math.sin(cameraAngleY); mz += Math.cos(cameraAngleY); }
     if (inputState.left) { mx -= Math.cos(cameraAngleY); mz += Math.sin(cameraAngleY); }
     if (inputState.right) { mx += Math.cos(cameraAngleY); mz -= Math.sin(cameraAngleY); }
+
+    // Confusion: apply a fixed rotation offset to all movement input, re-roll periodically
+    const confused = this.deps.isConfused?.() ?? false;
+    if (confused && !this.wasConfused) {
+      const angles = [Math.PI / 2, Math.PI, -Math.PI / 2];
+      this.confusionRotation = angles[Math.floor(Math.random() * 3)];
+      this.confusionTimer = 0;
+    } else if (confused) {
+      this.confusionTimer += dt;
+      if (this.confusionTimer >= PlayerControl.CONFUSION_REROLL) {
+        const angles = [Math.PI / 2, Math.PI, -Math.PI / 2];
+        this.confusionRotation = angles[Math.floor(Math.random() * 3)];
+        this.confusionTimer = 0;
+      }
+    }
+    this.wasConfused = confused;
+    if (confused && (mx !== 0 || mz !== 0)) {
+      const c = Math.cos(this.confusionRotation), s = Math.sin(this.confusionRotation);
+      const omx = mx;
+      mx = omx * c - mz * s;
+      mz = omx * s + mz * c;
+    }
 
     const moveLen = Math.sqrt(mx * mx + mz * mz);
     if (moveLen > 0.001) {

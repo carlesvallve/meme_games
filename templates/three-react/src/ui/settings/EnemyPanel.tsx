@@ -78,6 +78,14 @@ export function EnemyPanel() {
           Spawn Enemy
         </button>
       </div>
+      <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
+        <button onClick={() => useGameStore.getState().onTestFrenzyDrink?.()} style={{ ...resetBtnStyle, flex: 1, background: 'rgba(255,80,80,0.15)', color: '#f66', border: '1px solid rgba(255,80,80,0.3)' }}>
+          Frenzy Drink
+        </button>
+        <button onClick={() => useGameStore.getState().onTestFrenzyKick?.()} style={{ ...resetBtnStyle, flex: 1, background: 'rgba(255,140,50,0.15)', color: '#fa6', border: '1px solid rgba(255,140,50,0.3)' }}>
+          Frenzy Kick
+        </button>
+      </div>
     </SettingsWindow>
   );
 }

@@ -3,6 +3,7 @@ import { useGameStore } from '../../store';
 import { createCharacterMesh, voxRoster } from './characters';
 import type { CharacterType } from './characters';
 import type { VoxCharEntry, StepMode } from './VoxCharacterDB';
+import { getArchetype, getCharacterStats, randomInRange, getCharacterAnimScale } from './VoxCharacterDB';
 import { Entity, Layer } from '../Entity';
 import type { Terrain } from '../Terrain';
 import type { NavGrid } from '../NavGrid';
@@ -14,6 +15,7 @@ import { audioSystem } from '../../utils/AudioSystem';
 import type { LadderDef } from '../Ladder';
 import {
   DEFAULT_CHARACTER_PARAMS, GRAVITY, MAX_FALL_SPEED, STEP_UP_RATE, FOOT_SFX_COOLDOWN,
+  DEFAULT_HOP_FREQUENCY, ANIM_REFERENCE_SPEED,
   type MovementParams,
 } from './CharacterSettings';
 import { FootIK } from './FootIK';
@@ -34,8 +36,16 @@ export class Character implements BehaviorAgent {
   velocityY = 0;
   moveTime = 0;
   lastHopHalf = 0;
-  hopFrequency = 4;
+  hopFrequency = DEFAULT_HOP_FREQUENCY;
   footSfxTimer = 0;
+  /** Animation rhythm multiplier — scales hop frequency and walk anim FPS. */
+  animSpeedScale = 1.0;
+  /** Per-archetype anim multiplier (tweak any monster's animation rhythm). */
+  characterAnimScale = 1.0;
+  /** Crit chance 0-1, rolled on each hit. */
+  critChance = 0.05;
+  /** Deflect chance 0-1. */
+  armour = 0;
 
   // ── Composed modules ──────────────────────────────────────────────
   private climbing = new CharacterClimbing();
@@ -160,6 +170,14 @@ export class Character implements BehaviorAgent {
       const rosterEntry = voxRoster[type];
       if (rosterEntry) {
         this.applyVoxSkin(rosterEntry);
+        // Apply per-character stats (heroes or monsters picked via roster)
+        const stats = getCharacterStats(getArchetype(rosterEntry.name));
+        this.hp = this.maxHp = Math.round(randomInRange(stats.hp));
+        this.params.speed = randomInRange(stats.movSpeed);
+        this.params.attackDamage = Math.floor(randomInRange(stats.damage));
+        this.params.attackCooldown = 1 / randomInRange(stats.atkSpeed);
+        this.critChance = stats.critChance;
+        this.armour = stats.armour;
       }
     }
   }
@@ -241,10 +259,13 @@ export class Character implements BehaviorAgent {
       this.entity.radius = Math.max(halfX, halfZ) + 0.02;
     }
 
-    // Jumpers move slower than walkers
-    if (entry.stepMode === 'jumper') {
+    // Jumpers move slower than walkers (only for non-enemies; enemies use per-monster movSpeed)
+    if (entry.stepMode === 'jumper' && !this.isEnemy) {
       this.params.speed *= 0.6;
     }
+
+    // Small critters scurry with faster animation
+    this.characterAnimScale = getCharacterAnimScale(getArchetype(entry.name));
   }
 
   private _wasMoving = false;
@@ -336,6 +357,17 @@ export class Character implements BehaviorAgent {
     if (Math.abs(dx) < 0.001 && Math.abs(dz) < 0.001) return false;
     this.footSfxTimer += dt;
 
+    // Play an immediate step sound when starting movement from idle
+    const startingMove = this.moveTime === 0;
+    if (startingMove && this.footSfxTimer >= FOOT_SFX_COOLDOWN) {
+      const stepMode = this.getStepMode();
+      if (stepMode === 'walker') {
+        const vol = this.isEnemy ? 0.5 : 0.7;
+        audioSystem.sfxAt('step', this.mesh.position.x, this.mesh.position.z, vol);
+        this.footSfxTimer = 0;
+      }
+    }
+
     const oldX = this.mesh.position.x;
     const oldZ = this.mesh.position.z;
 
@@ -375,6 +407,16 @@ export class Character implements BehaviorAgent {
       this.mesh.rotation.y = this.facing;
     }
 
+    // Scale hop frequency and walk animation proportional to actual velocity
+    {
+      const movedX = this.mesh.position.x - oldX;
+      const movedZ = this.mesh.position.z - oldZ;
+      const actualSpeed = dt > 0 ? Math.sqrt(movedX * movedX + movedZ * movedZ) / dt : 0;
+      const rawScale = Math.sqrt(actualSpeed / ANIM_REFERENCE_SPEED) * this.characterAnimScale;
+      const minScale = this.getStepMode() === 'jumper' ? 0.8 : 0.3;
+      this.animSpeedScale = Math.max(rawScale, minScale);
+      this.hopFrequency = DEFAULT_HOP_FREQUENCY * this.animSpeedScale;
+    }
     this.moveTime += dt * this.hopFrequency;
     this.updateVoxAnimation(dt, true);
 
