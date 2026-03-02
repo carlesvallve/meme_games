@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useGameStore } from '../store';
 import { CHARACTER_TEAM_COLORS, getSlots, voxRoster } from '../game/character';
 import type { CharacterType } from '../game/character';
+import { audioSystem } from '../utils/AudioSystem';
 
 /** Per-hero emoji for the character select grid */
 const HERO_ICONS: Record<string, string> = {
@@ -41,6 +42,7 @@ export function CharacterSelect() {
   }, []);
 
   const confirmSelection = useCallback((index: number) => {
+    audioSystem.sfx('uiAccept');
     if (index === 0) {
       // Random: pick a random slot
       const randomSlot = slots[Math.floor(Math.random() * slots.length)];
@@ -77,6 +79,7 @@ export function CharacterSelect() {
       }
 
       e.preventDefault();
+      if (newIndex !== focusIndex) audioSystem.sfx('uiSelect');
       setFocusIndex(newIndex);
     }
 
@@ -91,13 +94,15 @@ export function CharacterSelect() {
     const color = isRandom ? '#aaa' : CHARACTER_TEAM_COLORS[slot!];
     const entry = slot ? voxRoster[slot] : null;
     const icon = isRandom ? '🎲' : (HERO_ICONS[entry!.id] ?? '⚔️');
-    const name = isRandom ? 'Random' : entry!.name;
+    // Strip variant suffix: "Mimic A (Purple)" → "Mimic"
+    const rawName = isRandom ? 'Random' : entry!.name;
+    const name = isRandom ? rawName : rawName.replace(/\s*\([^)]*\)\s*/g, '').replace(/\s+[A-H]$/i, '').trim();
 
     return (
       <button
         key={isRandom ? '__random__' : slot}
         onClick={() => confirmSelection(index)}
-        onMouseEnter={() => setFocusIndex(index)}
+        onMouseEnter={() => { if (focusIndex !== index) { audioSystem.sfx('uiSelect'); setFocusIndex(index); } }}
         style={{
           display: 'flex',
           flexDirection: 'column',

@@ -21,6 +21,7 @@ export function SpeechBubbles() {
             pointerEvents: 'none',
             opacity: b.opacity,
             transition: 'opacity 0.15s',
+            zIndex: 0,
           }}
         >
           <div

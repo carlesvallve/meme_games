@@ -299,7 +299,7 @@ const DEFAULT_PERSONALITY: Pick<VoxCharEntry, 'thoughts' | 'exclamations' | 'sou
 };
 
 /** Extract the base archetype name from a folder name. E.g. "Blob A (Green)" -> "blob" */
-function getArchetype(folder: string): string {
+export function getArchetype(folder: string): string {
   return folder
     .replace(/\s*\([^)]*\)\s*/g, '')  // strip parens: "Blob A (Green)" -> "Blob A"
     .replace(/\s+[A-H]$/i, '')         // strip variant letter: "Blob A" -> "Blob"
@@ -317,6 +317,21 @@ const STEP_MODE_BY_ARCHETYPE: Partial<Record<Archetype, StepMode>> = {
   mimic: 'jumper',
   slob: 'walker',
 };
+
+/** Per-character animation speed multiplier (critters scurry, heavy monsters lumber). */
+const CHARACTER_ANIM_SCALE: Partial<Record<string, number>> = {
+  rat: 1.4,
+  spider: 1.4,
+  imp: 1.3,
+  goblin: 1.35,
+  blob: 1.2,
+  bat: 1.2,
+};
+
+/** Get the per-character animation multiplier (1.0 = default). */
+export function getCharacterAnimScale(archetype: string): number {
+  return CHARACTER_ANIM_SCALE[archetype] ?? 1.0;
+}
 
 function getPersonality(folder: string): Pick<VoxCharEntry, 'thoughts' | 'exclamations' | 'sounds'> {
   const archetype = getArchetype(folder);
@@ -403,4 +418,87 @@ export function getEnemyTypeGroups(): { label: string; ids: string[] }[] {
 
 export function getRandomVoxChar(): VoxCharEntry {
   return ALL_VOX_CHARACTERS[Math.floor(Math.random() * ALL_VOX_CHARACTERS.length)];
+}
+
+// ── Per-Monster Stats (3-Tier System) ────────────────────────────────
+
+export interface MonsterStats {
+  tier: 'low' | 'mid' | 'high';
+  hp: [number, number];
+  mp: [number, number];
+  damage: [number, number];
+  atkSpeed: [number, number];
+  movSpeed: [number, number];
+  critChance: number;
+  /** Deflect chance 0-1. On deflect: zero damage, "CLANK!" sfx, spark, slight knockback. */
+  armour: number;
+}
+
+export function randomInRange(range: [number, number]): number {
+  return range[0] + Math.random() * (range[1] - range[0]);
+}
+
+const MONSTER_STATS: Record<string, MonsterStats> = {
+  // ── Low Tier — fragile, fast, swarm-type ──
+  // movSpeed range: 1.0–2.5
+  rat:     { tier: 'low', hp: [2, 3],  mp: [2, 4], damage: [1, 1], atkSpeed: [1.0, 1.4], movSpeed: [1.9, 2.5], critChance: 0.02, armour: 0 },
+  bat:     { tier: 'low', hp: [2, 3],  mp: [2, 4], damage: [1, 2], atkSpeed: [0.8, 1.2], movSpeed: [1.7, 2.3], critChance: 0.02, armour: 0 },
+  imp:     { tier: 'low', hp: [2, 3],  mp: [2, 4], damage: [1, 2], atkSpeed: [0.9, 1.3], movSpeed: [1.8, 2.4], critChance: 0.05, armour: 0 },
+  goblin:  { tier: 'low', hp: [3, 4],  mp: [2, 4], damage: [1, 2], atkSpeed: [0.7, 1.0], movSpeed: [1.6, 2.1], critChance: 0.03, armour: 0 },
+  blob:    { tier: 'low', hp: [3, 5],  mp: [2, 4], damage: [1, 2], atkSpeed: [0.5, 0.7], movSpeed: [1.1, 1.5], critChance: 0.01, armour: 0 },
+  spider:  { tier: 'low', hp: [2, 4],  mp: [2, 4], damage: [2, 3], atkSpeed: [0.9, 1.2], movSpeed: [1.5, 2.0], critChance: 0.05, armour: 0 },
+
+  // ── Mid Tier — standard dungeon threats ──
+  slob:      { tier: 'mid', hp: [7, 10],  mp: [4, 8], damage: [3, 4], atkSpeed: [0.3, 0.5], movSpeed: [1.0, 1.3], critChance: 0.02, armour: 0.25 },
+  skeleton:  { tier: 'mid', hp: [5, 7],   mp: [4, 8], damage: [2, 3], atkSpeed: [0.6, 0.9], movSpeed: [1.4, 1.8], critChance: 0.05, armour: 0 },
+  zombie:    { tier: 'mid', hp: [6, 9],   mp: [4, 8], damage: [2, 3], atkSpeed: [0.4, 0.6], movSpeed: [1.0, 1.3], critChance: 0.02, armour: 0 },
+  ghost:     { tier: 'mid', hp: [4, 6],   mp: [4, 8], damage: [2, 4], atkSpeed: [0.6, 0.9], movSpeed: [1.5, 1.9], critChance: 0.05, armour: 0 },
+  hobgoblin: { tier: 'mid', hp: [6, 8],   mp: [4, 8], damage: [2, 4], atkSpeed: [0.6, 0.8], movSpeed: [1.4, 1.7], critChance: 0.05, armour: 0.10 },
+  wolf:      { tier: 'mid', hp: [5, 7],   mp: [4, 8], damage: [2, 3], atkSpeed: [0.8, 1.1], movSpeed: [1.7, 2.2], critChance: 0.05, armour: 0 },
+  werewolf:  { tier: 'mid', hp: [7, 9],   mp: [4, 8], damage: [3, 4], atkSpeed: [0.7, 1.0], movSpeed: [1.6, 2.1], critChance: 0.08, armour: 0 },
+  bugbear:   { tier: 'mid', hp: [7, 10],  mp: [4, 8], damage: [3, 5], atkSpeed: [0.4, 0.6], movSpeed: [1.2, 1.5], critChance: 0.05, armour: 0.05 },
+  gargoyle:  { tier: 'mid', hp: [8, 11],  mp: [4, 8], damage: [2, 3], atkSpeed: [0.4, 0.6], movSpeed: [1.1, 1.4], critChance: 0.03, armour: 0.30 },
+
+  // ── High Tier — elite/boss-class ──
+  mimic:    { tier: 'high', hp: [8, 12],  mp: [8, 14], damage: [4, 6], atkSpeed: [0.5, 0.8], movSpeed: [1.4, 1.7], critChance: 0.08, armour: 0.15 },
+  vampire:  { tier: 'high', hp: [10, 14], mp: [8, 14], damage: [4, 5], atkSpeed: [0.7, 1.0], movSpeed: [1.6, 2.0], critChance: 0.12, armour: 0 },
+  devil:    { tier: 'high', hp: [12, 16], mp: [8, 14], damage: [4, 6], atkSpeed: [0.5, 0.8], movSpeed: [1.4, 1.7], critChance: 0.10, armour: 0.10 },
+  beholder: { tier: 'high', hp: [10, 14], mp: [8, 14], damage: [5, 7], atkSpeed: [0.4, 0.6], movSpeed: [1.0, 1.3], critChance: 0.08, armour: 0 },
+  minotaur: { tier: 'high', hp: [14, 18], mp: [8, 14], damage: [5, 7], atkSpeed: [0.4, 0.6], movSpeed: [1.3, 1.6], critChance: 0.08, armour: 0.10 },
+  golem:    { tier: 'high', hp: [16, 22], mp: [8, 14], damage: [4, 6], atkSpeed: [0.3, 0.5], movSpeed: [1.0, 1.2], critChance: 0.03, armour: 0.40 },
+  hydra:    { tier: 'high', hp: [14, 18], mp: [8, 14], damage: [4, 6], atkSpeed: [0.7, 1.0], movSpeed: [1.2, 1.5], critChance: 0.10, armour: 0.05 },
+  dragon:   { tier: 'high', hp: [18, 25], mp: [8, 14], damage: [6, 8], atkSpeed: [0.5, 0.7], movSpeed: [1.3, 1.7], critChance: 0.15, armour: 0.25 },
+};
+
+/** Default fallback for unknown archetypes (mid-tier). */
+const DEFAULT_MONSTER_STATS: MonsterStats = {
+  tier: 'mid', hp: [5, 7], mp: [4, 8], damage: [2, 3],
+  atkSpeed: [0.6, 0.9], movSpeed: [1.4, 1.7], critChance: 0.05, armour: 0,
+};
+
+export function getMonsterStats(archetype: string): MonsterStats {
+  return MONSTER_STATS[archetype] ?? DEFAULT_MONSTER_STATS;
+}
+
+// ── Hero Stats ───────────────────────────────────────────────────────
+// Same schema as monsters. Heroes are player-controlled so stats are tuned for survivability.
+
+const HERO_STATS: Record<string, MonsterStats> = {
+  adventurer:  { tier: 'mid', hp: [10, 10], mp: [8, 8],  damage: [2, 3], atkSpeed: [1.2, 1.2], movSpeed: [2.6, 2.6], critChance: 0.08, armour: 0.05 },
+  alchemist:   { tier: 'mid', hp: [8, 8],   mp: [14, 14], damage: [2, 2], atkSpeed: [1.0, 1.0], movSpeed: [2.4, 2.4], critChance: 0.05, armour: 0 },
+  amazon:      { tier: 'mid', hp: [12, 12], mp: [8, 8],  damage: [3, 4], atkSpeed: [1.1, 1.1], movSpeed: [2.7, 2.7], critChance: 0.10, armour: 0.05 },
+  archer:      { tier: 'mid', hp: [8, 8],   mp: [10, 10], damage: [3, 3], atkSpeed: [1.0, 1.0], movSpeed: [2.6, 2.6], critChance: 0.12, armour: 0 },
+  barbarian:   { tier: 'mid', hp: [14, 14], mp: [6, 6],  damage: [4, 5], atkSpeed: [0.8, 0.8], movSpeed: [2.2, 2.2], critChance: 0.10, armour: 0.10 },
+  bard:        { tier: 'mid', hp: [8, 8],   mp: [14, 14], damage: [1, 2], atkSpeed: [1.0, 1.0], movSpeed: [2.6, 2.6], critChance: 0.05, armour: 0 },
+  knight:      { tier: 'mid', hp: [14, 14], mp: [8, 8],  damage: [3, 3], atkSpeed: [0.9, 0.9], movSpeed: [2.1, 2.1], critChance: 0.05, armour: 0.20 },
+  mage:        { tier: 'mid', hp: [7, 7],   mp: [16, 16], damage: [2, 2], atkSpeed: [1.0, 1.0], movSpeed: [2.1, 2.1], critChance: 0.08, armour: 0 },
+  monk:        { tier: 'mid', hp: [10, 10], mp: [12, 12], damage: [2, 3], atkSpeed: [1.4, 1.4], movSpeed: [2.8, 2.8], critChance: 0.12, armour: 0 },
+  necromancer: { tier: 'mid', hp: [7, 7],   mp: [16, 16], damage: [2, 2], atkSpeed: [1.0, 1.0], movSpeed: [2.4, 2.4], critChance: 0.08, armour: 0 },
+  priestess:   { tier: 'mid', hp: [9, 9],   mp: [14, 14], damage: [1, 2], atkSpeed: [1.0, 1.0], movSpeed: [2.4, 2.4], critChance: 0.05, armour: 0 },
+  rogue:       { tier: 'mid', hp: [9, 9],   mp: [10, 10], damage: [2, 3], atkSpeed: [1.3, 1.3], movSpeed: [2.8, 2.8], critChance: 0.15, armour: 0 },
+};
+
+/** Look up stats for any character archetype — checks heroes first, then monsters. */
+export function getCharacterStats(archetype: string): MonsterStats {
+  return HERO_STATS[archetype] ?? MONSTER_STATS[archetype] ?? DEFAULT_MONSTER_STATS;
 }

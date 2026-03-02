@@ -79,42 +79,90 @@ function HPBar({ hp, maxHp }: { hp: number; maxHp: number }) {
   );
 }
 
-const EFFECT_ICONS: Record<string, string> = {
-  heal: '❤️', poison: '☠️',
-  speed: '⚡', slow: '🐌',
-  armor: '🛡️', fragile: '💔',
-  shadow: '👻', frenzy: '🔥',
+/** Simple SVG icon paths (16x16 viewBox) — flat, solid, no emoji */
+function SvgIcon({ path, color, size = 14 }: { path: string; color: string; size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill={color} style={{ display: 'block' }}>
+      <path d={path} />
+    </svg>
+  );
+}
+
+const EFFECT_SVG: Record<string, { path: string; color: string }> = {
+  heal:    { path: 'M8 2C6.3 2 4 3.6 4 6.4c0 3.2 4 7.6 4 7.6s4-4.4 4-7.6C12 3.6 9.7 2 8 2z', color: '#ff4466' },
+  poison:  { path: 'M8 1a2 2 0 0 0-2 2v2.5L4 8v1h1v4a3 3 0 0 0 6 0V9h1V8l-2-2.5V3a2 2 0 0 0-2-2zM7 10a1 1 0 1 1 0-2 1 1 0 0 1 0 2zm2.5 2a1 1 0 1 1 0-2 1 1 0 0 1 0 2z', color: '#88dd44' },
+  speed:   { path: 'M13 3L7 8h4l-5 6 2-4.5H5L9 3h4z', color: '#ffcc22' },
+  slow:    { path: 'M8 1C4.1 1 1 4.1 1 8s3.1 7 7 7 7-3.1 7-7-3.1-7-7-7zm0 12.5c-3 0-5.5-2.5-5.5-5.5S5 2.5 8 2.5 13.5 5 13.5 8 11 13.5 8 13.5zM8.5 4H7v5l4 2.4.8-1.2-3.3-2V4z', color: '#8888cc' },
+  armor:   { path: 'M8 1L2 4v4c0 4 2.7 6.6 6 8 3.3-1.4 6-4 6-8V4L8 1z', color: '#55aaff' },
+  fragile: { path: 'M8 14s-6-4.4-6-8.4C2 3.3 4.3 1 7 1c1 0 1.8.5 1 1.2C7.2.5 8 0 9 1c2.7 0 5 2.3 5 4.6 0 4-6 8.4-6 8.4zM6 6l4 4M10 6l-4 4', color: '#dd6644' },
+  shadow:  { path: 'M8 2C5.2 2 3 4.2 3 7c0 1.6.8 3 2 4v2a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1v-2c1.2-1 2-2.4 2-4 0-2.8-2.2-5-5-5zm0 2a3 3 0 0 1 3 3c0 1-.5 1.8-1.3 2.4l-.7.5V12H7v-2.1l-.7-.5C5.5 8.8 5 8 5 7a3 3 0 0 1 3-3z', color: '#aa88ff' },
+  frenzy:    { path: 'M8 1c-.6 2-2.5 3.5-2.5 6C5.5 9.5 6.6 11 8 11s2.5-1.5 2.5-4C10.5 4.5 8.6 3 8 1zM8 13c-1 0-1.8-.5-2.2-1.2C4 12.5 3 13.8 3 15h10c0-1.2-1-2.5-2.8-3.2-.4.7-1.2 1.2-2.2 1.2z', color: '#ff6622' },
+  clarity:   { path: 'M8 3C5.8 3 4 4.8 4 7s1.8 4 4 4 4-1.8 4-4-1.8-4-4-4zm0 6.5a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5zM8 5.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zM3 2l1.5 1.5M13 2l-1.5 1.5M3 12l1.5-1.5M13 12l-1.5-1.5', color: '#44ddff' },
+  confusion: { path: 'M8 2C6 2 5 3.5 5.5 5c.3.8 1 1.2 1 2s-.5 1.5-1 2.5C5 10.5 5.5 12 7 13c1 .7 2.5.5 3-.5.3-.6 0-1.2-.5-1.5s-1-.5-1-1.2c0-.5.5-1 1-1.5s1.5-1 2-2c.7-1.3.3-3-1-4C10 1.5 9 2 8 2zm0 12a1 1 0 1 0 0 2 1 1 0 0 0 0-2z', color: '#dd44ff' },
 };
 
 function ActiveEffects({ effects }: { effects: ActivePotionDisplay[] }) {
   if (effects.length === 0) return null;
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'flex-end' }}>
+    <div style={{
+      display: 'flex',
+      flexDirection: 'row',
+      gap: 4,
+      justifyContent: 'flex-end',
+    }}>
       {effects.map(({ effect, remaining, duration, positive }) => {
         const ratio = duration > 0 ? remaining / duration : 0;
         const color = positive ? '#44dd66' : '#dd4444';
-        const icon = EFFECT_ICONS[effect] ?? '🧪';
-        const label = EFFECT_META[effect].label;
+        const bgColor = positive ? 'rgba(68,221,102,0.15)' : 'rgba(221,68,68,0.15)';
+        const borderColor = positive ? 'rgba(68,221,102,0.4)' : 'rgba(221,68,68,0.4)';
+        const svgData = EFFECT_SVG[effect];
+        const iconColor = svgData?.color ?? color;
+        const secs = Math.ceil(remaining);
         return (
           <div key={effect} style={{
-            display: 'flex', alignItems: 'center', gap: 5,
+            position: 'relative',
+            width: 28,
+            height: 28,
+            borderRadius: '50%',
+            background: bgColor,
+            border: `1.5px solid ${borderColor}`,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            overflow: 'hidden',
           }}>
-            <span style={{ fontSize: 10, fontWeight: 600, color, minWidth: 48, textAlign: 'right' }}>
-              {icon} {label}
-            </span>
+            {/* Timer fill from bottom */}
             <div style={{
-              width: 60, height: 5,
-              background: 'rgba(255,255,255,0.12)',
-              borderRadius: 3, overflow: 'hidden',
-            }}>
-              <div style={{
-                width: `${ratio * 100}%`, height: '100%',
-                background: color, borderRadius: 3,
-                transition: 'width 0.15s linear',
-              }} />
+              position: 'absolute',
+              bottom: 0,
+              left: 0,
+              right: 0,
+              height: `${ratio * 100}%`,
+              background: positive ? 'rgba(68,221,102,0.25)' : 'rgba(221,68,68,0.25)',
+              transition: 'height 0.25s linear',
+            }} />
+            {/* SVG icon */}
+            <div style={{ position: 'relative', zIndex: 1 }}>
+              {svgData
+                ? <SvgIcon path={svgData.path} color={iconColor} size={14} />
+                : <span style={{ fontSize: 12, color }}>{effect[0].toUpperCase()}</span>
+              }
             </div>
-            <span style={{ fontSize: 9, opacity: 0.6, minWidth: 20 }}>
-              {Math.ceil(remaining)}s
+            {/* Timer text */}
+            <span style={{
+              position: 'absolute',
+              bottom: -1,
+              right: -1,
+              fontSize: 7,
+              fontWeight: 700,
+              color,
+              background: 'rgba(0,0,0,0.7)',
+              borderRadius: 3,
+              padding: '0 2px',
+              lineHeight: '10px',
+              zIndex: 2,
+            }}>
+              {secs}
             </span>
           </div>
         );
@@ -207,13 +255,12 @@ export function HUD() {
             {activeCharacterName}
           </div>
         )}
+        <ActiveEffects effects={activePotionEffects} />
         <HPBar hp={hp} maxHp={maxHp} />
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
           <Stat icon="💎" value={collectibles} color="#44ffaa" />
           <Stat icon="🪙" value={coins} color="#ffd700" />
-          <Stat icon="🧪" value={potionCount} color="#ff6688" />
         </div>
-        <ActiveEffects effects={activePotionEffects} />
       </div>
     </div>
   );

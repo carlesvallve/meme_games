@@ -4,7 +4,7 @@ import type { Terrain } from '../Terrain';
 import type { NavGrid } from '../NavGrid';
 import type { LadderDef } from '../Ladder';
 import type { VoxCharEntry } from './VoxCharacterDB';
-import { getFilteredEnemies } from './VoxCharacterDB';
+import { getFilteredEnemies, getArchetype, getMonsterStats, randomInRange } from './VoxCharacterDB';
 import { ChaseBehavior } from '../behaviors/ChaseBehavior';
 import { Roaming } from '../behaviors/Roaming';
 import type { BehaviorContext } from '../behaviors/Behavior';
@@ -20,6 +20,12 @@ export class Enemy extends Character {
   private isChasing = false;
   private chaseMemoryTimer = 0;
 
+  /** Base movement speed (before status effects like slow). */
+  baseSpeed = 1.0;
+  /** Stamina (reserved for future use). */
+  mp = 0;
+  maxMp = 0;
+
   constructor(
     scene: THREE.Scene,
     terrain: Terrain,
@@ -31,15 +37,10 @@ export class Enemy extends Character {
 
     const ep = useGameStore.getState().enemyParams;
     this.isEnemy = true;
-    this.hp = ep.hp;
-    this.maxHp = ep.hp;
 
     // Override character params with enemy-specific values from the store
     Object.assign(this.params, {
-      speed: ep.speed[0] + Math.random() * (ep.speed[1] - ep.speed[0]),
       hopHeight: 0.03,
-      attackDamage: Math.floor(Math.random() * 4) + 1,
-      attackCooldown: ep.attackCooldown,
       chaseRange: ep.chaseRange * 0.25,
       invulnDuration: ep.invulnDuration,
       stunDuration: ep.stunDuration,
@@ -57,6 +58,17 @@ export class Enemy extends Character {
     const pool = getFilteredEnemies(ep.allowedTypes);
     const entry = pool[Math.floor(Math.random() * pool.length)];
     this.applyVoxSkin(entry);
+
+    // Apply per-monster stats based on archetype
+    const stats = getMonsterStats(getArchetype(entry.name));
+    this.hp = this.maxHp = Math.round(randomInRange(stats.hp));
+    this.mp = this.maxMp = Math.round(randomInRange(stats.mp));
+    this.params.attackDamage = Math.floor(randomInRange(stats.damage));
+    this.params.attackCooldown = 1 / randomInRange(stats.atkSpeed);
+    this.params.speed = randomInRange(stats.movSpeed);
+    this.baseSpeed = this.params.speed;
+    this.critChance = stats.critChance;
+    this.armour = stats.armour;
   }
 
   /** Initialize chase behavior — call after construction */
@@ -108,6 +120,12 @@ export class Enemy extends Character {
   /** Check if the chase behavior is in attack state (wants to attack) */
   wantsToAttack(): boolean {
     return this.chaseBehavior?.getState() === 'attack';
+  }
+
+  /** Set confusion state on chase and roam behaviors */
+  setConfused(active: boolean): void {
+    if (this.chaseBehavior) this.chaseBehavior.confusionActive = active;
+    if (this.roamBehavior) this.roamBehavior.confusionActive = active;
   }
 
   override updateTorch(_dt: number): void {

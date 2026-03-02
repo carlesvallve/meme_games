@@ -397,6 +397,8 @@ interface GameStore {
   onSpawnEnemy: (() => void) | null;
   onResetEnemyParams: (() => void) | null;
   onDrinkPotion: ((colorIndex: number) => void) | null;
+  onTestFrenzyDrink: (() => void) | null;
+  onTestFrenzyKick: (() => void) | null;
 }
 
 const saved = loadSettings();
@@ -600,6 +602,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
   onSpawnEnemy: null,
   onResetEnemyParams: null,
   onDrinkPotion: null,
+  onTestFrenzyDrink: null,
+  onTestFrenzyKick: null,
 }));
 
 // Auto-save settings to localStorage on any change

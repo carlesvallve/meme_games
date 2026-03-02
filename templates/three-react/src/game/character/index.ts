@@ -44,5 +44,8 @@ export {
   createCharacterMesh,
 } from './characters';
 
-export type { VoxCharEntry, StepMode } from './VoxCharacterDB';
-export { VOX_HEROES, VOX_ENEMIES, ALL_VOX_CHARACTERS, getRandomVoxChar } from './VoxCharacterDB';
+export type { VoxCharEntry, StepMode, MonsterStats } from './VoxCharacterDB';
+export {
+  VOX_HEROES, VOX_ENEMIES, ALL_VOX_CHARACTERS, getRandomVoxChar,
+  getArchetype, getCharacterStats, getMonsterStats, randomInRange,
+} from './VoxCharacterDB';

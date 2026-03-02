@@ -27,6 +27,8 @@ interface LootItem {
   sparklePhase?: number;
   /** Floating label sprite */
   label?: THREE.Sprite;
+  /** Potion magnet activated by Space press — allows pull toward player */
+  magnetActivated?: boolean;
 }
 
 const GRAVITY = 20;
@@ -37,23 +39,37 @@ const SETTLE_THRESHOLD = 0.5;
 
 /** Create a floating label sprite for a potion */
 function createPotionLabel(text: string, color: string): THREE.Sprite {
+  const isUnknown = text === '?';
   const canvas = document.createElement('canvas');
-  canvas.width = 128;
-  canvas.height = 32;
+  canvas.width = isUnknown ? 96 : 192;
+  canvas.height = isUnknown ? 96 : 48;
   const ctx = canvas.getContext('2d')!;
-  ctx.font = 'bold 16px monospace';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  // Dark background pill
-  const metrics = ctx.measureText(text);
-  const pw = Math.min(metrics.width + 12, 120);
-  const px = (128 - pw) / 2;
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
-  ctx.roundRect(px, 2, pw, 28, 6);
-  ctx.fill();
-  // Text
-  ctx.fillStyle = color;
-  ctx.fillText(text, 64, 17);
+
+  if (isUnknown) {
+    // Big centered "?" with circular background
+    ctx.font = 'bold 52px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+    ctx.beginPath();
+    ctx.arc(48, 48, 34, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = color;
+    ctx.fillText('?', 48, 51);
+  } else {
+    ctx.font = 'bold 26px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    // Dark background pill
+    const metrics = ctx.measureText(text);
+    const pw = Math.min(metrics.width + 18, 180);
+    const px = (192 - pw) / 2;
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+    ctx.roundRect(px, 3, pw, 42, 10);
+    ctx.fill();
+    ctx.fillStyle = color;
+    ctx.fillText(text, 96, 26);
+  }
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.minFilter = THREE.LinearFilter;
@@ -63,8 +79,13 @@ function createPotionLabel(text: string, color: string): THREE.Sprite {
     depthTest: false,
   });
   const sprite = new THREE.Sprite(mat);
-  sprite.scale.set(0.3, 0.075, 1);
-  sprite.position.set(0, 0.18, 0);
+  if (isUnknown) {
+    sprite.scale.set(0.20, 0.20, 1);
+    sprite.position.set(0, 0.20, 0);
+  } else {
+    sprite.scale.set(0.42, 0.105, 1);
+    sprite.position.set(0, 0.20, 0);
+  }
   sprite.renderOrder = 2;
   sprite.raycast = () => {}; // exclude from raycaster
   return sprite;
@@ -76,25 +97,27 @@ function updatePotionLabel(sprite: THREE.Sprite, text: string, color: string): v
   const oldTex = mat.map;
 
   const canvas = document.createElement('canvas');
-  canvas.width = 128;
-  canvas.height = 32;
+  canvas.width = 192;
+  canvas.height = 48;
   const ctx = canvas.getContext('2d')!;
-  ctx.font = 'bold 16px monospace';
+  ctx.font = 'bold 26px monospace';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   const metrics = ctx.measureText(text);
-  const pw = Math.min(metrics.width + 12, 120);
-  const px = (128 - pw) / 2;
+  const pw = Math.min(metrics.width + 18, 180);
+  const px = (192 - pw) / 2;
   ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
-  ctx.roundRect(px, 2, pw, 28, 6);
+  ctx.roundRect(px, 3, pw, 42, 10);
   ctx.fill();
   ctx.fillStyle = color;
-  ctx.fillText(text, 64, 17);
+  ctx.fillText(text, 96, 26);
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.minFilter = THREE.LinearFilter;
   mat.map = texture;
   mat.needsUpdate = true;
+  // Switch from "?" scale to text scale when identified
+  sprite.scale.set(0.42, 0.105, 1);
   if (oldTex) oldTex.dispose();
 }
 
@@ -109,11 +132,11 @@ export class LootSystem {
   /** Shared material for all tinted potions (vertex colors carry the tint). */
   private readonly potionMat: THREE.MeshStandardMaterial;
   private readonly potionMatFallback: THREE.MeshStandardMaterial;
-  /** Base geometries: potion shape (colorIndex 0-3) and bottle shape (4-7) */
+  /** Base geometries: potion shape (colorIndex 0-4) and bottle shape (5-9) */
   private potionBaseGeo: THREE.BufferGeometry | null = null;
   private bottleBaseGeo: THREE.BufferGeometry | null = null;
-  /** Pre-tinted geometries per colorIndex (0-7). Built once base geos load. */
-  private tintedGeos: (THREE.BufferGeometry | null)[] = new Array(8).fill(null);
+  /** Pre-tinted geometries per colorIndex (0-9). Built once base geos load. */
+  private tintedGeos: (THREE.BufferGeometry | null)[] = new Array(POTION_HUES.length).fill(null);
   private potionGeoFallback: THREE.BufferGeometry;
   private potionGeosReady = false;
   /** Sparkle sprite shared geometry */
@@ -177,9 +200,11 @@ export class LootSystem {
       this.potionBaseGeo = buildVoxMesh(potionResult.model, potionResult.palette, POTION_LOOT_HEIGHT);
       this.bottleBaseGeo = buildVoxMesh(bottleResult.model, bottleResult.palette, POTION_LOOT_HEIGHT);
 
-      // Build 8 tinted variants: 0-3 = potion shape, 4-7 = bottle shape
-      for (let i = 0; i < 8; i++) {
-        const baseGeo = i < 4 ? this.potionBaseGeo : this.bottleBaseGeo;
+      // Build tinted variants: first half = potion shape, second half = bottle shape
+      const numColors = POTION_HUES.length;
+      const halfColors = Math.floor(numColors / 2);
+      for (let i = 0; i < numColors; i++) {
+        const baseGeo = i < halfColors ? this.potionBaseGeo : this.bottleBaseGeo;
         this.tintedGeos[i] = tintGeometry(baseGeo, POTION_HUES[i], 1.2);
       }
       this.potionGeosReady = true;
@@ -205,7 +230,7 @@ export class LootSystem {
       const type: 'coin' | 'potion' = isCoin ? 'coin' : 'potion';
       if (!isCoin) potionSpawned = true;
 
-      const colorIndex = Math.floor(Math.random() * 8);
+      const colorIndex = Math.floor(Math.random() * POTION_HUES.length);
       const geo = isCoin ? this.coinGeo : this.getPotionGeo(colorIndex);
       const mat = isCoin ? this.coinMat : (this.potionGeosReady ? this.potionMat : this.potionMatFallback);
 
@@ -255,7 +280,7 @@ export class LootSystem {
   private addPotionLabel(item: LootItem): void {
     const ps = this.potionSystem;
     const identified = ps ? ps.isIdentified(item.colorIndex) : false;
-    const text = identified ? (ps?.getLabel(item.colorIndex) ?? '???') : '???';
+    const text = identified ? (ps?.getLabel(item.colorIndex) ?? '?') : '?';
     const positive = ps ? ps.isPositive(item.colorIndex) : true;
     const color = identified ? (positive ? '#44ff66' : '#ff4444') : '#ffffff';
     const label = createPotionLabel(text, color);
@@ -394,9 +419,13 @@ export class LootSystem {
       const dz = playerPos.z - item.mesh.position.z;
       const dist = Math.sqrt(dx * dx + dz * dz);
 
-      // Magnet attraction after grace period (coins have wider pull)
-      const effectiveRadius = item.type === 'coin' ? magnetRadius * 1.2 : magnetRadius;
-      if (item.age > item.gracePeriod && dist < effectiveRadius && dist > this.pickupRadius) {
+      // Potions require Space to activate magnet (magnetActivated flag set externally)
+      const isPotion = item.type === 'potion';
+      const canMagnet = isPotion ? !!item.magnetActivated : true;
+
+      // Magnet attraction after grace period (coins auto-pull, potions only when activated)
+      const effectiveRadius = isPotion ? (canMagnet ? magnetRadius * 1.5 : 0) : magnetRadius * 1.2;
+      if (canMagnet && item.age > item.gracePeriod && dist < effectiveRadius && dist > this.pickupRadius) {
         // Stop physics, float toward player
         item.grounded = true;
         const speed = (1 - dist / effectiveRadius) * magnetSpeed * dt;
@@ -407,8 +436,8 @@ export class LootSystem {
         item.mesh.position.y += dy * 4 * dt;
       }
 
-      // Pickup
-      if (dist < this.pickupRadius) {
+      // Auto-pickup: coins always, potions only after magnet activated by Space
+      if ((!isPotion || item.magnetActivated) && dist < this.pickupRadius) {
         item.collected = true;
         item.mesh.visible = false;
         // Hide sparkles
@@ -449,6 +478,76 @@ export class LootSystem {
     return { coins, potions, potionColorIndices };
   }
 
+  /** Find nearest potion within radius of a position.
+   *  @param badOnly — if true, only return identified bad potions (for kick). */
+  getNearestPotion(x: number, z: number, radius: number, badOnly = false): LootItem | null {
+    let best: LootItem | null = null;
+    let bestDist = radius;
+    for (const item of this.items) {
+      if (item.collected || item.type !== 'potion') continue;
+      if (!item.grounded) continue; // skip in-flight potions
+      if (badOnly && !this.potionSystem?.isIdentifiedBad(item.colorIndex)) continue;
+      const dx = x - item.mesh.position.x;
+      const dz = z - item.mesh.position.z;
+      const dist = Math.sqrt(dx * dx + dz * dz);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = item;
+      }
+    }
+    return best;
+  }
+
+  /** Activate magnet pull for nearby good/unidentified potions (called on Space press).
+   *  Returns true if any potion was activated. */
+  activatePotionMagnet(x: number, z: number, radius: number): boolean {
+    let activated = false;
+    for (const item of this.items) {
+      if (item.collected || item.type !== 'potion' || item.magnetActivated) continue;
+      if (!item.grounded) continue;
+      // Don't magnet-pull identified bad potions — those get kicked
+      if (this.potionSystem?.isIdentifiedBad(item.colorIndex)) continue;
+      const dx = x - item.mesh.position.x;
+      const dz = z - item.mesh.position.z;
+      if (dx * dx + dz * dz < radius * radius) {
+        item.magnetActivated = true;
+        activated = true;
+      }
+    }
+    return activated;
+  }
+
+  /** Kick a potion item — removes from loot, returns projectile data */
+  kickPotion(item: LootItem, dirX: number, dirZ: number): {
+    mesh: THREE.Mesh; colorIndex: number; vx: number; vy: number; vz: number;
+  } | null {
+    const idx = this.items.indexOf(item);
+    if (idx < 0) return null;
+
+    // Detach sparkles + label from mesh
+    if (item.sparkles) {
+      for (const sp of item.sparkles) item.mesh.remove(sp);
+    }
+    if (item.label) {
+      item.mesh.remove(item.label);
+      (item.label.material as THREE.SpriteMaterial).map?.dispose();
+      (item.label.material as THREE.SpriteMaterial).dispose();
+    }
+
+    item.entity.destroy();
+    this.items.splice(idx, 1);
+
+    // Launch as projectile
+    const speed = 5;
+    return {
+      mesh: item.mesh,
+      colorIndex: item.colorIndex,
+      vx: dirX * speed,
+      vy: 3,
+      vz: dirZ * speed,
+    };
+  }
+
   /** All active loot item meshes (for room visibility). */
   getMeshes(): THREE.Mesh[] {
     return this.items.filter(i => !i.collected).map(i => i.mesh);
@@ -471,7 +570,7 @@ export class LootSystem {
   restoreLoot(saved: SavedLoot[]): void {
     for (const s of saved) {
       const isCoin = s.type === 'coin';
-      const colorIndex = s.colorIndex ?? Math.floor(Math.random() * 8);
+      const colorIndex = s.colorIndex ?? Math.floor(Math.random() * POTION_HUES.length);
       const geo = isCoin ? this.coinGeo : this.getPotionGeo(colorIndex);
       const mat = isCoin ? this.coinMat : (this.potionGeosReady ? this.potionMat : this.potionMatFallback);
 

@@ -179,6 +179,44 @@ export class PostProcessStack {
     this.colorGradePass.uniforms['saturation'].value = settings.colorGrade.saturation;
   }
 
+  // ── Color grade overrides (for death transitions) ──
+
+  /** Override saturation uniform directly (bypasses store sync). */
+  setSaturation(v: number): void {
+    this.colorGradePass.uniforms['saturation'].value = v;
+  }
+
+  /** Override brightness uniform directly (bypasses store sync). */
+  setBrightness(v: number): void {
+    this.colorGradePass.uniforms['brightness'].value = v;
+  }
+
+  getSaturation(): number {
+    return this.colorGradePass.uniforms['saturation'].value as number;
+  }
+
+  getBrightness(): number {
+    return this.colorGradePass.uniforms['brightness'].value as number;
+  }
+
+  /** Force color grade pass enabled (for death transition desaturation even if store disables it). */
+  setColorGradeEnabled(v: boolean): void {
+    this.colorGradePass.enabled = v;
+  }
+
+  /** Directly set fade alpha (1 = visible, 0 = black). Used by death transitions for progressive fade. */
+  setFadeAlpha(v: number): void {
+    this.fadePass.enabled = v < 0.999;
+    this.fadePass.uniforms['fadeAlpha'].value = v;
+    this.fadePass.uniforms['vignetteBoost'].value = (1 - v) * 0.6;
+  }
+
+  /** Insert a ShaderPass just before the fade pass (last in the chain). */
+  insertPassBeforeFade(pass: ShaderPass): void {
+    // Remove fade, add the new pass, re-add fade
+    this.composer.passes.splice(this.composer.passes.indexOf(this.fadePass), 0, pass);
+  }
+
   /**
    * Fade screen to black, call `onBlack` when fully dark, hold black until `releaseFade()`.
    * @param onBlack — called at the midpoint (screen is black). Call `releaseFade()` when ready to fade in.

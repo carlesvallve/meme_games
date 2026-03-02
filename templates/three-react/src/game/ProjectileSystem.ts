@@ -315,6 +315,9 @@ export interface ProjectileHitInfo {
   z: number;
   dirX: number;
   dirZ: number;
+  isCrit: boolean;
+  /** True when the hit was deflected by armour (no damage dealt). */
+  deflected?: boolean;
 }
 
 export interface ProjectileUpdateOptions {
@@ -339,8 +342,18 @@ export class ProjectileSystem {
   private impactEffects: EnergyImpact[] = [];
   private readonly scene: THREE.Scene;
 
+  /** Base crit chance for projectiles (5%) */
+  private critChance = 0.05;
+  /** Additional crit bonus (from clarity potion) */
+  private critBonusValue = 0;
+
   constructor(scene: THREE.Scene) {
     this.scene = scene;
+  }
+
+  /** Set the crit bonus (e.g. from clarity potion) */
+  setCritBonus(bonus: number): void {
+    this.critBonusValue = bonus;
   }
 
   /** Spawn a short-lived energy explosion at (x,y,z). If dir is provided, offset position by ARROW_PENETRATION_OFFSET * penetrationScale. If parent (e.g. character mesh) is provided, explosion is parented so it follows the character. */
@@ -1213,16 +1226,39 @@ export class ProjectileSystem {
             const hitDirY = cdy / cDist;
             const hitDirZ = cdz / cDist;
 
-            const wasHit = enemy.takeDamage(p.damage, p.mesh.position.x - p.vx * 0.1, p.mesh.position.z - p.vz * 0.1, p.knockback);
+            // Armour deflect — ricochet projectile in a random direction
+            if (enemy.armour > 0 && Math.random() < enemy.armour) {
+              onHit({
+                enemy, damage: 0, x: ex, y: ey, z: ez,
+                dirX: -hitDirX, dirZ: -hitDirZ, isCrit: false, deflected: true,
+              });
+              // Ricochet: randomize velocity direction, reduce speed
+              const angle = (Math.random() - 0.5) * Math.PI * 1.2; // ±108° spread
+              const cos = Math.cos(angle), sin = Math.sin(angle);
+              const oldVx = p.vx, oldVz = p.vz;
+              p.vx = oldVx * cos - oldVz * sin;
+              p.vz = oldVx * sin + oldVz * cos;
+              p.vy = 1.5 + Math.random() * 2; // pop upward
+              p.speed *= 0.6;
+              p.damage = 0; // no damage after deflect
+              p.lifetime = p.age + 0.5; // short remaining life
+              break;
+            }
+
+            // Roll for crit
+            const isCrit = Math.random() < (this.critChance + this.critBonusValue);
+            const finalDamage = isCrit ? p.damage * 2 : p.damage;
+            const wasHit = enemy.takeDamage(finalDamage, p.mesh.position.x - p.vx * 0.1, p.mesh.position.z - p.vz * 0.1, p.knockback);
             if (wasHit) {
               onHit({
                 enemy,
-                damage: p.damage,
+                damage: finalDamage,
                 x: ex,
                 y: ey,
                 z: ez,
                 dirX: -hitDirX,
                 dirZ: -hitDirZ,
+                isCrit,
               });
             }
 

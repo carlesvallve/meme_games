@@ -112,7 +112,7 @@ export class ChestSystem {
 
   /** Register a chest placed by DungeonPropSystem (voxel dungeon). Closed mesh → swap to openGeo on interact, spawn loot. */
   registerPropChest(position: THREE.Vector3, mesh: THREE.Mesh, entity: Entity, openGeo?: THREE.BufferGeometry): void {
-    if (!openGeo) console.warn('[ChestSystem] Registered prop chest without openGeo at', position.x.toFixed(2), position.z.toFixed(2));
+    if (!openGeo) console.warn('[ChestSystem] Chest missing openGeo (will not show open state) at', position.x.toFixed(2), position.z.toFixed(2));
     const group = new THREE.Group();
     group.position.copy(position);
     const lidPivot = new THREE.Object3D();

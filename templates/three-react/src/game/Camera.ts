@@ -72,6 +72,9 @@ export class Camera {
   private snapAngleY: number | null = null;
   private readonly snapSpeed = 12; // exponential lerp speed
 
+  // Target Y override (for death transitions — camera drifts upward)
+  private targetYOverride: number | null = null;
+
   // Screen shake
   private shakeX = 0;
   private shakeZ = 0;
@@ -244,6 +247,11 @@ export class Camera {
     this.snapAngleY = targetAngleY;
   }
 
+  /** Override camera target Y (e.g. soul ascend drift). Pass null to clear. */
+  setTargetYOverride(y: number | null): void {
+    this.targetYOverride = y;
+  }
+
   /** Returns true if the most recent pointer interaction was a confirmed drag (not a click). */
   wasDrag(): boolean {
     return this.dragConfirmed;
@@ -299,6 +307,11 @@ export class Camera {
         this.angleY = this.snapAngleY;
         this.snapAngleY = null;
       }
+    }
+
+    // Apply target Y override (death transition camera drift)
+    if (this.targetYOverride !== null) {
+      this.target.y = this.targetYOverride;
     }
 
     // Smooth the orbit center (follow target), not the camera — so we can lookAt it without tilt

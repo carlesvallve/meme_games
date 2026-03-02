@@ -14,12 +14,12 @@ export class HpBar {
     this.group = new THREE.Group();
 
     const bgGeo = new THREE.PlaneGeometry(HP_BAR_WIDTH, HP_BAR_HEIGHT);
-    const bgMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.6, side: THREE.DoubleSide, depthTest: false });
+    const bgMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.6, side: THREE.DoubleSide, depthTest: false, depthWrite: false });
     this.bg = new THREE.Mesh(bgGeo, bgMat);
     this.group.add(this.bg);
 
     const fillGeo = new THREE.PlaneGeometry(HP_BAR_WIDTH, HP_BAR_HEIGHT);
-    const fillMat = new THREE.MeshBasicMaterial({ color: 0x44dd66, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthTest: false });
+    const fillMat = new THREE.MeshBasicMaterial({ color: 0x44dd66, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthTest: false, depthWrite: false });
     this.fill = new THREE.Mesh(fillGeo, fillMat);
     this.group.add(this.fill);
 
