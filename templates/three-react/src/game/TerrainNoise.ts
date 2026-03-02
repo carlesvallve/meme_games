@@ -1010,7 +1010,7 @@ function detectLadderSites(
   }
   if (otherRegions.size === 0) return ladders;
 
-  console.log(`[detectLadderSites] spawnLabel=${spawnLabel}, ${otherRegions.size} disconnected region(s), ${regionCount} total regions`);
+  // console.log(`[detectLadderSites] spawnLabel=${spawnLabel}, ${otherRegions.size} disconnected region(s), ${regionCount} total regions`);
 
   // Build borders for all regions (interRegionOnly = true to avoid map-edge vertices)
   const borders = buildBoundaryIndex(labels, verts, regionCount, true);
@@ -1144,13 +1144,13 @@ function detectLadderSites(
       topCellGZ: 0,
     });
 
-    console.log(`[Ladder ${ladders.length}] h=${(highH - lowH).toFixed(1)}m at (${ladderX.toFixed(1)}, ${ladderZ.toFixed(1)}) low=(${worldLowX.toFixed(1)},${worldLowZ.toFixed(1)}) high=(${worldHighX.toFixed(1)},${worldHighZ.toFixed(1)})`);
+    // console.log(`[Ladder ${ladders.length}] h=${(highH - lowH).toFixed(1)}m at (${ladderX.toFixed(1)}, ${ladderZ.toFixed(1)}) low=(${worldLowX.toFixed(1)},${worldLowZ.toFixed(1)}) high=(${worldHighX.toFixed(1)},${worldHighZ.toFixed(1)})`);
 
     // Mark this region as connected
     union(spawnLabel, targetRegion);
   }
 
-  console.log(`[detectLadderSites] Created ${ladders.length} ladder(s) for ${otherRegions.size} disconnected regions`);
+  // console.log(`[detectLadderSites] Created ${ladders.length} ladder(s) for ${otherRegions.size} disconnected regions`);
   return ladders;
 }
 

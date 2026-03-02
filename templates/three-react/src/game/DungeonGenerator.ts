@@ -538,7 +538,7 @@ function addLoopCorridors(
     extraConnections.set(b, (extraConnections.get(b) ?? 0) + 1);
     added++;
     const tag = pair.hops >= 4 ? 'CROSS' : 'loop';
-    console.log(`[Dungeon] ${tag} corridor room ${a}↔${b} dist=${pair.dist} hops=${pair.hops} cells=${corridor.cells.length}`);
+    // console.log(`[Dungeon] ${tag} corridor room ${a}↔${b} dist=${pair.dist} hops=${pair.hops} cells=${corridor.cells.length}`);
     return true;
   };
 
@@ -559,7 +559,7 @@ function addLoopCorridors(
   }
 
   if (added > 0) {
-    console.log(`[Dungeon] Added ${added} loop corridors total (${protectedCells.size} protected cells)`);
+    // console.log(`[Dungeon] Added ${added} loop corridors total (${protectedCells.size} protected cells)`);
   }
   return protectedCells;
 }

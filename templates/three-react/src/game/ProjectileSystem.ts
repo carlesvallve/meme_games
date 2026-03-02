@@ -6,7 +6,7 @@ import { audioSystem } from '../utils/AudioSystem';
 
 // ── Constants ────────────────────────────────────────────────────────
 
-const MAX_ACTIVE = 6;
+const MAX_ACTIVE = 12;
 const HIT_RADIUS = 0.5;
 const FLY_Y_OFFSET = 0.2; // height above ground (fallback when muzzleUp not provided)
 const TERRAIN_HIT_SLOPE = 0.8; // slope threshold: above this, projectile impacts terrain
@@ -1022,7 +1022,7 @@ export class ProjectileSystem {
             const offSegmentSq = toStick * toStick + toStickY * toStickY + toStickZ * toStickZ - projectedDist * projectedDist;
             if (projectedDist < -0.1 || projectedDist > rayLen + 0.2 || offSegmentSq > 0.25) {
               if (DEBUG_PROJECTILE_STICK) {
-                console.log('[Projectile stick RAYCAST] SKIP hit — stick point off ray segment', { projectedDist: projectedDist.toFixed(2), rayLen: rayLen.toFixed(2), offSegmentM: Math.sqrt(offSegmentSq).toFixed(2) });
+                // console.log('[Projectile stick RAYCAST] SKIP hit — stick point off ray segment', { projectedDist: projectedDist.toFixed(2), rayLen: rayLen.toFixed(2), offSegmentM: Math.sqrt(offSegmentSq).toFixed(2) });
               }
               continue;
             }
@@ -1034,7 +1034,7 @@ export class ProjectileSystem {
             );
             if (stickPoint.distanceTo(closestOnBox) > MAX_STICK_TO_OBJECT_DISTANCE) {
               if (DEBUG_PROJECTILE_STICK) {
-                console.log('[Projectile stick RAYCAST] SKIP hit — stick point too far from object AABB', stickPoint.distanceTo(closestOnBox).toFixed(2), 'm');
+                // console.log('[Projectile stick RAYCAST] SKIP hit — stick point too far from object AABB', stickPoint.distanceTo(closestOnBox).toFixed(2), 'm');
               }
               continue; // try next hit
             }
@@ -1056,24 +1056,24 @@ export class ProjectileSystem {
                 ? `${(hitMesh.material as THREE.Material).type} visible=${(hitMesh.material as THREE.Material).visible}`
                 : 'NO_MAT';
               const boxSize = box.getSize(new THREE.Vector3());
-              console.log('[Projectile stick RAYCAST]', {
-                objectType: h.object.type,
-                objectName: (h.object as THREE.Object3D & { name?: string }).name,
-                objectWorldPos: `${objPos.x.toFixed(2)},${objPos.y.toFixed(2)},${objPos.z.toFixed(2)}`,
-                parentChain: parentChain.slice(0, 5),
-                geo: geoInfo,
-                mat: matInfo,
-                aabb: `${boxSize.x.toFixed(2)}x${boxSize.y.toFixed(2)}x${boxSize.z.toFixed(2)}`,
-                aabbMin: `${box.min.x.toFixed(2)},${box.min.y.toFixed(2)},${box.min.z.toFixed(2)}`,
-                aabbMax: `${box.max.x.toFixed(2)},${box.max.y.toFixed(2)},${box.max.z.toFixed(2)}`,
-                h_point: `${h.point.x.toFixed(3)},${h.point.y.toFixed(3)},${h.point.z.toFixed(3)}`,
-                h_distance: h.distance.toFixed(3),
-                stickPoint: `${stickPoint.x.toFixed(3)},${stickPoint.y.toFixed(3)},${stickPoint.z.toFixed(3)}`,
-                collisionOnly: !!(h.object as any).userData?.collisionOnly,
-                projectileY: p.mesh.position.y.toFixed(3),
-                distFromSpawn: Math.sqrt((h.point.x - p.startX) ** 2 + (h.point.y - p.startY) ** 2 + (h.point.z - p.startZ) ** 2).toFixed(3),
-                spawn: `${p.startX.toFixed(3)},${p.startY.toFixed(3)},${p.startZ.toFixed(3)}`,
-              });
+              // console.log('[Projectile stick RAYCAST]', {
+              //   objectType: h.object.type,
+              //   objectName: (h.object as THREE.Object3D & { name?: string }).name,
+              //   objectWorldPos: `${objPos.x.toFixed(2)},${objPos.y.toFixed(2)},${objPos.z.toFixed(2)}`,
+              //   parentChain: parentChain.slice(0, 5),
+              //   geo: geoInfo,
+              //   mat: matInfo,
+              //   aabb: `${boxSize.x.toFixed(2)}x${boxSize.y.toFixed(2)}x${boxSize.z.toFixed(2)}`,
+              //   aabbMin: `${box.min.x.toFixed(2)},${box.min.y.toFixed(2)},${box.min.z.toFixed(2)}`,
+              //   aabbMax: `${box.max.x.toFixed(2)},${box.max.y.toFixed(2)},${box.max.z.toFixed(2)}`,
+              //   h_point: `${h.point.x.toFixed(3)},${h.point.y.toFixed(3)},${h.point.z.toFixed(3)}`,
+              //   h_distance: h.distance.toFixed(3),
+              //   stickPoint: `${stickPoint.x.toFixed(3)},${stickPoint.y.toFixed(3)},${stickPoint.z.toFixed(3)}`,
+              //   collisionOnly: !!(h.object as any).userData?.collisionOnly,
+              //   projectileY: p.mesh.position.y.toFixed(3),
+              //   distFromSpawn: Math.sqrt((h.point.x - p.startX) ** 2 + (h.point.y - p.startY) ** 2 + (h.point.z - p.startZ) ** 2).toFixed(3),
+              //   spawn: `${p.startX.toFixed(3)},${p.startY.toFixed(3)},${p.startZ.toFixed(3)}`,
+              // });
             }
             if (DEBUG_PROJECTILE_STICK) {
               // Visual debug: red sphere at stick point, green wireframe box showing hit object AABB
@@ -1163,14 +1163,14 @@ export class ProjectileSystem {
             // Steep slope — projectile impacts terrain (cliff/wall). Arrows stick at ground height.
             const hitPoint = new THREE.Vector3(p.mesh.position.x, groundHere + FLOOR_STICK_Y_OFFSET, p.mesh.position.z);
             if (DEBUG_PROJECTILE_STICK) {
-              console.log('[Projectile stick TERRAIN]', {
-                path: 'getGroundY steep slope',
-                projectilePos: { x: p.mesh.position.x.toFixed(3), y: p.mesh.position.y.toFixed(3), z: p.mesh.position.z.toFixed(3) },
-                groundHere,
-                groundPrev,
-                slope: slope.toFixed(3),
-                hitPoint: { x: hitPoint.x.toFixed(3), y: hitPoint.y.toFixed(3), z: hitPoint.z.toFixed(3) },
-              });
+              // console.log('[Projectile stick TERRAIN]', {
+              //   path: 'getGroundY steep slope',
+              //   projectilePos: { x: p.mesh.position.x.toFixed(3), y: p.mesh.position.y.toFixed(3), z: p.mesh.position.z.toFixed(3) },
+              //   groundHere,
+              //   groundPrev,
+              //   slope: slope.toFixed(3),
+              //   hitPoint: { x: hitPoint.x.toFixed(3), y: hitPoint.y.toFixed(3), z: hitPoint.z.toFixed(3) },
+              // });
             }
             audioSystem.sfxAt('fleshHit', hitPoint.x, hitPoint.z);
             if (p.isArrow) {

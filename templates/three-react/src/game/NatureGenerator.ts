@@ -952,10 +952,10 @@ export function generateNature(
   const totalGrass = grassBatches.reduce((s, b) => s + b.count, 0);
   const totalFlowers = flowerBatches.reduce((s, b) => s + b.count, 0);
 
-  console.log(
-    `[Nature] biome=${biome}, trees=${totalTrees}, rocks=${totalRocks}, ` +
-    `grass=${totalGrass}, flowers=${totalFlowers}`,
-  );
+  // console.log(
+  //   `[Nature] biome=${biome}, trees=${totalTrees}, rocks=${totalRocks}, ` +
+  //   `grass=${totalGrass}, flowers=${totalFlowers}`,
+  // );
 
   return {
     group,

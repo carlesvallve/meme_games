@@ -264,7 +264,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
 
   /** Wipe terrain + all dependent systems and rebuild from current store settings */
   function regenerateScene(opts: RegenerateOpts = {}): void {
-    console.log(`[Game] regen — seed=${opts.seed}, spawnAt=${opts.spawnAt}, snapshot=${!!opts.snapshot}, theme=${opts.themeOverride ?? 'auto'}, preset=${opts.presetOverride ?? useGameStore.getState().terrainPreset}`);
+    // console.log(`[Game] regen — seed=${opts.seed}, spawnAt=${opts.spawnAt}, snapshot=${!!opts.snapshot}, theme=${opts.themeOverride ?? 'auto'}, preset=${opts.presetOverride ?? useGameStore.getState().terrainPreset}`);
     activeCharacter = null;
     debugLadderIndex = -1;
     needsFullRegen = false;
@@ -328,7 +328,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
         if (entrance && exit) {
           const result = findPath(navGrid, entrance.x, entrance.z, exit.x, exit.z);
           if (!result.found) {
-            console.log(`[Game] dungeon attempt ${attempt + 1} unsolvable — retrying`);
+            // console.log(`[Game] dungeon attempt ${attempt + 1} unsolvable — retrying`);
             continue;
           }
         }
@@ -368,7 +368,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
         list.forEach(({ position, mesh, entity, openGeo }) => chestSystem.registerPropChest(position, mesh, entity, openGeo));
         // Once prop chests are registered, apply pending snapshot restoration
         if (pendingSnapshot) {
-          console.log(`[Game] restore snapshot: ${pendingSnapshot.chests.length} chests, ${pendingSnapshot.collectibles.length} collectibles, ${pendingSnapshot.loot.length} loot, ${pendingSnapshot.destroyedProps?.length ?? 0} destroyedProps`);
+          // console.log(`[Game] restore snapshot: ${pendingSnapshot.chests.length} chests, ${pendingSnapshot.collectibles.length} collectibles, ${pendingSnapshot.loot.length} loot, ${pendingSnapshot.destroyedProps?.length ?? 0} destroyedProps`);
           chestSystem.restoreState(pendingSnapshot.chests);
           collectibles.restoreState(pendingSnapshot.collectibles);
           lootSystem.restoreLoot(pendingSnapshot.loot);
@@ -394,7 +394,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       // Dungeon ready (layout + props + portals all placed) — reposition, visibility, fade in
       terrain.setOnDungeonReady(() => {
         if (!activeCharacter) return;
-        console.log('[Game] dungeonReady');
+        // console.log('[Game] dungeonReady');
 
         // Reposition character to portal entrance/exit (floor transitions only)
         if (spawnAtCapture) {
@@ -402,7 +402,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
             ? terrain.getExitPosition()
             : terrain.getEntrancePosition();
           if (pos) {
-            console.log(`[Game] dungeonReady spawn at ${spawnAtCapture} (${pos.x.toFixed(2)}, ${pos.z.toFixed(2)})`);
+            // console.log(`[Game] dungeonReady spawn at ${spawnAtCapture} (${pos.x.toFixed(2)}, ${pos.z.toFixed(2)})`);
             const y = terrain.getTerrainY(pos.x, pos.z);
             activeCharacter.mesh.position.set(pos.x, y, pos.z);
             activeCharacter.groundY = y;
@@ -466,7 +466,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
         const camTarget = activeCharacter.getCameraTarget();
         cam.setTarget(camTarget.x, camTarget.y, camTarget.z);
         cam.snapToTarget();
-        console.log('[Game] dungeonReady releasing fade');
+        // console.log('[Game] dungeonReady releasing fade');
         postProcess.releaseFade();
       });
     }
@@ -514,12 +514,12 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       }
     }
 
-    console.log(`[Game] regen done — floor=${useGameStore.getState().floor}, palette=${terrain.getPaletteName()}`);
+    // console.log(`[Game] regen done — floor=${useGameStore.getState().floor}, palette=${terrain.getPaletteName()}`);
   }
 
   /** Change floor: fade out → serialize → regenerate → fade in */
   function changeFloor(direction: 'down' | 'up'): void {
-    console.log(`[Game] changeFloor ${direction}`);
+    // console.log(`[Game] changeFloor ${direction}`);
 
     // Dismiss any active speech bubbles before transition
     speechSystem.dismissAll();
@@ -531,7 +531,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
 
       // Serialize and cache current level
       const snapshot = serializeLevel();
-      console.log(`[Game] serialize floor ${currentFloor}: ${snapshot.enemies.length} enemies, ${snapshot.chests.length} chests, ${snapshot.collectibles.length} collectibles, ${snapshot.loot.length} loot, ${snapshot.destroyedProps.length} destroyedProps`);
+      // console.log(`[Game] serialize floor ${currentFloor}: ${snapshot.enemies.length} enemies, ${snapshot.chests.length} chests, ${snapshot.collectibles.length} collectibles, ${snapshot.loot.length} loot, ${snapshot.destroyedProps.length} destroyedProps`);
       store.saveLevelSnapshot(currentFloor, snapshot);
 
       // Compute new floor
@@ -542,7 +542,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       const cached = store.getLevelSnapshot(newFloor);
       const seed = store.getFloorSeed(newFloor);
 
-      console.log(`[Game] floor ${currentFloor} → ${newFloor}, seed=${seed}, cached=${!!cached}`);
+      // console.log(`[Game] floor ${currentFloor} → ${newFloor}, seed=${seed}, cached=${!!cached}`);
 
       // Clear stale theme so new floors get a fresh random theme
       if (!cached) store.setCurrentTheme('');
@@ -836,7 +836,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
         const pool = e.shiftKey ? VOX_ENEMIES : VOX_HEROES;
         const entry = pool[Math.floor(Math.random() * pool.length)];
         voxRoster[activeCharacter.characterType] = entry;
-        console.log(`[Game] Random ${e.shiftKey ? 'enemy' : 'hero'} skin: ${entry.name}`);
+        // console.log(`[Game] Random ${e.shiftKey ? 'enemy' : 'hero'} skin: ${entry.name}`);
         speechSystem.onSkinChanged(activeCharacter);
         activeCharacter.applyVoxSkin(entry);
       }
@@ -847,7 +847,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
         const archer = VOX_HEROES.find((entry) => entry.id === 'archer');
         if (archer) {
           voxRoster[activeCharacter.characterType] = archer;
-          console.log('[Game] Archer (M):', archer.name);
+          // console.log('[Game] Archer (M):', archer.name);
           speechSystem.onSkinChanged(activeCharacter);
           activeCharacter.applyVoxSkin(archer);
           useGameStore.getState().setActiveCharacter(getCharacterName(activeCharacter.characterType), CHARACTER_TEAM_COLORS[activeCharacter.characterType]);
@@ -860,7 +860,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       const before = useGameStore.getState().torchEnabled;
       useGameStore.getState().toggleTorch();
       const after = useGameStore.getState().torchEnabled;
-      console.log(`[Game] Player torch: ${before} → ${after}`);
+      // console.log(`[Game] Player torch: ${before} → ${after}`);
       e.preventDefault();
     }
     else if (e.code === 'KeyL' && e.shiftKey) {
@@ -870,9 +870,9 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       if (debugLadderIndex >= ladders.length) debugLadderIndex = -1;
       if (debugLadderIndex >= 0) {
         const l = ladders[debugLadderIndex];
-        console.log(`[Debug] Ladder ${debugLadderIndex}/${ladders.length - 1}: h=${(l.topY - l.bottomY).toFixed(1)}m at (${l.bottomX.toFixed(1)}, ${l.bottomZ.toFixed(1)})`);
+        // console.log(`[Debug] Ladder ${debugLadderIndex}/${ladders.length - 1}: h=${(l.topY - l.bottomY).toFixed(1)}m at (${l.bottomX.toFixed(1)}, ${l.bottomZ.toFixed(1)})`);
       } else {
-        console.log('[Debug] Camera back to character');
+        // console.log('[Debug] Camera back to character');
       }
       e.preventDefault();
     }
@@ -989,7 +989,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       }
       characters.push(char);
       activeCharacter = char;
-      console.log(`[Game] spawn ${controlledType} at (${pos.x.toFixed(2)}, ${pos.z.toFixed(2)})${spawnAt ? ` [${spawnAt}]` : ''}`);
+      // console.log(`[Game] spawn ${controlledType} at (${pos.x.toFixed(2)}, ${pos.z.toFixed(2)})${spawnAt ? ` [${spawnAt}]` : ''}`);
 
       // Set portal cooldown guard when spawning via floor transition
       if (spawnAt) {
@@ -1040,6 +1040,9 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       enemySystem.setPlayerExclusionZone(cp.x, cp.z, chaseRange);
     }
 
+    // Set level transition exclusion zones so enemies don't spawn near stairs/ladders
+    enemySystem.setTransitionExclusions(terrain.getLevelTransitionPositions());
+
     // Restore enemies from snapshot or spawn fresh ones
     if (pendingSnapshot && pendingSnapshot.enemies.length > 0) {
       enemySystem.restoreEnemies(pendingSnapshot.enemies);
@@ -1047,13 +1050,11 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       const ep = useGameStore.getState().enemyParams;
       const walkableCells = navGrid.getWalkableCellCount();
       const maxEnemies = ep.enemyDensity <= 0 ? 0 : Math.min(ep.maxEnemies, Math.max(1, Math.round(walkableCells * ep.enemyDensity)));
-      // Spawn ~half upfront, let the rest trickle in via wave spawning
-      const initialCount = Math.max(1, Math.floor(maxEnemies * 0.5));
+      // Queue all enemies for staggered spawning (one-by-one with cooldowns)
       if (maxEnemies > 0) {
-        enemySystem.spawnEnemies(initialCount);
-        if (maxEnemies > initialCount) {
-          enemySystem.enableWaveSpawning(maxEnemies, useGameStore.getState().enemyParams.spawnInterval);
-        }
+        enemySystem.spawnEnemies(maxEnemies);
+        // Wave spawning kicks in after initial batch is done to replace killed enemies
+        enemySystem.enableWaveSpawning(maxEnemies, useGameStore.getState().enemyParams.spawnInterval);
       }
     }
     // Hide enemies until room visibility processes them
@@ -1069,7 +1070,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     onStartGame: () => {
       const wasPlayerDead = useGameStore.getState().phase === 'player_dead' ||
         (activeCharacter && !activeCharacter.isAlive);
-      console.log(`[Game] startGame — wasPlayerDead=${wasPlayerDead}`);
+      // console.log(`[Game] startGame — wasPlayerDead=${wasPlayerDead}`);
       rerollRoster();
       useGameStore.getState().setPhase('select');
       audioSystem.init();
@@ -1213,7 +1214,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   function triggerPlayerDeath(playerChar: Character): void {
     if (deathTriggered) return;
     deathTriggered = true;
-    console.log('[Game] playerDeath');
+    // console.log('[Game] playerDeath');
     potionSystem.clearEffects();
     potionVFX.clearAll();
     useGameStore.getState().setActivePotionEffects([]);
@@ -1268,12 +1269,12 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       lastSelectedCharacter = selected;
       if (needsFullRegen) {
         needsFullRegen = false;
-        console.log(`[Game] selectCharacter=${selected} → fullRegen`);
+        // console.log(`[Game] selectCharacter=${selected} → fullRegen`);
         postProcess.fadeTransition(() => {
           regenerateScene({ character: selected });
         }, 9999, 3.0);
       } else {
-        console.log(`[Game] selectCharacter=${selected} → spawn`);
+        // console.log(`[Game] selectCharacter=${selected} → spawn`);
         spawnCharacters(selected);
       }
     }
@@ -1331,26 +1332,27 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
           const faceDirX = -Math.sin(facing);
           const faceDirZ = -Math.cos(facing);
           const rangedP = useGameStore.getState().characterParams.ranged;
-          playerChar.startAttack(rangedP.exhaustionEnabled);
-          const spawnX = pos.x + faceDirX * muzzle.forward;
-          const spawnY = playerChar.groundY + muzzle.up;
-          const spawnZ = pos.z + faceDirZ * muzzle.forward;
-          projectileSystem.fireProjectile(
-            heroId,
-            projConfig,
-            spawnX, spawnY, spawnZ,
-            facing,
-            enemySystem ? enemySystem.getVisibleEnemies() : [],
-            [
-              terrain.getBoxGroup(),
-              ...(terrain.getTerrainMesh() ? [terrain.getTerrainMesh()!] : []),
-            ],
-            terrain.getOpenDoorObjects(),
-            muzzle.up,
-            rangedP.autoTarget,
-            rangedP.knockback,
-          );
-        } else {
+          if (playerChar.startAttack(rangedP.exhaustionEnabled)) {
+            const spawnX = pos.x + faceDirX * muzzle.forward;
+            const spawnY = playerChar.groundY + muzzle.up;
+            const spawnZ = pos.z + faceDirZ * muzzle.forward;
+            projectileSystem.fireProjectile(
+              heroId,
+              projConfig,
+              spawnX, spawnY, spawnZ,
+              facing,
+              enemySystem ? enemySystem.getVisibleEnemies() : [],
+              [
+                terrain.getBoxGroup(),
+                ...(terrain.getTerrainMesh() ? [terrain.getTerrainMesh()!] : []),
+              ],
+              terrain.getOpenDoorObjects(),
+              muzzle.up,
+              rangedP.autoTarget,
+              rangedP.knockback,
+            );
+          }
+        } else if (!enemySystem?.isCritChainActive) {
           // Melee: auto-aim snap toward nearest enemy, then attack
           const meleeP = useGameStore.getState().characterParams;
           if (enemySystem && meleeP.melee.autoTarget) {
@@ -1364,13 +1366,28 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
                 : aimTarget;
             }
           }
-          playerChar.startAttack(meleeP.melee.exhaustionEnabled);
+          // Roll for crit chain before normal attack
+          if (!enemySystem || !enemySystem.tryCritChain(playerChar)) {
+            playerChar.startAttack(meleeP.melee.exhaustionEnabled);
+          }
         }
       }
 
-      // Update all characters uniformly
-      for (const char of characters) {
-        char.update(dt);
+      // Update crit chain dash (skips normal movement while active)
+      const showSlashFx = useGameStore.getState().characterParams.melee.showSlashEffect;
+      if (enemySystem?.updateCritChain(dt, playerChar, () => {
+        const s = useGameStore.getState();
+        s.setScore(s.score + 10);
+      }, showSlashFx)) {
+        // During crit chain, skip normal character update for player
+        for (const char of characters) {
+          if (char !== playerChar) char.update(dt);
+        }
+      } else {
+        // Update all characters uniformly
+        for (const char of characters) {
+          char.update(dt);
+        }
       }
       // Restore player speed after update so the multiplier doesn't accumulate
       playerChar.params.speed = baseSpeed;
@@ -1644,7 +1661,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
           const faceDz = -Math.cos(facing);
           const dot = faceDx * wallDir[0] + faceDz * wallDir[1];
           if (dot > 0.5) {
-            console.log(`[Portal] EXIT triggered — going down, dot=${dot.toFixed(2)}`);
+            // console.log(`[Portal] EXIT triggered — going down, dot=${dot.toFixed(2)}`);
             exitTriggered = true;
             changeFloor('down');
           }
@@ -1668,7 +1685,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
           const faceDz = -Math.cos(facing);
           const dot = faceDx * wallDx + faceDz * wallDz;
           if (dot > 0.5) {
-            console.log(`[Portal] ENTRANCE triggered — going up, dot=${dot.toFixed(2)}`);
+            // console.log(`[Portal] ENTRANCE triggered — going up, dot=${dot.toFixed(2)}`);
             exitTriggered = true;
             changeFloor('up');
           }

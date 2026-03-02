@@ -334,7 +334,7 @@ export function computeCellHeights(
     }
   }
 
-  console.log(`[StairSystem] ${corridorInfos.length} corridors — ${stairs.length} stairs, ${ladderHints.length} ladder hints`);
+  // console.log(`[StairSystem] ${corridorInfos.length} corridors — ${stairs.length} stairs, ${ladderHints.length} ladder hints`);
   return { cellHeights, stairs, ladderHints };
 }
 
