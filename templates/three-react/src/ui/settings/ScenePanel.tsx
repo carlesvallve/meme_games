@@ -1,15 +1,33 @@
 import { useGameStore, DEFAULT_POST_PROCESS } from '../../store';
-import type { TerrainPreset } from '../../game/Terrain';
-import type { HeightmapStyle } from '../../game/TerrainNoise';
-import { palettes } from '../../game/ColorPalettes';
-import { getPropCategories, getGroundTileIds, getDungeonVariants } from '../../game/VoxDungeonDB';
-import { swapGroundTiles } from '../../game/VoxelDungeon';
-import { SettingsWindow, Section, Slider, Toggle, btnStyle, resetBtnStyle, rowStyle, selectStyle } from './shared';
+import type { TerrainPreset } from '../../game/terrain';
+import type { HeightmapStyle } from '../../game/terrain';
+import { palettes } from '../../game/terrain';
+import {
+  getPropCategories,
+  getGroundTileIds,
+  getDungeonVariants,
+  swapGroundTiles,
+} from '../../game/dungeon';
+import {
+  SettingsWindow,
+  Section,
+  Slider,
+  Toggle,
+  btnStyle,
+  resetBtnStyle,
+  rowStyle,
+  selectStyle,
+} from './shared';
 
 const PROP_CATEGORIES = getPropCategories().sort();
 const GROUND_TILE_IDS = getGroundTileIds().sort();
 const DUNGEON_VARIANT_OPTIONS = ['random', ...getDungeonVariants()];
-const HEIGHTMAP_STYLES: HeightmapStyle[] = ['rolling', 'terraces', 'islands', 'caves'];
+const HEIGHTMAP_STYLES: HeightmapStyle[] = [
+  'rolling',
+  'terraces',
+  'islands',
+  'caves',
+];
 const PALETTE_NAMES = ['random', ...Object.keys(palettes)];
 
 export function ScenePanel() {
@@ -59,26 +77,40 @@ export function ScenePanel() {
   const remesh = useGameStore((s) => s.onRemesh);
   const randomizePalette = useGameStore((s) => s.onRandomizePalette);
 
-  const hasPresetSettings = terrainPreset === 'heightmap'
-    || terrainPreset === 'rooms'
-    || terrainPreset === 'voxelDungeon';
+  const hasPresetSettings =
+    terrainPreset === 'heightmap' ||
+    terrainPreset === 'rooms' ||
+    terrainPreset === 'voxelDungeon';
 
-  const presetLabel = terrainPreset === 'voxelDungeon' ? 'Voxel Dungeon'
-    : terrainPreset === 'rooms' ? 'Rooms' : 'Heightmap';
+  const presetLabel =
+    terrainPreset === 'voxelDungeon'
+      ? 'Voxel Dungeon'
+      : terrainPreset === 'rooms'
+        ? 'Rooms'
+        : 'Heightmap';
 
   return (
     <SettingsWindow>
-
       {/* ── TERRAIN ── */}
-      <Section label="Terrain" first>
+      <Section label='Terrain' first>
         {heightmapThumb && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              marginTop: 4,
+            }}
+          >
             <img
               src={heightmapThumb}
-              alt="heightmap"
+              alt='heightmap'
               style={{
-                width: 48, height: 48, imageRendering: 'pixelated',
-                border: '1px solid rgba(255,255,255,0.2)', borderRadius: 3,
+                width: 48,
+                height: 48,
+                imageRendering: 'pixelated',
+                border: '1px solid rgba(255,255,255,0.2)',
+                borderRadius: 3,
               }}
             />
             <span style={{ fontSize: 10, color: '#999', lineHeight: 1.3 }}>
@@ -87,19 +119,50 @@ export function ScenePanel() {
           </div>
         )}
         <div style={rowStyle}>
-          <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Preset</span>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 3, flex: 1 }}>
+          <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>
+            Preset
+          </span>
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 3,
+              flex: 1,
+            }}
+          >
             <div style={{ display: 'flex', gap: 3 }}>
-              {(['scattered', 'terraced', 'heightmap'] as TerrainPreset[]).map((p) => (
-                <button key={p} onClick={() => setTerrainPreset(p)}
-                  style={{ ...btnStyle(terrainPreset === p), flex: 1, textTransform: 'capitalize' }}>{p}</button>
-              ))}
+              {(['scattered', 'terraced', 'heightmap'] as TerrainPreset[]).map(
+                (p) => (
+                  <button
+                    key={p}
+                    onClick={() => setTerrainPreset(p)}
+                    style={{
+                      ...btnStyle(terrainPreset === p),
+                      flex: 1,
+                      textTransform: 'capitalize',
+                    }}
+                  >
+                    {p}
+                  </button>
+                ),
+              )}
             </div>
             <div style={{ display: 'flex', gap: 3 }}>
-              {(['dungeon', 'rooms', 'voxelDungeon'] as TerrainPreset[]).map((p) => (
-                <button key={p} onClick={() => setTerrainPreset(p)}
-                  style={{ ...btnStyle(terrainPreset === p), flex: 1, textTransform: 'capitalize' }}>{p}</button>
-              ))}
+              {(['dungeon', 'rooms', 'voxelDungeon'] as TerrainPreset[]).map(
+                (p) => (
+                  <button
+                    key={p}
+                    onClick={() => setTerrainPreset(p)}
+                    style={{
+                      ...btnStyle(terrainPreset === p),
+                      flex: 1,
+                      textTransform: 'capitalize',
+                    }}
+                  >
+                    {p}
+                  </button>
+                ),
+              )}
             </div>
           </div>
         </div>
@@ -111,61 +174,155 @@ export function ScenePanel() {
           {terrainPreset === 'heightmap' && (
             <>
               <div style={rowStyle}>
-                <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Style</span>
+                <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>
+                  Style
+                </span>
                 <div style={{ display: 'flex', gap: 3, flex: 1 }}>
                   {HEIGHTMAP_STYLES.map((s) => (
-                    <button key={s} onClick={() => setHeightmapStyle(s)}
-                      style={{ ...btnStyle(heightmapStyle === s), flex: 1, textTransform: 'capitalize' }}>{s}</button>
+                    <button
+                      key={s}
+                      onClick={() => setHeightmapStyle(s)}
+                      style={{
+                        ...btnStyle(heightmapStyle === s),
+                        flex: 1,
+                        textTransform: 'capitalize',
+                      }}
+                    >
+                      {s}
+                    </button>
                   ))}
                 </div>
               </div>
-              <Toggle label="Nature" value={natureEnabled} onChange={setNatureEnabled} />
+              <Toggle
+                label='Nature'
+                value={natureEnabled}
+                onChange={setNatureEnabled}
+              />
               {natureEnabled && (
                 <>
-                  <Toggle label="Biomes" value={useBiomes} onChange={setUseBiomes} />
-                  <Toggle label="Debug" value={debugBiomes} onChange={setDebugBiomes} />
+                  <Toggle
+                    label='Biomes'
+                    value={useBiomes}
+                    onChange={setUseBiomes}
+                  />
+                  <Toggle
+                    label='Debug'
+                    value={debugBiomes}
+                    onChange={setDebugBiomes}
+                  />
                 </>
               )}
             </>
           )}
 
           {terrainPreset === 'rooms' && (
-            <Slider label="Wall Gap" value={wallGap} min={0} max={4} step={1}
-              onChange={(v) => setWallGap(Math.round(v))} />
+            <Slider
+              label='Wall Gap'
+              value={wallGap}
+              min={0}
+              max={4}
+              step={1}
+              onChange={(v) => setWallGap(Math.round(v))}
+            />
           )}
 
           {terrainPreset === 'voxelDungeon' && (
             <>
-              <Slider label="Room Gap" value={roomSpacing} min={1} max={8} step={1}
-                onChange={(v) => setRoomSpacing(Math.round(v))} />
-              <Slider label="Dungeon Size" value={dungeonSize} min={12} max={60} step={4}
-                onChange={(v) => setDungeonSize(Math.round(v))} />
-              <Slider label="Tile Size" value={tileSize} min={0.5} max={2} step={0.25}
-                onChange={(v) => setTileSize(v)} />
+              <Slider
+                label='Room Gap'
+                value={roomSpacing}
+                min={1}
+                max={8}
+                step={1}
+                onChange={(v) => setRoomSpacing(Math.round(v))}
+              />
+              <Slider
+                label='Dungeon Size'
+                value={dungeonSize}
+                min={12}
+                max={60}
+                step={4}
+                onChange={(v) => setDungeonSize(Math.round(v))}
+              />
+              <Slider
+                label='Tile Size'
+                value={tileSize}
+                min={0.5}
+                max={2}
+                step={0.25}
+                onChange={(v) => setTileSize(v)}
+              />
               <div style={rowStyle}>
-                <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Variant</span>
-                <select value={dungeonVariant} onChange={(e) => setDungeonVariant(e.target.value)} style={selectStyle}>
+                <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>
+                  Variant
+                </span>
+                <select
+                  value={dungeonVariant}
+                  onChange={(e) => setDungeonVariant(e.target.value)}
+                  style={selectStyle}
+                >
                   {DUNGEON_VARIANT_OPTIONS.map((v) => (
-                    <option key={v} value={v}>{v === 'random' ? 'Random' : v.replace('_', '-').toUpperCase()}</option>
+                    <option key={v} value={v}>
+                      {v === 'random'
+                        ? 'Random'
+                        : v.replace('_', '-').toUpperCase()}
+                    </option>
                   ))}
                 </select>
               </div>
-              <Slider label="Door Chance" value={doorChance} min={0} max={1} step={0.1}
-                onChange={(v) => setDoorChance(v)} />
-              <Toggle label="Room Labels" value={roomLabels} onChange={setRoomLabels} />
-              <Toggle label="Force Stairs" value={useGameStore((s) => s.forceStairs)} onChange={useGameStore.getState().setForceStairs} />
+              <Slider
+                label='Door Chance'
+                value={doorChance}
+                min={0}
+                max={1}
+                step={0.1}
+                onChange={(v) => setDoorChance(v)}
+              />
+              <Toggle
+                label='Room Labels'
+                value={roomLabels}
+                onChange={setRoomLabels}
+              />
+              <Toggle
+                label='Force Stairs'
+                value={useGameStore((s) => s.forceStairs)}
+                onChange={useGameStore.getState().setForceStairs}
+              />
               <div style={rowStyle}>
-                <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Test Prop</span>
-                <select value={testProp} onChange={(e) => setTestProp(e.target.value)} style={selectStyle}>
-                  <option value="">All (templates)</option>
-                  {propCategories.map((cat) => (<option key={cat} value={cat}>{cat}</option>))}
+                <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>
+                  Test Prop
+                </span>
+                <select
+                  value={testProp}
+                  onChange={(e) => setTestProp(e.target.value)}
+                  style={selectStyle}
+                >
+                  <option value=''>All (templates)</option>
+                  {propCategories.map((cat) => (
+                    <option key={cat} value={cat}>
+                      {cat}
+                    </option>
+                  ))}
                 </select>
               </div>
               <div style={rowStyle}>
-                <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Test Floor</span>
-                <select value={testFloor} onChange={(e) => { setTestFloor(e.target.value); swapGroundTiles(e.target.value); }} style={selectStyle}>
-                  <option value="">Random</option>
-                  {GROUND_TILE_IDS.map((id) => (<option key={id} value={id}>{id}</option>))}
+                <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>
+                  Test Floor
+                </span>
+                <select
+                  value={testFloor}
+                  onChange={(e) => {
+                    setTestFloor(e.target.value);
+                    swapGroundTiles(e.target.value);
+                  }}
+                  style={selectStyle}
+                >
+                  <option value=''>Random</option>
+                  {GROUND_TILE_IDS.map((id) => (
+                    <option key={id} value={id}>
+                      {id}
+                    </option>
+                  ))}
                 </select>
               </div>
             </>
@@ -174,99 +331,301 @@ export function ScenePanel() {
       )}
 
       {/* ── DISPLAY ── */}
-      <Section label="Display">
+      <Section label='Display'>
         <div style={rowStyle}>
-          <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Palette</span>
-          <select value={paletteName} onChange={(e) => setPaletteName(e.target.value)}
-            style={{ ...selectStyle, textTransform: 'capitalize' }}>
+          <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>
+            Palette
+          </span>
+          <select
+            value={paletteName}
+            onChange={(e) => setPaletteName(e.target.value)}
+            style={{ ...selectStyle, textTransform: 'capitalize' }}
+          >
             {PALETTE_NAMES.map((name) => (
-              <option key={name} value={name} style={{ background: '#1a1a2a', color: '#ccc' }}>{name}</option>
+              <option
+                key={name}
+                value={name}
+                style={{ background: '#1a1a2a', color: '#ccc' }}
+              >
+                {name}
+              </option>
             ))}
           </select>
           {paletteActive && (
             <span
               onClick={() => randomizePalette?.()}
               style={{
-                color: '#6af', fontSize: 10, flexShrink: 0,
-                textTransform: 'capitalize', cursor: 'pointer',
-                padding: '2px 4px', borderRadius: 3,
+                color: '#6af',
+                fontSize: 10,
+                flexShrink: 0,
+                textTransform: 'capitalize',
+                cursor: 'pointer',
+                padding: '2px 4px',
+                borderRadius: 3,
                 background: 'rgba(100,170,255,0.1)',
               }}
-              title="Click to randomize palette"
+              title='Click to randomize palette'
             >
               {paletteActive}
             </span>
           )}
         </div>
-        <Slider label="Grid" value={gridOpacity} min={0} max={1} step={0.05}
-          onChange={(v) => setGridOpacity(v)} />
-        <Slider label="Resolution" value={resolutionScale} min={0.5} max={3} step={0.5}
+        <Slider
+          label='Grid'
+          value={gridOpacity}
+          min={0}
+          max={1}
+          step={0.05}
+          onChange={(v) => setGridOpacity(v)}
+        />
+        <Slider
+          label='Resolution'
+          value={resolutionScale}
+          min={0.5}
+          max={3}
+          step={0.5}
           onChange={(v) => {
             setResolutionScale(v);
             clearTimeout((window as any).__remeshTimer);
             (window as any).__remeshTimer = setTimeout(() => remesh?.(), 300);
-          }} />
-        <Toggle label="HMR Cache" value={hmrCacheEnabled} onChange={setHmrCacheEnabled} />
+          }}
+        />
+        <Toggle
+          label='HMR Cache'
+          value={hmrCacheEnabled}
+          onChange={setHmrCacheEnabled}
+        />
       </Section>
 
       {/* ── POST FX ── */}
-      <Section label="Post FX">
-        <Toggle label="Enabled" value={postProcess.enabled} onChange={(v) => setPostProcess({ ...postProcess, enabled: v })} />
-        {postProcess.enabled && (<>
-          <Toggle label="Bloom" value={postProcess.bloom.enabled} onChange={(v) => setPostProcess({ ...postProcess, bloom: { ...postProcess.bloom, enabled: v } })} />
-          {postProcess.bloom.enabled && (<>
-            <Slider label="Strength" value={postProcess.bloom.strength} min={0} max={2} step={0.05}
-              onChange={(v) => setPostProcess({ ...postProcess, bloom: { ...postProcess.bloom, strength: v } })} />
-            <Slider label="Radius" value={postProcess.bloom.radius} min={0} max={1} step={0.05}
-              onChange={(v) => setPostProcess({ ...postProcess, bloom: { ...postProcess.bloom, radius: v } })} />
-            <Slider label="Threshold" value={postProcess.bloom.threshold} min={0} max={1} step={0.05}
-              onChange={(v) => setPostProcess({ ...postProcess, bloom: { ...postProcess.bloom, threshold: v } })} />
-          </>)}
+      <Section label='Post FX'>
+        <Toggle
+          label='Enabled'
+          value={postProcess.enabled}
+          onChange={(v) => setPostProcess({ ...postProcess, enabled: v })}
+        />
+        {postProcess.enabled && (
+          <>
+            <Toggle
+              label='Bloom'
+              value={postProcess.bloom.enabled}
+              onChange={(v) =>
+                setPostProcess({
+                  ...postProcess,
+                  bloom: { ...postProcess.bloom, enabled: v },
+                })
+              }
+            />
+            {postProcess.bloom.enabled && (
+              <>
+                <Slider
+                  label='Strength'
+                  value={postProcess.bloom.strength}
+                  min={0}
+                  max={2}
+                  step={0.05}
+                  onChange={(v) =>
+                    setPostProcess({
+                      ...postProcess,
+                      bloom: { ...postProcess.bloom, strength: v },
+                    })
+                  }
+                />
+                <Slider
+                  label='Radius'
+                  value={postProcess.bloom.radius}
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  onChange={(v) =>
+                    setPostProcess({
+                      ...postProcess,
+                      bloom: { ...postProcess.bloom, radius: v },
+                    })
+                  }
+                />
+                <Slider
+                  label='Threshold'
+                  value={postProcess.bloom.threshold}
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  onChange={(v) =>
+                    setPostProcess({
+                      ...postProcess,
+                      bloom: { ...postProcess.bloom, threshold: v },
+                    })
+                  }
+                />
+              </>
+            )}
 
-          <Toggle label="SSAO" value={postProcess.ssao.enabled} onChange={(v) => setPostProcess({ ...postProcess, ssao: { ...postProcess.ssao, enabled: v } })} />
-          {postProcess.ssao.enabled && (<>
-            <Slider label="Radius" value={postProcess.ssao.radius} min={0.01} max={2} step={0.01}
-              onChange={(v) => setPostProcess({ ...postProcess, ssao: { ...postProcess.ssao, radius: v } })} />
-            <Slider label="Max Dist" value={postProcess.ssao.maxDistance} min={0.01} max={0.5} step={0.01}
-              onChange={(v) => setPostProcess({ ...postProcess, ssao: { ...postProcess.ssao, maxDistance: v } })} />
-          </>)}
+            <Toggle
+              label='SSAO'
+              value={postProcess.ssao.enabled}
+              onChange={(v) =>
+                setPostProcess({
+                  ...postProcess,
+                  ssao: { ...postProcess.ssao, enabled: v },
+                })
+              }
+            />
+            {postProcess.ssao.enabled && (
+              <>
+                <Slider
+                  label='Radius'
+                  value={postProcess.ssao.radius}
+                  min={0.01}
+                  max={2}
+                  step={0.01}
+                  onChange={(v) =>
+                    setPostProcess({
+                      ...postProcess,
+                      ssao: { ...postProcess.ssao, radius: v },
+                    })
+                  }
+                />
+                <Slider
+                  label='Max Dist'
+                  value={postProcess.ssao.maxDistance}
+                  min={0.01}
+                  max={0.5}
+                  step={0.01}
+                  onChange={(v) =>
+                    setPostProcess({
+                      ...postProcess,
+                      ssao: { ...postProcess.ssao, maxDistance: v },
+                    })
+                  }
+                />
+              </>
+            )}
 
-          <Toggle label="Vignette" value={postProcess.vignette.enabled} onChange={(v) => setPostProcess({ ...postProcess, vignette: { ...postProcess.vignette, enabled: v } })} />
-          {postProcess.vignette.enabled && (<>
-            <Slider label="Offset" value={postProcess.vignette.offset} min={0} max={3} step={0.1}
-              onChange={(v) => setPostProcess({ ...postProcess, vignette: { ...postProcess.vignette, offset: v } })} />
-            <Slider label="Darkness" value={postProcess.vignette.darkness} min={0} max={3} step={0.1}
-              onChange={(v) => setPostProcess({ ...postProcess, vignette: { ...postProcess.vignette, darkness: v } })} />
-          </>)}
+            <Toggle
+              label='Vignette'
+              value={postProcess.vignette.enabled}
+              onChange={(v) =>
+                setPostProcess({
+                  ...postProcess,
+                  vignette: { ...postProcess.vignette, enabled: v },
+                })
+              }
+            />
+            {postProcess.vignette.enabled && (
+              <>
+                <Slider
+                  label='Offset'
+                  value={postProcess.vignette.offset}
+                  min={0}
+                  max={3}
+                  step={0.1}
+                  onChange={(v) =>
+                    setPostProcess({
+                      ...postProcess,
+                      vignette: { ...postProcess.vignette, offset: v },
+                    })
+                  }
+                />
+                <Slider
+                  label='Darkness'
+                  value={postProcess.vignette.darkness}
+                  min={0}
+                  max={3}
+                  step={0.1}
+                  onChange={(v) =>
+                    setPostProcess({
+                      ...postProcess,
+                      vignette: { ...postProcess.vignette, darkness: v },
+                    })
+                  }
+                />
+              </>
+            )}
 
-          <Toggle label="Color Grade" value={postProcess.colorGrade.enabled} onChange={(v) => setPostProcess({ ...postProcess, colorGrade: { ...postProcess.colorGrade, enabled: v } })} />
-          {postProcess.colorGrade.enabled && (<>
-            <Slider label="Brightness" value={postProcess.colorGrade.brightness} min={-0.5} max={0.5} step={0.01}
-              onChange={(v) => setPostProcess({ ...postProcess, colorGrade: { ...postProcess.colorGrade, brightness: v } })} />
-            <Slider label="Contrast" value={postProcess.colorGrade.contrast} min={-0.5} max={0.5} step={0.01}
-              onChange={(v) => setPostProcess({ ...postProcess, colorGrade: { ...postProcess.colorGrade, contrast: v } })} />
-            <Slider label="Saturation" value={postProcess.colorGrade.saturation} min={-1} max={1} step={0.01}
-              onChange={(v) => setPostProcess({ ...postProcess, colorGrade: { ...postProcess.colorGrade, saturation: v } })} />
-          </>)}
+            <Toggle
+              label='Color Grade'
+              value={postProcess.colorGrade.enabled}
+              onChange={(v) =>
+                setPostProcess({
+                  ...postProcess,
+                  colorGrade: { ...postProcess.colorGrade, enabled: v },
+                })
+              }
+            />
+            {postProcess.colorGrade.enabled && (
+              <>
+                <Slider
+                  label='Brightness'
+                  value={postProcess.colorGrade.brightness}
+                  min={-0.5}
+                  max={0.5}
+                  step={0.01}
+                  onChange={(v) =>
+                    setPostProcess({
+                      ...postProcess,
+                      colorGrade: { ...postProcess.colorGrade, brightness: v },
+                    })
+                  }
+                />
+                <Slider
+                  label='Contrast'
+                  value={postProcess.colorGrade.contrast}
+                  min={-0.5}
+                  max={0.5}
+                  step={0.01}
+                  onChange={(v) =>
+                    setPostProcess({
+                      ...postProcess,
+                      colorGrade: { ...postProcess.colorGrade, contrast: v },
+                    })
+                  }
+                />
+                <Slider
+                  label='Saturation'
+                  value={postProcess.colorGrade.saturation}
+                  min={-1}
+                  max={1}
+                  step={0.01}
+                  onChange={(v) =>
+                    setPostProcess({
+                      ...postProcess,
+                      colorGrade: { ...postProcess.colorGrade, saturation: v },
+                    })
+                  }
+                />
+              </>
+            )}
 
-          <button onClick={() => setPostProcess({ ...DEFAULT_POST_PROCESS })} style={resetBtnStyle}>
-            Reset PostFX
-          </button>
-        </>)}
+            <button
+              onClick={() => setPostProcess({ ...DEFAULT_POST_PROCESS })}
+              style={resetBtnStyle}
+            >
+              Reset PostFX
+            </button>
+          </>
+        )}
       </Section>
 
       {/* Buttons */}
       <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
-        <button onClick={() => useGameStore.getState().onResetSceneParams?.()} style={{ ...resetBtnStyle, marginTop: 0, flex: 1 }}>
+        <button
+          onClick={() => useGameStore.getState().onResetSceneParams?.()}
+          style={{ ...resetBtnStyle, marginTop: 0, flex: 1 }}
+        >
           Reset
         </button>
         <button
           onClick={() => regenerate?.()}
           style={{
-            flex: 1, padding: '4px 12px',
-            background: 'rgba(100,220,120,0.2)', color: '#8f8',
-            border: '1px solid rgba(100,220,120,0.4)', borderRadius: 4,
-            cursor: 'pointer', fontSize: 11, fontWeight: 600,
+            flex: 1,
+            padding: '4px 12px',
+            background: 'rgba(100,220,120,0.2)',
+            color: '#8f8',
+            border: '1px solid rgba(100,220,120,0.4)',
+            borderRadius: 4,
+            cursor: 'pointer',
+            fontSize: 11,
+            fontWeight: 600,
           }}
         >
           Regenerate

@@ -3,19 +3,32 @@ import { useGameStore } from '../../store';
 import { createCharacterMesh, voxRoster } from './characters';
 import type { CharacterType } from './characters';
 import type { VoxCharEntry, StepMode } from './VoxCharacterDB';
-import { getArchetype, getCharacterStats, randomInRange, getCharacterAnimScale } from './VoxCharacterDB';
+import {
+  getArchetype,
+  getCharacterStats,
+  randomInRange,
+  getCharacterAnimScale,
+} from './VoxCharacterDB';
 import { Entity, Layer } from '../Entity';
-import type { Terrain } from '../Terrain';
-import type { NavGrid } from '../NavGrid';
+import type { Environment } from '../environment';
+import type { NavGrid } from '../pathfinding';
 import { Behavior, type BehaviorAgent } from '../behaviors/Behavior';
 import { Roaming } from '../behaviors/Roaming';
 import { GoToPoint } from '../behaviors/GoToPoint';
-import { PlayerControl, type PlayerControlDeps } from '../behaviors/PlayerControl';
-import { audioSystem } from '../../utils/AudioSystem';
-import type { LadderDef } from '../Ladder';
 import {
-  DEFAULT_CHARACTER_PARAMS, GRAVITY, MAX_FALL_SPEED, STEP_UP_RATE, FOOT_SFX_COOLDOWN,
-  DEFAULT_HOP_FREQUENCY, ANIM_REFERENCE_SPEED,
+  PlayerControl,
+  type PlayerControlDeps,
+} from '../behaviors/PlayerControl';
+import { audioSystem } from '../../utils/AudioSystem';
+import type { LadderDef } from '../dungeon';
+import {
+  DEFAULT_CHARACTER_PARAMS,
+  GRAVITY,
+  MAX_FALL_SPEED,
+  STEP_UP_RATE,
+  FOOT_SFX_COOLDOWN,
+  DEFAULT_HOP_FREQUENCY,
+  ANIM_REFERENCE_SPEED,
   type MovementParams,
 } from './CharacterSettings';
 import { FootIK } from './FootIK';
@@ -65,48 +78,160 @@ export class Character implements BehaviorAgent {
   private _baseSpeed: number | undefined;
 
   protected scene: THREE.Scene;
-  terrain: Terrain;
+  terrain: Environment;
   private navGrid: NavGrid;
   private ladderDefs: ReadonlyArray<LadderDef>;
 
   // ── Combat forwarding (keeps external API identical) ──────────────
-  get hp(): number { return this.combat.hp; }
-  set hp(v: number) { this.combat.hp = v; }
-  get maxHp(): number { return this.combat.maxHp; }
-  set maxHp(v: number) { this.combat.maxHp = v; }
-  get isAlive(): boolean { return this.combat.isAlive; }
-  set isAlive(v: boolean) { this.combat.isAlive = v; }
+  get hp(): number {
+    return this.combat.hp;
+  }
+  set hp(v: number) {
+    this.combat.hp = v;
+  }
+  get maxHp(): number {
+    return this.combat.maxHp;
+  }
+  set maxHp(v: number) {
+    this.combat.maxHp = v;
+  }
+  get isAlive(): boolean {
+    return this.combat.isAlive;
+  }
+  set isAlive(v: boolean) {
+    this.combat.isAlive = v;
+  }
   isEnemy = false;
-  get knockbackVX(): number { return this.combat.knockbackVX; }
-  set knockbackVX(v: number) { this.combat.knockbackVX = v; }
-  get knockbackVZ(): number { return this.combat.knockbackVZ; }
-  set knockbackVZ(v: number) { this.combat.knockbackVZ = v; }
-  get invulnTimer(): number { return this.combat.invulnTimer; }
-  set invulnTimer(v: number) { this.combat.invulnTimer = v; }
-  get flashTimer(): number { return this.combat.flashTimer; }
-  set flashTimer(v: number) { this.combat.flashTimer = v; }
-  get attackTimer(): number { return this.combat.attackTimer; }
-  set attackTimer(v: number) { this.combat.attackTimer = v; }
-  get isAttacking(): boolean { return this.combat.isAttacking; }
-  set isAttacking(v: boolean) { this.combat.isAttacking = v; }
-  get attackJustStarted(): boolean { return this.combat.attackJustStarted; }
-  set attackJustStarted(v: boolean) { this.combat.attackJustStarted = v; }
-  get attackCount(): number { return this.combat.attackCount; }
-  set attackCount(v: number) { this.combat.attackCount = v; }
-  get exhaustTimer(): number { return this.combat.exhaustTimer; }
-  set exhaustTimer(v: number) { this.combat.exhaustTimer = v; }
-  get stunTimer(): number { return this.combat.stunTimer; }
-  set stunTimer(v: number) { this.combat.stunTimer = v; }
-  get lastHitDirX(): number { return this.combat.lastHitDirX; }
-  set lastHitDirX(v: number) { this.combat.lastHitDirX = v; }
-  get lastHitDirZ(): number { return this.combat.lastHitDirZ; }
-  set lastHitDirZ(v: number) { this.combat.lastHitDirZ = v; }
-  get showingHpBar(): boolean { return this.hpBar.showing; }
-  set showingHpBar(v: boolean) { this.hpBar.showing = v; }
+  get knockbackVX(): number {
+    return this.combat.knockbackVX;
+  }
+  set knockbackVX(v: number) {
+    this.combat.knockbackVX = v;
+  }
+  get knockbackVZ(): number {
+    return this.combat.knockbackVZ;
+  }
+  set knockbackVZ(v: number) {
+    this.combat.knockbackVZ = v;
+  }
+  get invulnTimer(): number {
+    return this.combat.invulnTimer;
+  }
+  set invulnTimer(v: number) {
+    this.combat.invulnTimer = v;
+  }
+  get flashTimer(): number {
+    return this.combat.flashTimer;
+  }
+  set flashTimer(v: number) {
+    this.combat.flashTimer = v;
+  }
+  get attackTimer(): number {
+    return this.combat.attackTimer;
+  }
+  set attackTimer(v: number) {
+    this.combat.attackTimer = v;
+  }
+  get isAttacking(): boolean {
+    return this.combat.isAttacking;
+  }
+  set isAttacking(v: boolean) {
+    this.combat.isAttacking = v;
+  }
+  get attackJustStarted(): boolean {
+    return this.combat.attackJustStarted;
+  }
+  set attackJustStarted(v: boolean) {
+    this.combat.attackJustStarted = v;
+  }
+  get attackCount(): number {
+    return this.combat.attackCount;
+  }
+  set attackCount(v: number) {
+    this.combat.attackCount = v;
+  }
+  get exhaustTimer(): number {
+    return this.combat.exhaustTimer;
+  }
+  set exhaustTimer(v: number) {
+    this.combat.exhaustTimer = v;
+  }
+  get stunTimer(): number {
+    return this.combat.stunTimer;
+  }
+  set stunTimer(v: number) {
+    this.combat.stunTimer = v;
+  }
+  get lastHitDirX(): number {
+    return this.combat.lastHitDirX;
+  }
+  set lastHitDirX(v: number) {
+    this.combat.lastHitDirX = v;
+  }
+  get lastHitDirZ(): number {
+    return this.combat.lastHitDirZ;
+  }
+  set lastHitDirZ(v: number) {
+    this.combat.lastHitDirZ = v;
+  }
+  get showingHpBar(): boolean {
+    return this.hpBar.showing;
+  }
+  set showingHpBar(v: boolean) {
+    this.hpBar.showing = v;
+  }
+
+  // ── Regen / hunger forwarding ─────────────────────────────────────
+  get regenDelay(): number {
+    return this.combat.regenDelay;
+  }
+  set regenDelay(v: number) {
+    this.combat.regenDelay = v;
+  }
+  get regenRate(): number {
+    return this.combat.regenRate;
+  }
+  set regenRate(v: number) {
+    this.combat.regenRate = v;
+  }
+  get timeSinceLastDamage(): number {
+    return this.combat.timeSinceLastDamage;
+  }
+  get hungerEnabled(): boolean {
+    return this.combat.hungerEnabled;
+  }
+  set hungerEnabled(v: boolean) {
+    this.combat.hungerEnabled = v;
+  }
+  get hunger(): number {
+    return this.combat.hunger;
+  }
+  set hunger(v: number) {
+    this.combat.hunger = v;
+  }
+  get maxHunger(): number {
+    return this.combat.maxHunger;
+  }
+  set maxHunger(v: number) {
+    this.combat.maxHunger = v;
+  }
+  get hungerDecayRate(): number {
+    return this.combat.hungerDecayRate;
+  }
+  set hungerDecayRate(v: number) {
+    this.combat.hungerDecayRate = v;
+  }
+  restoreHunger(amount: number): void {
+    this.combat.restoreHunger(amount);
+  }
 
   // ── VOX forwarding ───────────────────────────────────────────────
-  get voxEntry(): VoxCharEntry | null { return this.animator.voxEntry; }
-  set voxEntry(v: VoxCharEntry | null) { this.animator.voxEntry = v; }
+  get voxEntry(): VoxCharEntry | null {
+    return this.animator.voxEntry;
+  }
+  set voxEntry(v: VoxCharEntry | null) {
+    this.animator.voxEntry = v;
+  }
 
   getStepMode(): StepMode {
     return this.animator.getStepMode();
@@ -118,7 +243,15 @@ export class Character implements BehaviorAgent {
   private playerControl: PlayerControl | null = null;
   private _selected = false;
 
-  constructor(scene: THREE.Scene, terrain: Terrain, navGrid: NavGrid, type: CharacterType, position: THREE.Vector3, ladderDefs: ReadonlyArray<LadderDef> = [], skipAutoSkin = false) {
+  constructor(
+    scene: THREE.Scene,
+    terrain: Environment,
+    navGrid: NavGrid,
+    type: CharacterType,
+    position: THREE.Vector3,
+    ladderDefs: ReadonlyArray<LadderDef> = [],
+    skipAutoSkin = false,
+  ) {
     this.scene = scene;
     this.terrain = terrain;
     this.footIK = new FootIK(terrain);
@@ -132,7 +265,10 @@ export class Character implements BehaviorAgent {
     this.groundY = position.y;
     this.visualGroundY = position.y;
     scene.add(this.mesh);
-    this.entity = new Entity(this.mesh, { layer: Layer.Character, radius: 0.25 });
+    this.entity = new Entity(this.mesh, {
+      layer: Layer.Character,
+      radius: 0.25,
+    });
 
     // HP bar (billboard)
     this.hpBar = new HpBar(scene);
@@ -147,13 +283,24 @@ export class Character implements BehaviorAgent {
       torch.intensity,
       torch.distance,
     );
-    this.torchLight.position.set(position.x, position.y + torch.offsetUp, position.z);
+    this.torchLight.position.set(
+      position.x,
+      position.y + torch.offsetUp,
+      position.z,
+    );
     this.torchLight.castShadow = false;
     scene.add(this.torchLight);
-    this.torchLightEntity = new Entity(this.torchLight, { layer: Layer.Light, radius: torch.distance });
+    this.torchLightEntity = new Entity(this.torchLight, {
+      layer: Layer.Light,
+      radius: torch.distance,
+    });
 
     // Fill light
-    this.fillLight = new THREE.PointLight(new THREE.Color(torch.color), torch.intensity * 0.4, 3);
+    this.fillLight = new THREE.PointLight(
+      new THREE.Color(torch.color),
+      torch.intensity * 0.4,
+      3,
+    );
     this.fillLight.castShadow = false;
     scene.add(this.fillLight);
 
@@ -189,8 +336,12 @@ export class Character implements BehaviorAgent {
       const self = this;
       this._combatOwner = {
         mesh: this.mesh,
-        get groundY() { return self.groundY; },
-        set groundY(v: number) { self.groundY = v; },
+        get groundY() {
+          return self.groundY;
+        },
+        set groundY(v: number) {
+          self.groundY = v;
+        },
         isEnemy: this.isEnemy,
         params: this.params,
         terrain: this.terrain,
@@ -205,10 +356,19 @@ export class Character implements BehaviorAgent {
 
   // ── BehaviorAgent interface ──────────────────────────────────────
 
-  getX(): number { return this.mesh.position.x; }
-  getZ(): number { return this.mesh.position.z; }
-  getFacing(): number { return this.facing; }
-  setFacing(angle: number): void { this.facing = angle; this.mesh.rotation.y = angle; }
+  getX(): number {
+    return this.mesh.position.x;
+  }
+  getZ(): number {
+    return this.mesh.position.z;
+  }
+  getFacing(): number {
+    return this.facing;
+  }
+  setFacing(angle: number): void {
+    this.facing = angle;
+    this.mesh.rotation.y = angle;
+  }
 
   /** Apply vertical hop offset. */
   applyHop(hopHeight: number): number {
@@ -219,20 +379,37 @@ export class Character implements BehaviorAgent {
     const stepMode = this.getStepMode();
 
     if (stepMode === 'flyer') {
-      if (currentHopHalf !== this.lastHopHalf && this.footSfxTimer >= FOOT_SFX_COOLDOWN) {
+      if (
+        currentHopHalf !== this.lastHopHalf &&
+        this.footSfxTimer >= FOOT_SFX_COOLDOWN
+      ) {
         this.lastHopHalf = currentHopHalf;
         this.footSfxTimer = 0;
-        audioSystem.sfxAt('fly', this.mesh.position.x, this.mesh.position.z, this.isEnemy ? 0.4 : 0.5);
+        audioSystem.sfxAt(
+          'fly',
+          this.mesh.position.x,
+          this.mesh.position.z,
+          this.isEnemy ? 0.4 : 0.5,
+        );
       } else if (currentHopHalf !== this.lastHopHalf) {
         this.lastHopHalf = currentHopHalf;
       }
       return currentHopHalf;
     }
-    if (stepMode === 'walker' && currentHopHalf !== this.lastHopHalf && this.footSfxTimer >= FOOT_SFX_COOLDOWN) {
+    if (
+      stepMode === 'walker' &&
+      currentHopHalf !== this.lastHopHalf &&
+      this.footSfxTimer >= FOOT_SFX_COOLDOWN
+    ) {
       this.lastHopHalf = currentHopHalf;
       this.footSfxTimer = 0;
       const stepVol = this.isEnemy ? 0.5 : 0.7;
-      audioSystem.sfxAt('step', this.mesh.position.x, this.mesh.position.z, stepVol);
+      audioSystem.sfxAt(
+        'step',
+        this.mesh.position.x,
+        this.mesh.position.z,
+        stepVol,
+      );
     } else if (currentHopHalf !== this.lastHopHalf) {
       this.lastHopHalf = currentHopHalf;
     }
@@ -285,11 +462,16 @@ export class Character implements BehaviorAgent {
 
   // ── Selection & control switching ────────────────────────────────
 
-  get selected(): boolean { return this._selected; }
+  get selected(): boolean {
+    return this._selected;
+  }
 
   setPlayerControlled(deps: PlayerControlDeps): void {
     this._selected = true;
-    this.playerControl = new PlayerControl({ navGrid: this.navGrid, ladderDefs: this.ladderDefs }, deps);
+    this.playerControl = new PlayerControl(
+      { navGrid: this.navGrid, ladderDefs: this.ladderDefs },
+      deps,
+    );
     this.behavior = this.playerControl;
   }
 
@@ -301,7 +483,12 @@ export class Character implements BehaviorAgent {
 
   goTo(worldX: number, worldZ: number): void {
     this.debugVis.clear();
-    this.behavior = new GoToPoint({ navGrid: this.navGrid, ladderDefs: this.ladderDefs }, this.params, worldX, worldZ);
+    this.behavior = new GoToPoint(
+      { navGrid: this.navGrid, ladderDefs: this.ladderDefs },
+      this.params,
+      worldX,
+      worldZ,
+    );
   }
 
   getCameraTarget(): { x: number; y: number; z: number } {
@@ -327,7 +514,11 @@ export class Character implements BehaviorAgent {
       return;
     }
 
-    if (this._selected && this.playerControl && this.behavior instanceof GoToPoint) {
+    if (
+      this._selected &&
+      this.playerControl &&
+      this.behavior instanceof GoToPoint
+    ) {
       if (this.playerControl.hasInput()) {
         this.behavior = this.playerControl;
       }
@@ -353,7 +544,16 @@ export class Character implements BehaviorAgent {
 
   // ── Movement (BehaviorAgent) ─────────────────────────────────────
 
-  move(dx: number, dz: number, speed: number, stepHeight: number, capsuleRadius: number, dt: number, slopeHeight?: number, skipFacing?: boolean): boolean {
+  move(
+    dx: number,
+    dz: number,
+    speed: number,
+    stepHeight: number,
+    capsuleRadius: number,
+    dt: number,
+    slopeHeight?: number,
+    skipFacing?: boolean,
+  ): boolean {
     if (Math.abs(dx) < 0.001 && Math.abs(dz) < 0.001) return false;
     this.footSfxTimer += dt;
 
@@ -363,7 +563,12 @@ export class Character implements BehaviorAgent {
       const stepMode = this.getStepMode();
       if (stepMode === 'walker') {
         const vol = this.isEnemy ? 0.5 : 0.7;
-        audioSystem.sfxAt('step', this.mesh.position.x, this.mesh.position.z, vol);
+        audioSystem.sfxAt(
+          'step',
+          this.mesh.position.x,
+          this.mesh.position.z,
+          vol,
+        );
         this.footSfxTimer = 0;
       }
     }
@@ -379,14 +584,21 @@ export class Character implements BehaviorAgent {
       const steerStrength = 0.35;
       if (door.corrAxis === 'x') {
         const offset = door.cx - oldX;
-        effDx = dx + Math.sign(offset) * Math.min(Math.abs(offset), 1) * steerStrength;
+        effDx =
+          dx +
+          Math.sign(offset) * Math.min(Math.abs(offset), 1) * steerStrength;
       } else {
         const offset = door.cz - oldZ;
-        effDz = dz + Math.sign(offset) * Math.min(Math.abs(offset), 1) * steerStrength;
+        effDz =
+          dz +
+          Math.sign(offset) * Math.min(Math.abs(offset), 1) * steerStrength;
       }
       // Re-normalize to keep same overall speed
       const len = Math.sqrt(effDx * effDx + effDz * effDz);
-      if (len > 0.001) { effDx /= len; effDz /= len; }
+      if (len > 0.001) {
+        effDx /= len;
+        effDz /= len;
+      }
     }
 
     // Slow down on stairs for smoother traversal
@@ -394,7 +606,16 @@ export class Character implements BehaviorAgent {
     const newX = oldX + effDx * effSpeed * dt;
     const newZ = oldZ + effDz * effSpeed * dt;
 
-    const resolved = this.terrain.resolveMovement(newX, newZ, this.groundY, stepHeight, capsuleRadius, oldX, oldZ, slopeHeight);
+    const resolved = this.terrain.resolveMovement(
+      newX,
+      newZ,
+      this.groundY,
+      stepHeight,
+      capsuleRadius,
+      oldX,
+      oldZ,
+      slopeHeight,
+    );
     this.mesh.position.x = resolved.x;
     this.mesh.position.z = resolved.z;
     this.groundY = resolved.y;
@@ -411,8 +632,10 @@ export class Character implements BehaviorAgent {
     {
       const movedX = this.mesh.position.x - oldX;
       const movedZ = this.mesh.position.z - oldZ;
-      const actualSpeed = dt > 0 ? Math.sqrt(movedX * movedX + movedZ * movedZ) / dt : 0;
-      const rawScale = Math.sqrt(actualSpeed / ANIM_REFERENCE_SPEED) * this.characterAnimScale;
+      const actualSpeed =
+        dt > 0 ? Math.sqrt(movedX * movedX + movedZ * movedZ) / dt : 0;
+      const rawScale =
+        Math.sqrt(actualSpeed / ANIM_REFERENCE_SPEED) * this.characterAnimScale;
       const minScale = this.getStepMode() === 'jumper' ? 0.8 : 0.3;
       this.animSpeedScale = Math.max(rawScale, minScale);
       this.hopFrequency = DEFAULT_HOP_FREQUENCY * this.animSpeedScale;
@@ -444,9 +667,20 @@ export class Character implements BehaviorAgent {
         } else if (impactSpeed > 1 && this.footSfxTimer >= FOOT_SFX_COOLDOWN) {
           const vol = this.isEnemy ? 0.5 : 0.7;
           if (stepMode === 'jumper') {
-            if (Math.random() < 0.5) audioSystem.sfxAt('step', this.mesh.position.x, this.mesh.position.z, vol);
+            if (Math.random() < 0.5)
+              audioSystem.sfxAt(
+                'step',
+                this.mesh.position.x,
+                this.mesh.position.z,
+                vol,
+              );
           } else {
-            audioSystem.sfxAt('land', this.mesh.position.x, this.mesh.position.z, vol);
+            audioSystem.sfxAt(
+              'land',
+              this.mesh.position.x,
+              this.mesh.position.z,
+              vol,
+            );
           }
           this.footSfxTimer = 0;
         }
@@ -459,10 +693,18 @@ export class Character implements BehaviorAgent {
   updateIdle(dt: number): void {
     this.footSfxTimer += dt;
     if (this.moveTime > 0) {
-      if (this.footSfxTimer >= FOOT_SFX_COOLDOWN && this.getStepMode() !== 'flyer') {
+      if (
+        this.footSfxTimer >= FOOT_SFX_COOLDOWN &&
+        this.getStepMode() !== 'flyer'
+      ) {
         this.footSfxTimer = 0;
         const stepVol = this.isEnemy ? 0.5 : 0.7;
-        audioSystem.sfxAt('step', this.mesh.position.x, this.mesh.position.z, stepVol);
+        audioSystem.sfxAt(
+          'step',
+          this.mesh.position.x,
+          this.mesh.position.z,
+          stepVol,
+        );
       }
       this.moveTime = 0;
       this.lastHopHalf = 0;
@@ -479,10 +721,20 @@ export class Character implements BehaviorAgent {
   // ── HP bar ──────────────────────────────────────────────────────
 
   updateHpBar(camera: THREE.Camera): void {
-    this.hpBar.update(this.mesh.position, this.hp, this.maxHp, this.isAlive, camera);
+    this.hpBar.update(
+      this.mesh.position,
+      this.hp,
+      this.maxHp,
+      this.isAlive,
+      camera,
+    );
   }
 
   // ── Combat methods ───────────────────────────────────────────────
+
+  hideHpBar(): void {
+    this.hpBar.hide();
+  }
 
   hideBody(): void {
     this.mesh.visible = false;
@@ -493,8 +745,19 @@ export class Character implements BehaviorAgent {
     return this.combat.consumeJustTookDamage();
   }
 
-  takeDamage(amount: number, fromX: number, fromZ: number, knockback: number): boolean {
-    return this.combat.takeDamage(this.combatOwner, amount, fromX, fromZ, knockback);
+  takeDamage(
+    amount: number,
+    fromX: number,
+    fromZ: number,
+    knockback: number,
+  ): boolean {
+    return this.combat.takeDamage(
+      this.combatOwner,
+      amount,
+      fromX,
+      fromZ,
+      knockback,
+    );
   }
 
   startAttack(exhaustionEnabled = false): boolean {
@@ -532,11 +795,12 @@ export class Character implements BehaviorAgent {
 
     this.torchTime += dt * 12;
     const flickerAmount = torch.flicker;
-    const flicker = 1 + (
-      Math.sin(this.torchTime) * 0.5 +
-      Math.sin(this.torchTime * 2.3) * 0.3 +
-      Math.sin(this.torchTime * 5.7) * 0.2
-    ) * flickerAmount;
+    const flicker =
+      1 +
+      (Math.sin(this.torchTime) * 0.5 +
+        Math.sin(this.torchTime * 2.3) * 0.3 +
+        Math.sin(this.torchTime * 5.7) * 0.2) *
+        flickerAmount;
     this.torchLight.intensity = torch.intensity * flicker;
 
     this.torchLight.position.set(
@@ -552,9 +816,13 @@ export class Character implements BehaviorAgent {
     this.fillLight.color.set(torch.color);
     this.fillLight.intensity = torch.intensity * 0.4 * flicker;
     this.fillLight.position.set(
-      this.mesh.position.x + fwdX * torch.offsetForward + rightX * torch.offsetRight,
+      this.mesh.position.x +
+        fwdX * torch.offsetForward +
+        rightX * torch.offsetRight,
       this.mesh.position.y + torch.offsetUp * 0.6,
-      this.mesh.position.z + fwdZ * torch.offsetForward + rightZ * torch.offsetRight,
+      this.mesh.position.z +
+        fwdZ * torch.offsetForward +
+        rightZ * torch.offsetRight,
     );
   }
 

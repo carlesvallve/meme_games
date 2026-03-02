@@ -1,12 +1,16 @@
 import { create } from 'zustand';
 import type { CharacterType, SpeechBubbleData } from './types';
 import { Layer } from './game/Entity';
-import type { TerrainPreset } from './game/Terrain';
-import type { HeightmapStyle } from './game/TerrainNoise';
+import type { TerrainPreset } from './game/terrain';
+import type { HeightmapStyle } from './game/terrain';
 import { DEFAULT_CHARACTER_PARAMS } from './game/character';
-import type { MovementParams, MeleeParams, RangedParams } from './game/character';
-import type { LevelSnapshot } from './game/LevelState';
-import type { PotionEffect } from './game/PotionEffectSystem';
+import type {
+  MovementParams,
+  MeleeParams,
+  RangedParams,
+} from './game/character';
+import type { LevelSnapshot } from './game/dungeon';
+import type { PotionEffect } from './game/combat/PotionEffectSystem';
 
 export interface ActivePotionDisplay {
   effect: PotionEffect;
@@ -21,7 +25,11 @@ export interface PotionSlot {
 }
 import { floorSeed } from './utils/SeededRandom';
 
-export type { MovementParams, MeleeParams, RangedParams } from './game/character';
+export type {
+  MovementParams,
+  MeleeParams,
+  RangedParams,
+} from './game/character';
 
 /**
  * Enemy params — overrides of the base MovementParams that characters share,
@@ -51,6 +59,10 @@ export interface EnemyParams {
   spawnInterval: number;
   /** Allowed enemy type IDs (empty = all). */
   allowedTypes: string[];
+  /** Seconds after last damage before regen starts. */
+  regenDelay: number;
+  /** HP per second once regen is active (scaled by tier). */
+  regenRate: number;
 }
 
 export const DEFAULT_ENEMY_PARAMS: EnemyParams = {
@@ -60,14 +72,26 @@ export const DEFAULT_ENEMY_PARAMS: EnemyParams = {
   attackCooldown: 1.2,
   invulnDuration: 0.5,
   stunDuration: 0.15,
-  melee: { autoTarget: true, knockback: 5, showSlashEffect: true, exhaustionEnabled: false },
-  ranged: { enabled: false, autoTarget: true, knockback: 2.5, exhaustionEnabled: false },
+  melee: {
+    autoTarget: true,
+    knockback: 5,
+    showSlashEffect: true,
+    exhaustionEnabled: false,
+  },
+  ranged: {
+    enabled: false,
+    autoTarget: true,
+    knockback: 2.5,
+    exhaustionEnabled: false,
+  },
   chaseRange: 12,
   playerDamage: 2,
   enemyDensity: 0.02,
   maxEnemies: 32,
-  spawnInterval: 12,
+  spawnInterval: 0,
   allowedTypes: [],
+  regenDelay: 5.0,
+  regenRate: 0.1,
 };
 
 export interface ParticleToggles {
@@ -84,9 +108,9 @@ export type LightPreset = 'default' | 'bright' | 'dark' | 'none';
 export interface TorchParams {
   intensity: number;
   distance: number;
-  offsetForward: number;  // forward from character facing
-  offsetRight: number;    // right of character facing
-  offsetUp: number;       // height above character
+  offsetForward: number; // forward from character facing
+  offsetRight: number; // right of character facing
+  offsetUp: number; // height above character
   color: string;
   flicker: number;
 }
@@ -108,23 +132,50 @@ export interface CameraParams {
 
 export interface PostProcessSettings {
   enabled: boolean;
-  bloom: { enabled: boolean; strength: number; radius: number; threshold: number };
-  ssao: { enabled: boolean; radius: number; minDistance: number; maxDistance: number };
+  bloom: {
+    enabled: boolean;
+    strength: number;
+    radius: number;
+    threshold: number;
+  };
+  ssao: {
+    enabled: boolean;
+    radius: number;
+    minDistance: number;
+    maxDistance: number;
+  };
   vignette: { enabled: boolean; offset: number; darkness: number };
-  colorGrade: { enabled: boolean; brightness: number; contrast: number; saturation: number };
+  colorGrade: {
+    enabled: boolean;
+    brightness: number;
+    contrast: number;
+    saturation: number;
+  };
 }
 
 // ── Defaults ──────────────────────────────────────────────────────────
 
 export const DEFAULT_CAMERA_PARAMS: CameraParams = {
   fov: 60,
-  minDistance: 5, maxDistance: 25, distance: 12, pitchMin: -80, pitchMax: -10,
-  rotationSpeed: 0.005, zoomSpeed: 0.01, collisionLayers: Layer.None, collisionSkin: 0.1,
+  minDistance: 5,
+  maxDistance: 25,
+  distance: 12,
+  pitchMin: -80,
+  pitchMax: -10,
+  rotationSpeed: 0.005,
+  zoomSpeed: 0.01,
+  collisionLayers: Layer.None,
+  collisionSkin: 0.1,
 };
 
 export const DEFAULT_TORCH_PARAMS: TorchParams = {
-  intensity: 2.5, distance: 8, offsetForward: 0.3, offsetRight: 0.25,
-  offsetUp: 1.0, color: '#ff9944', flicker: 0.3,
+  intensity: 2.5,
+  distance: 8,
+  offsetForward: 0.3,
+  offsetRight: 0.25,
+  offsetUp: 1.0,
+  color: '#ff9944',
+  flicker: 0.3,
 };
 
 export const DEFAULT_LIGHT_PRESET: LightPreset = 'default';
@@ -138,7 +189,10 @@ export const DEFAULT_POST_PROCESS: PostProcessSettings = {
 };
 
 export const DEFAULT_PARTICLE_TOGGLES: ParticleToggles = {
-  dust: true, lightRain: false, rain: false, debris: false,
+  dust: true,
+  lightRain: false,
+  rain: false,
+  debris: false,
 };
 
 export const DEFAULT_SCENE_SETTINGS = {
@@ -150,7 +204,7 @@ export const DEFAULT_SCENE_SETTINGS = {
   tileSize: 0.75,
   gridOpacity: 0.25,
   resolutionScale: 1,
-  testProp: '' as string,  // empty = normal templates, category name = spawn only that
+  testProp: '' as string, // empty = normal templates, category name = spawn only that
   testFloor: '' as string, // empty = random ground tiles, tile id = use only that
   doorChance: 0.7,
   roomLabels: true, // voxelDungeon: show room name labels (e.g. "Barracks")
@@ -194,6 +248,7 @@ interface SavedSettings {
   hmrCacheEnabled?: boolean;
   dungeonVariant?: string;
   dungeonSize?: number;
+  progressionRecipe?: string;
   postProcess?: PostProcessSettings;
   characterPushEnabled?: boolean;
   particleToggles?: ParticleToggles;
@@ -206,7 +261,9 @@ function loadSettings(): SavedSettings {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
     if (raw) return JSON.parse(raw);
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
   return {};
 }
 
@@ -238,14 +295,18 @@ function saveSettings(): void {
     hmrCacheEnabled: s.hmrCacheEnabled,
     dungeonVariant: s.dungeonVariant,
     dungeonSize: s.dungeonSize,
+    progressionRecipe: s.progressionRecipe,
     postProcess: s.postProcess,
     characterPushEnabled: s.characterPushEnabled,
     particleToggles: s.particleToggles,
     enemyParams: s.enemyParams,
   };
-  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(data)); } catch { /* ignore */ }
+  try {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(data));
+  } catch {
+    /* ignore */
+  }
 }
-
 
 // ── Store ─────────────────────────────────────────────────────────────
 
@@ -258,6 +319,8 @@ interface GameStore {
   score: number;
   hp: number;
   maxHp: number;
+  hunger: number;
+  maxHunger: number;
   floor: number;
   /** Base seed for the entire dungeon run — combined with floor number for per-level seeds */
   dungeonBaseSeed: number;
@@ -265,6 +328,10 @@ interface GameStore {
   levelCache: Record<number, LevelSnapshot>;
   /** Dungeon theme for the current level */
   currentTheme: string;
+  /** Current zone name derived from floor config (e.g. "Upper Cellars") */
+  zoneName: string;
+  /** Zone announcement to display on floor transition (title + optional subtitle), cleared after display */
+  zoneAnnouncement: { title: string; subtitle?: string } | null;
   message: string | null;
 
   selectedCharacter: CharacterType | null;
@@ -280,8 +347,8 @@ interface GameStore {
   torchParams: TorchParams;
   terrainPreset: TerrainPreset;
   heightmapStyle: HeightmapStyle;
-  paletteName: string;       // user selection: 'random' or specific name
-  paletteActive: string;     // actual palette in use (for display)
+  paletteName: string; // user selection: 'random' or specific name
+  paletteActive: string; // actual palette in use (for display)
   wallGap: number;
   roomSpacing: number;
   tileSize: number;
@@ -305,16 +372,31 @@ interface GameStore {
   setHmrCacheEnabled: (on: boolean) => void;
   dungeonVariant: string;
   setDungeonVariant: (variant: string) => void;
+  /** Active progression recipe name (e.g. "Classic", "Blitz", "Nightmare"). */
+  progressionRecipe: string;
+  setProgressionRecipe: (name: string) => void;
   dungeonSize: number;
   setDungeonSize: (size: number) => void;
   postProcess: PostProcessSettings;
   setPostProcess: (settings: PostProcessSettings) => void;
-  setPostProcessParam: <K extends keyof PostProcessSettings>(key: K, value: PostProcessSettings[K]) => void;
+  setPostProcessParam: <K extends keyof PostProcessSettings>(
+    key: K,
+    value: PostProcessSettings[K],
+  ) => void;
 
   enemyParams: EnemyParams;
-  setEnemyParam: <K extends keyof EnemyParams>(key: K, value: EnemyParams[K]) => void;
-  setEnemyMeleeParam: <K extends keyof MeleeParams>(key: K, value: MeleeParams[K]) => void;
-  setEnemyRangedParam: <K extends keyof (RangedParams & { enabled: boolean })>(key: K, value: (RangedParams & { enabled: boolean })[K]) => void;
+  setEnemyParam: <K extends keyof EnemyParams>(
+    key: K,
+    value: EnemyParams[K],
+  ) => void;
+  setEnemyMeleeParam: <K extends keyof MeleeParams>(
+    key: K,
+    value: MeleeParams[K],
+  ) => void;
+  setEnemyRangedParam: <K extends keyof (RangedParams & { enabled: boolean })>(
+    key: K,
+    value: (RangedParams & { enabled: boolean })[K],
+  ) => void;
 
   /** If true, characters push each other apart when overlapping; if false, only the non-player is pushed (player stays put). */
   characterPushEnabled: boolean;
@@ -329,6 +411,7 @@ interface GameStore {
   setLastPointerUpWasAfterDrag: (v: boolean) => void;
   setScore: (score: number) => void;
   setHP: (hp: number, maxHp: number) => void;
+  setHunger: (hunger: number, maxHunger: number) => void;
   setFloor: (floor: number) => void;
   setDungeonBaseSeed: (seed: number) => void;
   /** Get the deterministic seed for a given floor */
@@ -340,6 +423,10 @@ interface GameStore {
   /** Clear all level cache (e.g. on new game) */
   clearLevelCache: () => void;
   setCurrentTheme: (theme: string) => void;
+  setZoneName: (name: string) => void;
+  setZoneAnnouncement: (
+    announcement: { title: string; subtitle?: string } | null,
+  ) => void;
   showMessage: (msg: string | null) => void;
 
   selectCharacter: (type: CharacterType) => void;
@@ -350,13 +437,28 @@ interface GameStore {
   clearPotionInventory: () => void;
   setSpeechBubbles: (bubbles: SpeechBubbleData[]) => void;
   toggleParticle: (key: keyof ParticleToggles) => void;
-  setCharacterParam: <K extends keyof MovementParams>(key: K, value: MovementParams[K]) => void;
-  setMeleeParam: <K extends keyof MeleeParams>(key: K, value: MeleeParams[K]) => void;
-  setRangedParam: <K extends keyof RangedParams>(key: K, value: RangedParams[K]) => void;
-  setCameraParam: <K extends keyof CameraParams>(key: K, value: CameraParams[K]) => void;
+  setCharacterParam: <K extends keyof MovementParams>(
+    key: K,
+    value: MovementParams[K],
+  ) => void;
+  setMeleeParam: <K extends keyof MeleeParams>(
+    key: K,
+    value: MeleeParams[K],
+  ) => void;
+  setRangedParam: <K extends keyof RangedParams>(
+    key: K,
+    value: RangedParams[K],
+  ) => void;
+  setCameraParam: <K extends keyof CameraParams>(
+    key: K,
+    value: CameraParams[K],
+  ) => void;
   setLightPreset: (preset: LightPreset) => void;
   toggleTorch: () => void;
-  setTorchParam: <K extends keyof TorchParams>(key: K, value: TorchParams[K]) => void;
+  setTorchParam: <K extends keyof TorchParams>(
+    key: K,
+    value: TorchParams[K],
+  ) => void;
   setTerrainPreset: (preset: TerrainPreset) => void;
   setHeightmapStyle: (style: HeightmapStyle) => void;
   setPaletteName: (name: string) => void;
@@ -410,10 +512,14 @@ export const useGameStore = create<GameStore>((set, get) => ({
   score: 0,
   hp: 100,
   maxHp: 100,
+  hunger: 80,
+  maxHunger: 100,
   floor: 1,
-  dungeonBaseSeed: (Math.random() * 0xFFFFFFFF) >>> 0,
+  dungeonBaseSeed: (Math.random() * 0xffffffff) >>> 0,
   levelCache: {},
   currentTheme: '',
+  zoneName: 'Upper Cellars',
+  zoneAnnouncement: null,
   message: null,
 
   selectedCharacter: null,
@@ -422,7 +528,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
   potionInventory: [],
   speechBubbles: [],
   particleToggles: saved.particleToggles ?? { ...DEFAULT_PARTICLE_TOGGLES },
-  characterParams: { ...DEFAULT_CHARACTER_PARAMS, ...(saved.characterParams ?? saved.playerParams) },
+  characterParams: {
+    ...DEFAULT_CHARACTER_PARAMS,
+    ...(saved.characterParams ?? saved.playerParams),
+  },
   cameraParams: (() => {
     const def = { ...DEFAULT_CAMERA_PARAMS };
     const savedCam = saved.cameraParams;
@@ -444,7 +553,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
   roomSpacing: saved.roomSpacing ?? DEFAULT_SCENE_SETTINGS.roomSpacing,
   tileSize: saved.tileSize ?? DEFAULT_SCENE_SETTINGS.tileSize,
   gridOpacity: saved.gridOpacity ?? DEFAULT_SCENE_SETTINGS.gridOpacity,
-  resolutionScale: saved.resolutionScale ?? DEFAULT_SCENE_SETTINGS.resolutionScale,
+  resolutionScale:
+    saved.resolutionScale ?? DEFAULT_SCENE_SETTINGS.resolutionScale,
   testProp: saved.testProp ?? DEFAULT_SCENE_SETTINGS.testProp,
   testFloor: saved.testFloor ?? DEFAULT_SCENE_SETTINGS.testFloor,
   doorChance: saved.doorChance ?? DEFAULT_SCENE_SETTINGS.doorChance,
@@ -455,14 +565,19 @@ export const useGameStore = create<GameStore>((set, get) => ({
   setUseBiomes: (useBiomes) => set({ useBiomes }),
   debugBiomes: saved.debugBiomes ?? DEFAULT_SCENE_SETTINGS.debugBiomes,
   setDebugBiomes: (debugBiomes) => set({ debugBiomes }),
-  debugProjectileStick: saved.debugProjectileStick ?? DEFAULT_SCENE_SETTINGS.debugProjectileStick,
-  setDebugProjectileStick: (debugProjectileStick) => set({ debugProjectileStick }),
+  debugProjectileStick:
+    saved.debugProjectileStick ?? DEFAULT_SCENE_SETTINGS.debugProjectileStick,
+  setDebugProjectileStick: (debugProjectileStick) =>
+    set({ debugProjectileStick }),
   forceStairs: saved.forceStairs ?? DEFAULT_SCENE_SETTINGS.forceStairs,
   setForceStairs: (forceStairs) => set({ forceStairs }),
-  hmrCacheEnabled: saved.hmrCacheEnabled ?? DEFAULT_SCENE_SETTINGS.hmrCacheEnabled,
+  hmrCacheEnabled:
+    saved.hmrCacheEnabled ?? DEFAULT_SCENE_SETTINGS.hmrCacheEnabled,
   setHmrCacheEnabled: (hmrCacheEnabled) => set({ hmrCacheEnabled }),
   dungeonVariant: saved.dungeonVariant ?? DEFAULT_SCENE_SETTINGS.dungeonVariant,
   setDungeonVariant: (dungeonVariant) => set({ dungeonVariant }),
+  progressionRecipe: saved.progressionRecipe ?? 'Classic',
+  setProgressionRecipe: (progressionRecipe) => set({ progressionRecipe }),
   dungeonSize: saved.dungeonSize ?? DEFAULT_SCENE_SETTINGS.dungeonSize,
   setDungeonSize: (dungeonSize) => set({ dungeonSize }),
   postProcess: saved.postProcess ?? { ...DEFAULT_POST_PROCESS },
@@ -477,7 +592,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const merged = {
       ...def,
       ...se,
-      speed: Array.isArray(se.speed) ? se.speed as [number, number] : def.speed,
+      speed: Array.isArray(se.speed)
+        ? (se.speed as [number, number])
+        : def.speed,
       melee: { ...def.melee, ...se.melee },
       ranged: { ...def.ranged, ...se.ranged },
     };
@@ -486,12 +603,23 @@ export const useGameStore = create<GameStore>((set, get) => ({
   setEnemyParam: (key, value) =>
     set((s) => ({ enemyParams: { ...s.enemyParams, [key]: value } })),
   setEnemyMeleeParam: (key, value) =>
-    set((s) => ({ enemyParams: { ...s.enemyParams, melee: { ...s.enemyParams.melee, [key]: value } as any } })),
+    set((s) => ({
+      enemyParams: {
+        ...s.enemyParams,
+        melee: { ...s.enemyParams.melee, [key]: value } as any,
+      },
+    })),
   setEnemyRangedParam: (key, value) =>
-    set((s) => ({ enemyParams: { ...s.enemyParams, ranged: { ...s.enemyParams.ranged, [key]: value } as any } })),
+    set((s) => ({
+      enemyParams: {
+        ...s.enemyParams,
+        ranged: { ...s.enemyParams.ranged, [key]: value } as any,
+      },
+    })),
 
   characterPushEnabled: saved.characterPushEnabled ?? true,
-  setCharacterPushEnabled: (characterPushEnabled) => set({ characterPushEnabled }),
+  setCharacterPushEnabled: (characterPushEnabled) =>
+    set({ characterPushEnabled }),
 
   settingsPanelOpen: false,
   setSettingsPanelOpen: (settingsPanelOpen) => set({ settingsPanelOpen }),
@@ -503,38 +631,52 @@ export const useGameStore = create<GameStore>((set, get) => ({
         : { phase, playerDeadAt: null },
     ),
   setPlayerDeadAt: (playerDeadAt) => set({ playerDeadAt }),
-  setLastPointerUpWasAfterDrag: (lastPointerUpWasAfterDrag) => set({ lastPointerUpWasAfterDrag }),
+  setLastPointerUpWasAfterDrag: (lastPointerUpWasAfterDrag) =>
+    set({ lastPointerUpWasAfterDrag }),
   setScore: (score) => set({ score }),
   setHP: (hp, maxHp) => set({ hp, maxHp }),
+  setHunger: (hunger, maxHunger) => set({ hunger, maxHunger }),
   setFloor: (floor) => set({ floor }),
   setDungeonBaseSeed: (dungeonBaseSeed) => set({ dungeonBaseSeed }),
   getFloorSeed: (floor) => floorSeed(get().dungeonBaseSeed, floor),
   saveLevelSnapshot: (floor, snapshot) =>
     set((s) => ({ levelCache: { ...s.levelCache, [floor]: snapshot } })),
   getLevelSnapshot: (floor) => get().levelCache[floor],
-  clearLevelCache: () => set({ levelCache: {}, dungeonBaseSeed: (Math.random() * 0xFFFFFFFF) >>> 0 }),
+  clearLevelCache: () =>
+    set({
+      levelCache: {},
+      dungeonBaseSeed: (Math.random() * 0xffffffff) >>> 0,
+    }),
   setCurrentTheme: (currentTheme) => set({ currentTheme }),
+  setZoneName: (zoneName) => set({ zoneName }),
+  setZoneAnnouncement: (zoneAnnouncement) => set({ zoneAnnouncement }),
   showMessage: (message) => set({ message }),
 
   selectCharacter: (type) => set({ selectedCharacter: type, phase: 'playing' }),
   setCollectibles: (collectibles) => set({ collectibles }),
   addCoins: (n) => set((s) => ({ coins: s.coins + n })),
-  addPotionToInventory: (colorIndex) => set((s) => {
-    const inv = [...s.potionInventory];
-    const existing = inv.find(slot => slot.colorIndex === colorIndex);
-    if (existing) {
-      existing.count++;
-    } else {
-      inv.push({ colorIndex, count: 1 });
-    }
-    return { potionInventory: inv };
-  }),
-  removePotionFromInventory: (colorIndex) => set((s) => {
-    const inv = s.potionInventory
-      .map(slot => slot.colorIndex === colorIndex ? { ...slot, count: slot.count - 1 } : slot)
-      .filter(slot => slot.count > 0);
-    return { potionInventory: inv };
-  }),
+  addPotionToInventory: (colorIndex) =>
+    set((s) => {
+      const inv = [...s.potionInventory];
+      const existing = inv.find((slot) => slot.colorIndex === colorIndex);
+      if (existing) {
+        existing.count++;
+      } else {
+        inv.push({ colorIndex, count: 1 });
+      }
+      return { potionInventory: inv };
+    }),
+  removePotionFromInventory: (colorIndex) =>
+    set((s) => {
+      const inv = s.potionInventory
+        .map((slot) =>
+          slot.colorIndex === colorIndex
+            ? { ...slot, count: slot.count - 1 }
+            : slot,
+        )
+        .filter((slot) => slot.count > 0);
+      return { potionInventory: inv };
+    }),
   clearPotionInventory: () => set({ potionInventory: [] }),
   setSpeechBubbles: (speechBubbles) => set({ speechBubbles }),
   toggleParticle: (key) =>
@@ -547,11 +689,17 @@ export const useGameStore = create<GameStore>((set, get) => ({
     })),
   setMeleeParam: (key, value) =>
     set((s) => ({
-      characterParams: { ...s.characterParams, melee: { ...s.characterParams.melee, [key]: value } },
+      characterParams: {
+        ...s.characterParams,
+        melee: { ...s.characterParams.melee, [key]: value },
+      },
     })),
   setRangedParam: (key, value) =>
     set((s) => ({
-      characterParams: { ...s.characterParams, ranged: { ...s.characterParams.ranged, [key]: value } },
+      characterParams: {
+        ...s.characterParams,
+        ranged: { ...s.characterParams.ranged, [key]: value },
+      },
     })),
   setCameraParam: (key, value) =>
     set((s) => ({
@@ -582,7 +730,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
   activeCharacterName: null,
   activeCharacterColor: null,
-  setActiveCharacter: (activeCharacterName, activeCharacterColor) => set({ activeCharacterName, activeCharacterColor }),
+  setActiveCharacter: (activeCharacterName, activeCharacterColor) =>
+    set({ activeCharacterName, activeCharacterColor }),
 
   heightmapThumb: null,
   setHeightmapThumb: (heightmapThumb) => set({ heightmapThumb }),

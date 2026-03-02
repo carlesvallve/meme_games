@@ -48,4 +48,5 @@ export type { VoxCharEntry, StepMode, MonsterStats } from './VoxCharacterDB';
 export {
   VOX_HEROES, VOX_ENEMIES, ALL_VOX_CHARACTERS, getRandomVoxChar,
   getArchetype, getCharacterStats, getMonsterStats, randomInRange,
+  getFilteredEnemies,
 } from './VoxCharacterDB';

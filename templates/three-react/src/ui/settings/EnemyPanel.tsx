@@ -1,7 +1,8 @@
 import { useMemo } from 'react';
 import { useGameStore, type EnemyParams } from '../../store';
-import { SettingsWindow, Section, Slider, Toggle, RangeSlider, MultiSelect, resetBtnStyle } from './shared';
+import { SettingsWindow, Section, Slider, Toggle, RangeSlider, MultiSelect, resetBtnStyle, rowStyle, selectStyle } from './shared';
 import { getEnemyTypeGroups } from '../../game/character/VoxCharacterDB';
+import { getRecipeNames, getRecipe } from '../../game/dungeon';
 
 const accent = '#f66';
 
@@ -15,9 +16,31 @@ export function EnemyPanel() {
     return getEnemyTypeGroups().map(g => ({ label: g.label, value: g.ids.join(',') }));
   }, []);
 
+  const recipeNames = useMemo(() => getRecipeNames(), []);
+  const progressionRecipe = useGameStore((s) => s.progressionRecipe);
+  const setProgressionRecipe = useGameStore((s) => s.setProgressionRecipe);
+
   return (
     <SettingsWindow>
-      <Section label="Spawn" accent={accent} first>
+      <Section label="Progression" accent={accent} first>
+        <div style={rowStyle}>
+          <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Recipe</span>
+          <select
+            value={progressionRecipe}
+            onChange={(e) => setProgressionRecipe(e.target.value)}
+            style={selectStyle}
+          >
+            {recipeNames.map((name) => (
+              <option key={name} value={name}>{name}</option>
+            ))}
+          </select>
+        </div>
+        <div style={{ fontSize: 10, color: '#888', marginTop: 2, lineHeight: '14px' }}>
+          {getRecipe(progressionRecipe)?.description ?? ''}
+        </div>
+      </Section>
+
+      <Section label="Spawn" accent={accent}>
         <Slider label="Enemy Density" value={ep.enemyDensity} min={0} max={0.08} step={0.005} accent={accent} onChange={(v) => set('enemyDensity', v)} />
         <Slider label="Respawn Time" value={ep.spawnInterval} min={0} max={60} step={1} accent={accent} onChange={(v) => set('spawnInterval', v)} />
         <MultiSelect
@@ -50,6 +73,11 @@ export function EnemyPanel() {
       <Section label="Defense" accent={accent}>
         <Slider label="Invuln" value={ep.invulnDuration} min={0} max={2} step={0.05} accent={accent} onChange={(v) => set('invulnDuration', v)} />
         <Slider label="Stun" value={ep.stunDuration} min={0} max={1} step={0.05} accent={accent} onChange={(v) => set('stunDuration', v)} />
+      </Section>
+
+      <Section label="Regen" accent={accent}>
+        <Slider label="Delay" value={ep.regenDelay} min={0} max={10} step={0.5} accent={accent} onChange={(v) => set('regenDelay', v)} />
+        <Slider label="Rate (HP/s)" value={ep.regenRate} min={0} max={2} step={0.05} accent={accent} onChange={(v) => set('regenRate', v)} />
       </Section>
 
       <Section label="Melee" accent={accent}>

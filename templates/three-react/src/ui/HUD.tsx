@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useGameStore } from '../store';
 import type { ParticleToggles, ActivePotionDisplay } from '../store';
-import { EFFECT_META } from '../game/PotionEffectSystem';
+import { EFFECT_META } from '../game/combat';
 
 const TOGGLE_KEYS: { key: keyof ParticleToggles; label: string }[] = [
   { key: 'dust', label: 'Dust' },
@@ -74,6 +74,36 @@ function HPBar({ hp, maxHp }: { hp: number; maxHp: number }) {
       </div>
       <span style={{ fontSize: 10, opacity: 0.7, letterSpacing: 1 }}>
         {hp} / {maxHp}
+      </span>
+    </div>
+  );
+}
+
+function HungerBar({ hunger, maxHunger }: { hunger: number; maxHunger: number }) {
+  const ratio = maxHunger > 0 ? hunger / maxHunger : 0;
+  const color = ratio > 0.4 ? '#cc8833' : ratio > 0.2 ? '#cc6622' : '#cc3322';
+  const flash = hunger <= 20;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
+      <div style={{
+        width: 120,
+        height: 6,
+        background: 'rgba(255,255,255,0.15)',
+        borderRadius: 3,
+        overflow: 'hidden',
+      }}>
+        <div style={{
+          width: `${ratio * 100}%`,
+          height: '100%',
+          background: color,
+          borderRadius: 3,
+          transition: 'width 0.3s ease-out, background 0.3s',
+          animation: flash ? 'hungerFlash 0.8s infinite alternate' : 'none',
+        }} />
+      </div>
+      <span style={{ fontSize: 9, opacity: 0.5, letterSpacing: 1 }}>
+        {Math.round(hunger)} / {maxHunger}
       </span>
     </div>
   );
@@ -171,97 +201,204 @@ function ActiveEffects({ effects }: { effects: ActivePotionDisplay[] }) {
   );
 }
 
+/** Zone announcement overlay — fades in, holds, fades out */
+function ZoneAnnouncement() {
+  const announcement = useGameStore((s) => s.zoneAnnouncement);
+  const [visible, setVisible] = useState(false);
+  const [opacity, setOpacity] = useState(0);
+
+  useEffect(() => {
+    if (!announcement) {
+      setVisible(false);
+      setOpacity(0);
+      return;
+    }
+    setVisible(true);
+    // Fade in
+    requestAnimationFrame(() => setOpacity(1));
+    // Hold then fade out
+    const fadeOut = setTimeout(() => setOpacity(0), 2500);
+    // Hide after fade completes
+    const hide = setTimeout(() => {
+      setVisible(false);
+      useGameStore.getState().setZoneAnnouncement(null);
+    }, 3500);
+    return () => { clearTimeout(fadeOut); clearTimeout(hide); };
+  }, [announcement]);
+
+  if (!visible || !announcement) return null;
+
+  return (
+    <div style={{
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      justifyContent: 'center',
+      pointerEvents: 'none',
+      opacity,
+      transition: 'opacity 0.8s ease-in-out',
+      zIndex: 50,
+    }}>
+      <div style={{
+        fontSize: 28,
+        fontWeight: 700,
+        letterSpacing: 3,
+        textTransform: 'uppercase',
+        color: '#fff',
+        textShadow: '0 0 20px rgba(0,0,0,0.9), 0 2px 8px rgba(0,0,0,0.7)',
+      }}>
+        {announcement.title}
+      </div>
+      {announcement.subtitle && (
+        <div style={{
+          fontSize: 14,
+          fontWeight: 400,
+          letterSpacing: 1,
+          color: 'rgba(255,255,255,0.7)',
+          textShadow: '0 0 10px rgba(0,0,0,0.8)',
+          marginTop: 8,
+          fontStyle: 'italic',
+        }}>
+          {announcement.subtitle}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function HUD() {
   const collectibles = useGameStore((s) => s.collectibles);
   const coins = useGameStore((s) => s.coins);
   const potionCount = useGameStore((s) => s.potionInventory.reduce((sum, slot) => sum + slot.count, 0));
   const hp = useGameStore((s) => s.hp);
   const maxHp = useGameStore((s) => s.maxHp);
+  const hunger = useGameStore((s) => s.hunger);
+  const maxHunger = useGameStore((s) => s.maxHunger);
   const toggles = useGameStore((s) => s.particleToggles);
   const toggle = useGameStore((s) => s.toggleParticle);
   const activeCharacterName = useGameStore((s) => s.activeCharacterName);
   const activeCharacterColor = useGameStore((s) => s.activeCharacterColor);
   const activePotionEffects = useGameStore((s) => s.activePotionEffects);
+  const floor = useGameStore((s) => s.floor);
+  const zoneName = useGameStore((s) => s.zoneName);
 
   return (
-    <div
-      style={{
-        position: 'absolute',
-        top: 28,
-        left: 16,
-        right: 16,
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'flex-start',
-        pointerEvents: 'none',
-        color: '#fff',
-        textShadow: '0 1px 4px rgba(0,0,0,0.8)',
-        fontSize: 18,
-      }}
-    >
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, pointerEvents: 'auto' }}>
-        <div style={{ opacity: 0.7, fontSize: 13 }}>
-          WASD move &middot; Drag orbit &middot; Scroll zoom &middot; ←→ cycle
+    <>
+      <ZoneAnnouncement />
+      <div
+        style={{
+          position: 'absolute',
+          top: 28,
+          left: 16,
+          right: 16,
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'flex-start',
+          pointerEvents: 'none',
+          color: '#fff',
+          textShadow: '0 1px 4px rgba(0,0,0,0.8)',
+          fontSize: 18,
+        }}
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, pointerEvents: 'auto' }}>
+          <div style={{ opacity: 0.7, fontSize: 13 }}>
+            WASD move &middot; Drag orbit &middot; Scroll zoom &middot; ←→ cycle
+          </div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            {TOGGLE_KEYS.map((t) => {
+              const on = toggles[t.key];
+              return (
+                <button
+                  key={t.key}
+                  onClick={() => toggle(t.key)}
+                  style={{
+                    padding: '4px 10px',
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: on ? '#fff' : 'rgba(255,255,255,0.4)',
+                    background: on
+                      ? 'rgba(255,255,255,0.2)'
+                      : 'rgba(255,255,255,0.04)',
+                    border: on
+                      ? '1px solid rgba(255,255,255,0.4)'
+                      : '1px solid rgba(255,255,255,0.1)',
+                    borderRadius: 5,
+                    cursor: 'pointer',
+                    letterSpacing: 0.5,
+                    transition: 'all 0.15s',
+                    minWidth: 44,
+                    minHeight: 28,
+                  }}
+                >
+                  {t.label}
+                </button>
+              );
+            })}
+          </div>
         </div>
-        <div style={{ display: 'flex', gap: 6 }}>
-          {TOGGLE_KEYS.map((t) => {
-            const on = toggles[t.key];
-            return (
-              <button
-                key={t.key}
-                onClick={() => toggle(t.key)}
-                style={{
-                  padding: '4px 10px',
-                  fontSize: 11,
-                  fontWeight: 600,
-                  color: on ? '#fff' : 'rgba(255,255,255,0.4)',
-                  background: on
-                    ? 'rgba(255,255,255,0.2)'
-                    : 'rgba(255,255,255,0.04)',
-                  border: on
-                    ? '1px solid rgba(255,255,255,0.4)'
-                    : '1px solid rgba(255,255,255,0.1)',
-                  borderRadius: 5,
-                  cursor: 'pointer',
-                  letterSpacing: 0.5,
-                  transition: 'all 0.15s',
-                  minWidth: 44,
-                  minHeight: 28,
-                }}
-              >
-                {t.label}
-              </button>
-            );
-          })}
-        </div>
-      </div>
 
-      {/* Right-side stats */}
-      <div style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 6,
-        alignItems: 'flex-end',
-      }}>
-        {activeCharacterName && (
+        {/* Right-side stats */}
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 6,
+          alignItems: 'flex-end',
+        }}>
+          {/* Floor + Zone */}
           <div style={{
-            fontSize: 12,
-            fontWeight: 700,
-            letterSpacing: 1.5,
-            textTransform: 'uppercase',
-            color: activeCharacterColor ?? '#6af',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
             marginBottom: 2,
           }}>
-            {activeCharacterName}
+            <span style={{
+              fontSize: 11,
+              fontWeight: 600,
+              letterSpacing: 1,
+              color: 'rgba(255,255,255,0.5)',
+              textTransform: 'uppercase',
+            }}>
+              {zoneName}
+            </span>
+            <span style={{
+              fontSize: 13,
+              fontWeight: 700,
+              letterSpacing: 1,
+              color: '#aaccff',
+              background: 'rgba(100,150,255,0.15)',
+              border: '1px solid rgba(100,150,255,0.3)',
+              borderRadius: 4,
+              padding: '1px 6px',
+            }}>
+              F{floor}
+            </span>
           </div>
-        )}
-        <ActiveEffects effects={activePotionEffects} />
-        <HPBar hp={hp} maxHp={maxHp} />
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-          <Stat icon="💎" value={collectibles} color="#44ffaa" />
-          <Stat icon="🪙" value={coins} color="#ffd700" />
+          {activeCharacterName && (
+            <div style={{
+              fontSize: 12,
+              fontWeight: 700,
+              letterSpacing: 1.5,
+              textTransform: 'uppercase',
+              color: activeCharacterColor ?? '#6af',
+              marginBottom: 2,
+            }}>
+              {activeCharacterName}
+            </div>
+          )}
+          <ActiveEffects effects={activePotionEffects} />
+          <HPBar hp={hp} maxHp={maxHp} />
+          <HungerBar hunger={hunger} maxHunger={maxHunger} />
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+            <Stat icon="💎" value={collectibles} color="#44ffaa" />
+            <Stat icon="🪙" value={coins} color="#ffd700" />
+          </div>
         </div>
       </div>
-    </div>
+    </>
   );
 }
