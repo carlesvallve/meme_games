@@ -186,6 +186,9 @@ export class SpeechBubbleSystem {
 
     for (const b of this.bubbles) {
       const mesh = b.character.mesh;
+      // Follow mesh visibility: hide bubble when character is hidden/dimmed
+      if (!mesh.visible) continue;
+
       mesh.getWorldPosition(pos);
       // Shift bubble up when HP bar is visible
       const hpBarExtra = b.character.showingHpBar ? 0.1 : 0;
