@@ -739,6 +739,11 @@ export class Character implements BehaviorAgent {
   // ── HP bar ──────────────────────────────────────────────────────
 
   updateHpBar(camera: THREE.Camera): void {
+    // HP bar follows mesh visibility: hidden when character is hidden/dimmed
+    if (!this.mesh.visible) {
+      this.hpBar.hide();
+      return;
+    }
     this.hpBar.update(
       this.mesh.position,
       this.hp,
