@@ -59,6 +59,12 @@ export class HeightmapBuilder {
       this.ctx.waterMaterial.uniforms.uDeepColor.value.set(pal.waterDeep);
     }
 
+    // Update basic floor plane color
+    if (this.ctx.preset === 'basic' && this.ctx.waterMesh) {
+      const mat = this.ctx.waterMesh.material as THREE.MeshStandardMaterial;
+      if (mat.color) mat.color.set(pal.flat);
+    }
+
     // Recolor heightmap mesh vertices
     if (!this.ctx.heightmapMesh || !this.ctx.heightmapData) return;
     const geo = this.ctx.heightmapMesh.geometry;

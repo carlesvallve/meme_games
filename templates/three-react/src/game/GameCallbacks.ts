@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { useGameStore, DEFAULT_CAMERA_PARAMS, DEFAULT_LIGHT_PRESET, DEFAULT_TORCH_PARAMS, DEFAULT_PARTICLE_TOGGLES, DEFAULT_SCENE_SETTINGS, DEFAULT_ENEMY_PARAMS } from '../store';
 import { DEFAULT_CHARACTER_PARAMS } from './character';
-import { randomPalette } from './terrain';
+import { randomPalette, palettes } from './terrain';
 import { audioSystem } from '../utils/AudioSystem';
 import { POTION_COLORS, EFFECT_META } from './combat';
 import { rerollRoster, VOX_HEROES, VOX_ENEMIES, voxRoster, getCharacterName, getArchetype, getCharacterStats, randomInRange, CHARACTER_TEAM_COLORS } from './character';
@@ -123,6 +123,17 @@ export function createCallbacks(
       useGameStore.getState().setPaletteActive(name);
       ctx.sceneSky.setPalette(name);
     },
+    onApplyPalette: (name: string) => {
+      if (name === 'random') {
+        useGameStore.getState().onRandomizePalette?.();
+        return;
+      }
+      const pal = palettes[name];
+      if (!pal) return;
+      ctx.terrain.applyPalette(pal, name);
+      useGameStore.getState().setPaletteActive(name);
+      ctx.sceneSky.setPalette(name);
+    },
     onResetCharacterParams: () => {
       const d = DEFAULT_CHARACTER_PARAMS;
       const store = useGameStore.getState();
@@ -188,7 +199,6 @@ export function createCallbacks(
       store.setTerrainPreset(d.terrainPreset);
       store.setHeightmapStyle(d.heightmapStyle);
       store.setPaletteName(d.paletteName);
-      store.setWallGap(d.wallGap);
       store.setGridOpacity(d.gridOpacity);
       store.setResolutionScale(d.resolutionScale);
       store.setRoomLabels(d.roomLabels);

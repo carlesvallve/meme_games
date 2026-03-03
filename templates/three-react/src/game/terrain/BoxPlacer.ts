@@ -1,15 +1,12 @@
 /**
  * BoxPlacer — box-based debris and ramp placement.
  *
- * Only used by the `scattered` and `terraced` terrain presets (boxy modes).
+ * Only used by the `basic` terrain preset (boxy mode).
  * Not used by `heightmap` or dungeon presets.
  *
  * Responsibilities:
  *  - createScatteredDebris()  Place random boxes (150 by default) with 20% tall
  *                             walls, then add smart ramps to bridge drops.
- *  - createTerracedDebris()   Place clustered/terraced boxes around peak anchors
- *                             with concentric rings of decreasing height, plus
- *                             filler rubble, then smart ramps.
  *  - placeBox()               Place a single axis-aligned box with z-fight
  *                             detection, grid overlay, and entity registration.
  *  - placeSmartRamps()        Scan existing boxes for elevation drops and place
@@ -40,8 +37,8 @@ interface TerrainPresetConfig {
 }
 
 const PRESET_CONFIGS: Record<TerrainPreset, TerrainPresetConfig> = {
-  /** Original scattered debris — mostly low rubble with 20% tall walls */
-  scattered: {
+  /** Basic scattered debris — mostly low rubble with 20% tall walls */
+  basic: {
     count: 150,
     spawnClear: 1.5,
     generateBox() {
@@ -58,34 +55,10 @@ const PRESET_CONFIGS: Record<TerrainPreset, TerrainPresetConfig> = {
     },
   },
 
-  /** Progressive terraced elevations — deliberate staircase clusters */
-  terraced: {
-    count: 0,
-    spawnClear: 4,
-    generateBox() { return { w: 1, d: 1, h: 0.5 }; },
-    generatePos() { return null; },
-  },
-
   /** Noise-based heightmap terrain — real mesh via TerrainNoise */
   heightmap: {
     count: 0,
     spawnClear: 4,
-    generateBox() { return { w: 1, d: 1, h: 0.5 }; },
-    generatePos() { return null; },
-  },
-
-  /** BSP-partitioned dungeon with rooms, corridors, and walls */
-  dungeon: {
-    count: 0,
-    spawnClear: 0,
-    generateBox() { return { w: 1, d: 1, h: 0.5 }; },
-    generatePos() { return null; },
-  },
-
-  /** Simple random room placement with corridors */
-  rooms: {
-    count: 0,
-    spawnClear: 0,
     generateBox() { return { w: 1, d: 1, h: 0.5 }; },
     generatePos() { return null; },
   },
@@ -121,76 +94,6 @@ export class BoxPlacer {
       if (!pos) continue;
       if (Math.abs(pos.x) < spawnClear && Math.abs(pos.z) < spawnClear) continue;
       this.placeBox(pos.x, pos.z, w, d, h);
-    }
-
-    this.placeSmartRamps(halfGround, spawnClear);
-  }
-
-  createTerracedDebris(): void {
-    const halfGround = this.ctx.groundSize / 2 - 2;
-    const spawnClear = 2;
-
-    const clusterCount = 5 + Math.floor(Math.random() * 4);
-    const anchors: { x: number; z: number }[] = [];
-
-    for (let c = 0; c < clusterCount; c++) {
-      let ax = 0, az = 0;
-      for (let attempt = 0; attempt < 20; attempt++) {
-        ax = (Math.random() - 0.5) * halfGround * 1.6;
-        az = (Math.random() - 0.5) * halfGround * 1.6;
-        if (Math.abs(ax) < spawnClear + 1 && Math.abs(az) < spawnClear + 1) continue;
-        const tooClose = anchors.some(a =>
-          Math.abs(ax - a.x) < 3 && Math.abs(az - a.z) < 3
-        );
-        if (!tooClose) break;
-      }
-      anchors.push({ x: ax, z: az });
-
-      const maxSteps = 3 + Math.floor(Math.random() * 4);
-      const baseAngle = Math.random() * Math.PI * 2;
-      const spread = 0.4 + Math.random() * 0.6;
-
-      for (let step = 0; step < maxSteps; step++) {
-        const h = snapHalf((step + 1) * 0.25);
-        const ringBoxes = Math.max(1, Math.floor((maxSteps - step) * (2 + Math.random())));
-
-        for (let b = 0; b < ringBoxes; b++) {
-          const w = snapHalf(0.5 + Math.random() * 1);
-          const d = snapHalf(0.5 + Math.random() * 1);
-
-          const ringRadius = (maxSteps - step) * 0.6 + Math.random() * 0.75;
-          const angle = baseAngle + (b / ringBoxes) * Math.PI * 2 * spread +
-            (Math.random() - 0.5) * 0.5;
-          const bxVal = snapPos(ax + Math.cos(angle) * ringRadius, w / 2);
-          const bzVal = snapPos(az + Math.sin(angle) * ringRadius, d / 2);
-
-          if (Math.abs(bxVal) > halfGround || Math.abs(bzVal) > halfGround) continue;
-          if (Math.abs(bxVal) < spawnClear && Math.abs(bzVal) < spawnClear) continue;
-
-          this.placeBox(bxVal, bzVal, w, d, h);
-        }
-      }
-
-      const peakW = snapHalf(0.5 + Math.random() * 0.75);
-      const peakD = snapHalf(0.5 + Math.random() * 0.75);
-      const peakH = snapHalf((maxSteps + 1) * 0.25);
-      const px = snapPos(ax, peakW / 2);
-      const pz = snapPos(az, peakD / 2);
-      if (Math.abs(px) < halfGround && Math.abs(pz) < halfGround) {
-        this.placeBox(px, pz, peakW, peakD, peakH);
-      }
-    }
-
-    const fillerCount = 60;
-    for (let i = 0; i < fillerCount; i++) {
-      const w = snapHalf(0.25 + Math.random() * 0.75);
-      const d = snapHalf(0.25 + Math.random() * 0.75);
-      const isTall = Math.random() < 0.15;
-      const h = snapHalf(isTall ? 1 + Math.random() * 1.25 : 0.15 + Math.random() * 0.25);
-      const x = snapPos((Math.random() - 0.5) * halfGround * 2, w / 2);
-      const z = snapPos((Math.random() - 0.5) * halfGround * 2, d / 2);
-      if (Math.abs(x) < spawnClear && Math.abs(z) < spawnClear) continue;
-      this.placeBox(x, z, w, d, h);
     }
 
     this.placeSmartRamps(halfGround, spawnClear);

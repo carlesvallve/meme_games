@@ -37,12 +37,12 @@ export class WaterSystem {
     geo.rotateX(-Math.PI / 2);
 
     // Dungeon modes have their own floors — no water plane needed
-    if (this.ctx.preset === 'dungeon' || this.ctx.preset === 'rooms' || this.ctx.preset === 'voxelDungeon') {
+    if (this.ctx.preset === 'voxelDungeon') {
       return;
     }
 
-    // Scattered / terraced: solid floor plane instead of water
-    if (this.ctx.preset === 'scattered' || this.ctx.preset === 'terraced') {
+    // Basic: solid floor plane instead of water
+    if (this.ctx.preset === 'basic') {
       const floorMat = new THREE.MeshStandardMaterial({
         color: this.ctx.palette.flat,
         roughness: 0.95,

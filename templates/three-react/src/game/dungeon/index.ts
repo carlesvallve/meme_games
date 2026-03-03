@@ -1,5 +1,5 @@
 // Dungeon generation
-export { generateDungeon, generateBSPDungeon, generateAdjacentRooms, convertToBoxDefs } from './DungeonGenerator';
+export { generateDungeon, generateBSPDungeon, convertToBoxDefs } from './DungeonGenerator';
 export type { BoxDef, WalkMask, DoorDef, DungeonOutput, DungeonResult } from './DungeonGenerator';
 
 // Voxel dungeon

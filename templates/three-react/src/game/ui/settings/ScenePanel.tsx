@@ -1,4 +1,4 @@
-import { useGameStore, DEFAULT_POST_PROCESS } from '../../../store';
+import { useGameStore } from '../../../store';
 import type { TerrainPreset } from '../../terrain';
 import type { HeightmapStyle } from '../../terrain';
 import { palettes } from '../../terrain';
@@ -12,6 +12,7 @@ import {
   SettingsWindow,
   Section,
   Slider,
+  RangeSlider,
   Toggle,
   btnStyle,
   resetBtnStyle,
@@ -43,10 +44,10 @@ export function ScenePanel() {
   const setPaletteName = useGameStore((s) => s.setPaletteName);
   const gridOpacity = useGameStore((s) => s.gridOpacity);
   const setGridOpacity = useGameStore((s) => s.setGridOpacity);
-  const wallGap = useGameStore((s) => s.wallGap);
-  const setWallGap = useGameStore((s) => s.setWallGap);
   const roomSpacing = useGameStore((s) => s.roomSpacing);
   const setRoomSpacing = useGameStore((s) => s.setRoomSpacing);
+  const roomSpacingMax = useGameStore((s) => s.roomSpacingMax);
+  const setRoomSpacingMax = useGameStore((s) => s.setRoomSpacingMax);
   const tileSize = useGameStore((s) => s.tileSize);
   const setTileSize = useGameStore((s) => s.setTileSize);
   const resolutionScale = useGameStore((s) => s.resolutionScale);
@@ -74,12 +75,11 @@ export function ScenePanel() {
   const propCategories = PROP_CATEGORIES;
   const dungeonVariant = useGameStore((s) => s.dungeonVariant);
   const setDungeonVariant = useGameStore((s) => s.setDungeonVariant);
-  const postProcess = useGameStore((s) => s.postProcess);
-  const setPostProcess = useGameStore((s) => s.setPostProcess);
   const hmrCacheEnabled = useGameStore((s) => s.hmrCacheEnabled);
   const setHmrCacheEnabled = useGameStore((s) => s.setHmrCacheEnabled);
   const remesh = useGameStore((s) => s.onRemesh);
   const randomizePalette = useGameStore((s) => s.onRandomizePalette);
+  const applyPalette = useGameStore((s) => s.onApplyPalette);
   const forceStairs = useGameStore((s) => s.forceStairs);
   const setForceStairs = useGameStore((s) => s.setForceStairs);
   const progressiveLayout = useGameStore((s) => s.progressiveLayout);
@@ -87,15 +87,12 @@ export function ScenePanel() {
 
   const hasPresetSettings =
     terrainPreset === 'heightmap' ||
-    terrainPreset === 'rooms' ||
     terrainPreset === 'voxelDungeon';
 
   const presetLabel =
     terrainPreset === 'voxelDungeon'
       ? 'Voxel Dungeon'
-      : terrainPreset === 'rooms'
-        ? 'Rooms'
-        : 'Heightmap';
+      : 'Heightmap';
 
   return (
     <SettingsWindow>
@@ -139,11 +136,11 @@ export function ScenePanel() {
             }}
           >
             <div style={{ display: 'flex', gap: 3 }}>
-              {(['scattered', 'terraced', 'heightmap'] as TerrainPreset[]).map(
+              {(['basic', 'heightmap'] as TerrainPreset[]).map(
                 (p) => (
                   <button
                     key={p}
-                    onClick={() => setTerrainPreset(p)}
+                    onClick={() => { setTerrainPreset(p); regenerate?.(); }}
                     style={{
                       ...btnStyle(terrainPreset === p),
                       flex: 1,
@@ -156,21 +153,16 @@ export function ScenePanel() {
               )}
             </div>
             <div style={{ display: 'flex', gap: 3 }}>
-              {(['dungeon', 'rooms', 'voxelDungeon'] as TerrainPreset[]).map(
-                (p) => (
-                  <button
-                    key={p}
-                    onClick={() => setTerrainPreset(p)}
-                    style={{
-                      ...btnStyle(terrainPreset === p),
-                      flex: 1,
-                      textTransform: 'capitalize',
-                    }}
-                  >
-                    {p}
-                  </button>
-                ),
-              )}
+              <button
+                onClick={() => { setTerrainPreset('voxelDungeon'); regenerate?.(); }}
+                style={{
+                  ...btnStyle(terrainPreset === 'voxelDungeon'),
+                  flex: 1,
+                  textTransform: 'capitalize',
+                }}
+              >
+                voxelDungeon
+              </button>
             </div>
           </div>
         </div>
@@ -223,26 +215,15 @@ export function ScenePanel() {
             </>
           )}
 
-          {terrainPreset === 'rooms' && (
-            <Slider
-              label='Wall Gap'
-              value={wallGap}
-              min={0}
-              max={4}
-              step={1}
-              onChange={(v) => setWallGap(Math.round(v))}
-            />
-          )}
-
           {terrainPreset === 'voxelDungeon' && (
             <>
-              <Slider
+              <RangeSlider
                 label='Room Gap'
-                value={roomSpacing}
+                value={[roomSpacing, roomSpacingMax]}
                 min={1}
                 max={8}
                 step={1}
-                onChange={(v) => setRoomSpacing(Math.round(v))}
+                onChange={([lo, hi]) => { setRoomSpacing(Math.round(lo)); setRoomSpacingMax(Math.round(hi)); }}
               />
               <Slider
                 label='Dungeon Size'
@@ -373,7 +354,7 @@ export function ScenePanel() {
           </span>
           <select
             value={paletteName}
-            onChange={(e) => setPaletteName(e.target.value)}
+            onChange={(e) => { setPaletteName(e.target.value); applyPalette?.(e.target.value); }}
             style={{ ...selectStyle, textTransform: 'capitalize' }}
           >
             {PALETTE_NAMES.map((name) => (
@@ -430,215 +411,6 @@ export function ScenePanel() {
           value={hmrCacheEnabled}
           onChange={setHmrCacheEnabled}
         />
-      </Section>
-
-      {/* ── POST FX ── */}
-      <Section label='Post FX'>
-        <Toggle
-          label='Enabled'
-          value={postProcess.enabled}
-          onChange={(v) => setPostProcess({ ...postProcess, enabled: v })}
-        />
-        {postProcess.enabled && (
-          <>
-            <Toggle
-              label='Bloom'
-              value={postProcess.bloom.enabled}
-              onChange={(v) =>
-                setPostProcess({
-                  ...postProcess,
-                  bloom: { ...postProcess.bloom, enabled: v },
-                })
-              }
-            />
-            {postProcess.bloom.enabled && (
-              <>
-                <Slider
-                  label='Strength'
-                  value={postProcess.bloom.strength}
-                  min={0}
-                  max={2}
-                  step={0.05}
-                  onChange={(v) =>
-                    setPostProcess({
-                      ...postProcess,
-                      bloom: { ...postProcess.bloom, strength: v },
-                    })
-                  }
-                />
-                <Slider
-                  label='Radius'
-                  value={postProcess.bloom.radius}
-                  min={0}
-                  max={1}
-                  step={0.05}
-                  onChange={(v) =>
-                    setPostProcess({
-                      ...postProcess,
-                      bloom: { ...postProcess.bloom, radius: v },
-                    })
-                  }
-                />
-                <Slider
-                  label='Threshold'
-                  value={postProcess.bloom.threshold}
-                  min={0}
-                  max={1}
-                  step={0.05}
-                  onChange={(v) =>
-                    setPostProcess({
-                      ...postProcess,
-                      bloom: { ...postProcess.bloom, threshold: v },
-                    })
-                  }
-                />
-              </>
-            )}
-
-            <Toggle
-              label='SSAO'
-              value={postProcess.ssao.enabled}
-              onChange={(v) =>
-                setPostProcess({
-                  ...postProcess,
-                  ssao: { ...postProcess.ssao, enabled: v },
-                })
-              }
-            />
-            {postProcess.ssao.enabled && (
-              <>
-                <Slider
-                  label='Radius'
-                  value={postProcess.ssao.radius}
-                  min={0.01}
-                  max={2}
-                  step={0.01}
-                  onChange={(v) =>
-                    setPostProcess({
-                      ...postProcess,
-                      ssao: { ...postProcess.ssao, radius: v },
-                    })
-                  }
-                />
-                <Slider
-                  label='Max Dist'
-                  value={postProcess.ssao.maxDistance}
-                  min={0.01}
-                  max={0.5}
-                  step={0.01}
-                  onChange={(v) =>
-                    setPostProcess({
-                      ...postProcess,
-                      ssao: { ...postProcess.ssao, maxDistance: v },
-                    })
-                  }
-                />
-              </>
-            )}
-
-            <Toggle
-              label='Vignette'
-              value={postProcess.vignette.enabled}
-              onChange={(v) =>
-                setPostProcess({
-                  ...postProcess,
-                  vignette: { ...postProcess.vignette, enabled: v },
-                })
-              }
-            />
-            {postProcess.vignette.enabled && (
-              <>
-                <Slider
-                  label='Offset'
-                  value={postProcess.vignette.offset}
-                  min={0}
-                  max={3}
-                  step={0.1}
-                  onChange={(v) =>
-                    setPostProcess({
-                      ...postProcess,
-                      vignette: { ...postProcess.vignette, offset: v },
-                    })
-                  }
-                />
-                <Slider
-                  label='Darkness'
-                  value={postProcess.vignette.darkness}
-                  min={0}
-                  max={3}
-                  step={0.1}
-                  onChange={(v) =>
-                    setPostProcess({
-                      ...postProcess,
-                      vignette: { ...postProcess.vignette, darkness: v },
-                    })
-                  }
-                />
-              </>
-            )}
-
-            <Toggle
-              label='Color Grade'
-              value={postProcess.colorGrade.enabled}
-              onChange={(v) =>
-                setPostProcess({
-                  ...postProcess,
-                  colorGrade: { ...postProcess.colorGrade, enabled: v },
-                })
-              }
-            />
-            {postProcess.colorGrade.enabled && (
-              <>
-                <Slider
-                  label='Brightness'
-                  value={postProcess.colorGrade.brightness}
-                  min={-0.5}
-                  max={0.5}
-                  step={0.01}
-                  onChange={(v) =>
-                    setPostProcess({
-                      ...postProcess,
-                      colorGrade: { ...postProcess.colorGrade, brightness: v },
-                    })
-                  }
-                />
-                <Slider
-                  label='Contrast'
-                  value={postProcess.colorGrade.contrast}
-                  min={-0.5}
-                  max={0.5}
-                  step={0.01}
-                  onChange={(v) =>
-                    setPostProcess({
-                      ...postProcess,
-                      colorGrade: { ...postProcess.colorGrade, contrast: v },
-                    })
-                  }
-                />
-                <Slider
-                  label='Saturation'
-                  value={postProcess.colorGrade.saturation}
-                  min={-1}
-                  max={1}
-                  step={0.01}
-                  onChange={(v) =>
-                    setPostProcess({
-                      ...postProcess,
-                      colorGrade: { ...postProcess.colorGrade, saturation: v },
-                    })
-                  }
-                />
-              </>
-            )}
-
-            <button
-              onClick={() => setPostProcess({ ...DEFAULT_POST_PROCESS })}
-              style={resetBtnStyle}
-            >
-              Reset PostFX
-            </button>
-          </>
-        )}
       </Section>
 
       {/* Buttons */}

@@ -31,7 +31,7 @@ export class Environment implements TerrainLike {
 
   constructor(
     scene: THREE.Scene,
-    preset: TerrainPreset = 'scattered',
+    preset: TerrainPreset = 'basic',
     heightmapStyle: HeightmapStyle = 'rolling',
     palettePick: string = 'random',
     dungeonSeed?: number,
@@ -95,12 +95,8 @@ export class Environment implements TerrainLike {
     const preset = this.ctx.preset;
     if (preset === 'heightmap') {
       this.terrainBuilder.createHeightmapMesh();
-    } else if (preset === 'terraced') {
-      this.terrainBuilder.createTerracedDebris();
     } else if (preset === 'voxelDungeon') {
       this.dungeonBuilder.createVoxelDungeonDebris();
-    } else if (preset === 'dungeon' || preset === 'rooms') {
-      this.dungeonBuilder.createDungeonDebris();
     } else {
       this.terrainBuilder.createScatteredDebris();
     }
