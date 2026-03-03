@@ -15,6 +15,8 @@ export interface BehaviorAgent {
   getFacing(): number;
   /** Set facing angle (radians) and sync mesh rotation */
   setFacing(angle: number): void;
+  /** Whether the character is alive */
+  readonly isAlive: boolean;
   /** If implemented, called once after agent took damage (so behavior can clear settle/speed and avoid walk-after-hit). */
   consumeJustTookDamage?(): boolean;
   /** Start climbing a ladder */

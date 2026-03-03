@@ -174,7 +174,7 @@ export function CharacterSelect() {
 
   // Cleanup previews on unmount
   useEffect(() => {
-    return () => { voxPreviewManager.clear(); };
+    return () => { voxPreviewManager.dispose(); };
   }, []);
 
   const confirmCard = useCallback(

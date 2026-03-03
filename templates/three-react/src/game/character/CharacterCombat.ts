@@ -317,7 +317,12 @@ export class CharacterCombat {
 
     // ── HP Regeneration ───────────────────────────────────────────────
     this.timeSinceLastDamage += dt;
+    // Only regen while active (moving/attacking/recently hit) — matches hunger decay logic
+    const regenActive = this.hungerEnabled
+      ? (owner.isMoving || this.isAttacking || this.timeSinceLastDamage < 1.0)
+      : true; // enemies always regen
     if (
+      regenActive &&
       this.isAlive &&
       this.hp < this.maxHp &&
       this.timeSinceLastDamage >= this.regenDelay

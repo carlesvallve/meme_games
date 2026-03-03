@@ -8,6 +8,7 @@ export { updateReveal, patchSceneArchitecture, revealUniforms } from './RevealSh
 export { DeathSequence } from './DeathSequence';
 export {
   updateDayCycle,
+  applyDungeonLighting,
   computeSunDirection,
   createSunDebugHelper,
   updateSunDebug,

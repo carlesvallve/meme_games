@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { LIGHT_DEFAULTS, LIGHT_PRESET_SCALES, LIGHT_EXTERIOR_SCALE } from '../../store';
 import type { LightPreset } from '../../store';
 import { ProceduralSky, createSunLensflare, getSkyColors, type SkyColors } from './Sky';
 
@@ -20,31 +21,14 @@ export interface SceneSky {
   dispose: () => void;
 }
 
-// Store default intensities so presets can scale them
-const DEFAULTS = {
-  ambient: 1.0,
-  dirPrimary: 2.0,
-  dirFill: 1.0,
-  dirRim: 0.7,
-  hemi: 0.8,
-};
-
-const PRESET_SCALES: Record<LightPreset, number> = {
-  default: 1.5,
-  bright: 2.5,
-  dark: 0.15,
-  none: 0,
-};
-
-
 export function applyLightPreset(lights: SceneLights, preset: LightPreset, isExterior = false): void {
-  const s = PRESET_SCALES[preset];
-  const ext = isExterior ? 1.6 : 1;
-  lights.ambient.intensity = DEFAULTS.ambient * s * ext;
-  lights.dirPrimary.intensity = DEFAULTS.dirPrimary * s * ext;
-  lights.dirFill.intensity = DEFAULTS.dirFill * s * ext;
-  lights.dirRim.intensity = DEFAULTS.dirRim * s * ext;
-  lights.hemi.intensity = DEFAULTS.hemi * s * ext;
+  const s = LIGHT_PRESET_SCALES[preset];
+  const ext = isExterior ? LIGHT_EXTERIOR_SCALE : 1;
+  lights.ambient.intensity = LIGHT_DEFAULTS.ambient * s * ext;
+  lights.dirPrimary.intensity = LIGHT_DEFAULTS.dirPrimary * s * ext;
+  lights.dirFill.intensity = LIGHT_DEFAULTS.dirFill * s * ext;
+  lights.dirRim.intensity = LIGHT_DEFAULTS.dirRim * s * ext;
+  lights.hemi.intensity = LIGHT_DEFAULTS.hemi * s * ext;
 }
 
 export function createScene(paletteName = 'meadow'): { scene: THREE.Scene; lights: SceneLights; sceneSky: SceneSky } {
@@ -52,11 +36,11 @@ export function createScene(paletteName = 'meadow'): { scene: THREE.Scene; light
   scene.background = null; // sky mesh replaces solid background
 
   // Ambient light
-  const ambient = new THREE.AmbientLight(0x7070a0, DEFAULTS.ambient);
+  const ambient = new THREE.AmbientLight(0x7070a0, LIGHT_DEFAULTS.ambient);
   scene.add(ambient);
 
   // Primary directional (with shadows)
-  const dirPrimary = new THREE.DirectionalLight(0xffffff, DEFAULTS.dirPrimary);
+  const dirPrimary = new THREE.DirectionalLight(0xffffff, LIGHT_DEFAULTS.dirPrimary);
   dirPrimary.position.set(8, 30, 10);
   dirPrimary.castShadow = true;
   dirPrimary.shadow.mapSize.set(2048, 2048);
@@ -70,12 +54,12 @@ export function createScene(paletteName = 'meadow'): { scene: THREE.Scene; light
   scene.add(dirPrimary);
 
   // Fill directional
-  const dirFill = new THREE.DirectionalLight(0x6a6a8a, DEFAULTS.dirFill);
+  const dirFill = new THREE.DirectionalLight(0x6a6a8a, LIGHT_DEFAULTS.dirFill);
   dirFill.position.set(-12, 15, -8);
   scene.add(dirFill);
 
   // Rim directional
-  const dirRim = new THREE.DirectionalLight(0x8888aa, DEFAULTS.dirRim);
+  const dirRim = new THREE.DirectionalLight(0x8888aa, LIGHT_DEFAULTS.dirRim);
   dirRim.position.set(5, 8, -15);
   scene.add(dirRim);
 
@@ -93,7 +77,7 @@ export function createScene(paletteName = 'meadow'): { scene: THREE.Scene; light
   scene.add(dirMoon);
 
   // Hemisphere
-  const hemi = new THREE.HemisphereLight(0x8080b0, 0x2a2a45, DEFAULTS.hemi);
+  const hemi = new THREE.HemisphereLight(0x8080b0, 0x2a2a45, LIGHT_DEFAULTS.hemi);
   scene.add(hemi);
 
   // Procedural sky + lensflare

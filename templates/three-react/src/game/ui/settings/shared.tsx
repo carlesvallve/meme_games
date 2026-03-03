@@ -108,7 +108,17 @@ export const selectStyle: React.CSSProperties = {
 
 export function SettingsWindow({ children }: { children: React.ReactNode }) {
   useEffect(() => { injectRangeStyles(); }, []);
-  return <div style={{ ...panelStyle, marginBottom: 8 }}>{children}</div>;
+  return (
+    <div
+      style={{ ...panelStyle, marginBottom: 8, touchAction: 'pan-y' }}
+      onPointerDown={(e) => e.stopPropagation()}
+      onPointerMove={(e) => e.stopPropagation()}
+      onTouchMove={(e) => e.stopPropagation()}
+      onWheel={(e) => e.stopPropagation()}
+    >
+      {children}
+    </div>
+  );
 }
 
 export function Toggle({ label, value, onChange }: { label: string; value: boolean; onChange: (v: boolean) => void }) {
