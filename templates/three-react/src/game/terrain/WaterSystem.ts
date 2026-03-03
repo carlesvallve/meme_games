@@ -18,6 +18,8 @@
 
 import * as THREE from 'three';
 import { EnvironmentContext } from '../environment/EnvironmentContext';
+import { useGameStore } from '../../store';
+import { computeDayLightScale } from '../rendering/DayCycle';
 
 export class WaterSystem {
   private ctx: EnvironmentContext;
@@ -77,6 +79,7 @@ export class WaterSystem {
         uCameraNear: { value: 0.1 },
         uCameraFar: { value: 100 },
         uResolution: { value: new THREE.Vector2(1024, 1024) },
+        uLightScale: { value: 1.0 },
       },
       vertexShader: /* glsl */ `
         uniform float uTime;
@@ -104,6 +107,7 @@ export class WaterSystem {
         uniform float uCameraNear;
         uniform float uCameraFar;
         uniform vec2 uResolution;
+        uniform float uLightScale;
         varying vec4 vScreenPos;
         varying vec3 vWorldPos;
         varying float vViewZ;
@@ -182,7 +186,8 @@ export class WaterSystem {
           float foamLine = (foamSum / totalWeight) * 0.9;
 
           float foam = min(0.9, foamLine);
-          col = mix(col, vec3(1.0), foam);
+          vec3 foamColor = vec3(uLightScale);
+          col = mix(col, foamColor, foam);
 
           // Alpha: fade in smoothly, more opaque deep
           float alpha = smoothstep(0.0, 0.5, animDepth) * 0.6;
@@ -205,6 +210,10 @@ export class WaterSystem {
   updateWater(dt: number, renderer?: THREE.WebGLRenderer, scene?: THREE.Scene, camera?: THREE.Camera): void {
     if (!this.ctx.waterMaterial) return;
     this.ctx.waterMaterial.uniforms.uTime.value += dt;
+
+    // Sync foam brightness with day/night cycle
+    const timeOfDay = useGameStore.getState().timeOfDay;
+    this.ctx.waterMaterial.uniforms.uLightScale.value = computeDayLightScale(timeOfDay);
 
     if (renderer && scene && camera && this.ctx.depthTarget && this.ctx.waterMesh) {
       // Update camera uniforms

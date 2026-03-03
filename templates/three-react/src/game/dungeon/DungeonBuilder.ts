@@ -712,7 +712,7 @@ export class DungeonBuilder {
       }
 
       // Register prop debris boxes for physical collision (keyboard movement)
-      const propDebris = this.ctx.propSystem.getDebrisBoxes();
+      const propDebris = this.ctx.propSystem!.getDebrisBoxes();
       for (const d of propDebris) d.isProp = true;
       this.ctx.debris.push(...propDebris);
 

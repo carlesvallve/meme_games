@@ -34,6 +34,9 @@ export class PlayerControl extends Behavior {
   }
 
   update(agent: BehaviorAgent, dt: number): BehaviorStatus {
+    // Stop all input when dead
+    if (!agent.isAlive) return 'running';
+
     // Clear movement state when player just took damage so we don't walk (e.g. grid settle) after hit
     if (agent.consumeJustTookDamage?.()) {
       this.settleTarget = null;

@@ -5,6 +5,7 @@ import {
   updateReveal,
   patchSceneArchitecture,
   updateDayCycle,
+  applyDungeonLighting,
   createSunDebugHelper,
   updateSunDebug,
   disposeSunDebugHelper,
@@ -390,7 +391,8 @@ export function createGameLoop(
           if (!enemiesOn && enemy.mesh.visible) enemy.mesh.visible = false;
         }
         if (!enemiesOn) {
-          // Skip update & spawning entirely when enemies disabled
+          // Skip update & spawning, but still tick VFX (pickup labels, damage numbers)
+          ctx.enemySystem.vfx.update(gameDt);
         } else {
         const showSlashEffect =
           useGameStore.getState().characterParams.melee.showSlashEffect;
@@ -410,6 +412,7 @@ export function createGameLoop(
             s.setHP(newHp, s.maxHp);
             playerChar.hp = newHp;
             if (newHp <= 0) {
+              playerChar.isAlive = false;
               triggerPlayerDeath(playerChar);
             }
           },
@@ -675,41 +678,53 @@ export function createGameLoop(
       ctx.currentLightPreset = preset;
       ctx.lastIsExterior = isExterior;
 
-      // Advance day cycle if enabled
+      // Lighting: dungeons use static interior lighting, exteriors use day cycle
       const store = useGameStore.getState();
-      let timeOfDay = store.timeOfDay;
-      if (store.dayCycleEnabled) {
-        const isNight = timeOfDay >= 18 || timeOfDay < 6;
-        const speedMul = (store.fastNights && isNight) ? 2.0 : 1.0;
-        timeOfDay = (timeOfDay + dt * store.dayCycleSpeed * speedMul) % 24;
-        useGameStore.setState({ timeOfDay });
-      }
+      if (isDungeonPreset) {
+        // Static interior lighting — no day cycle, no moon, single shadow pass
+        applyDungeonLighting(ctx.sceneLights, preset);
 
-      // Update day cycle (handles lights, sky, fog, stars)
-      updateDayCycle(
-        ctx.sceneLights,
-        ctx.sceneSky,
-        preset,
-        isExterior,
-        timeOfDay,
-        ctx.baseSkyColors,
-        ctx.scene.fog as THREE.Fog | null,
-      );
+        // Clean up sun debug helper if switching from exterior
+        if (ctx.sunDebugHelper) {
+          disposeSunDebugHelper(ctx.scene, ctx.sunDebugHelper);
+          ctx.sunDebugHelper = null;
+        }
+      } else {
+        // Advance day cycle if enabled
+        let timeOfDay = store.timeOfDay;
+        if (store.dayCycleEnabled) {
+          const isNight = timeOfDay >= 18 || timeOfDay < 6;
+          const speedMul = (store.fastNights && isNight) ? 2.0 : 1.0;
+          timeOfDay = (timeOfDay + dt * store.dayCycleSpeed * speedMul) % 24;
+          useGameStore.setState({ timeOfDay });
+        }
 
-      // Sun debug helper
-      const sunDebugWanted = store.sunDebug;
-      if (sunDebugWanted && !ctx.sunDebugHelper) {
-        ctx.sunDebugHelper = createSunDebugHelper(ctx.scene);
-      } else if (!sunDebugWanted && ctx.sunDebugHelper) {
-        disposeSunDebugHelper(ctx.scene, ctx.sunDebugHelper);
-        ctx.sunDebugHelper = null;
-      }
-      if (ctx.sunDebugHelper) {
-        const sunDir = computeSunDirection(timeOfDay);
-        const camTarget = ctx.activeCharacter
-          ? new THREE.Vector3(pp.x, ctx.activeCharacter.mesh.position.y + 2, pp.z)
-          : ctx.cam.camera.position;
-        updateSunDebug(ctx.sunDebugHelper, sunDir, camTarget);
+        // Update day cycle (handles lights, sky, fog, stars)
+        updateDayCycle(
+          ctx.sceneLights,
+          ctx.sceneSky,
+          preset,
+          isExterior,
+          timeOfDay,
+          ctx.baseSkyColors,
+          ctx.scene.fog as THREE.Fog | null,
+        );
+
+        // Sun debug helper
+        const sunDebugWanted = store.sunDebug;
+        if (sunDebugWanted && !ctx.sunDebugHelper) {
+          ctx.sunDebugHelper = createSunDebugHelper(ctx.scene);
+        } else if (!sunDebugWanted && ctx.sunDebugHelper) {
+          disposeSunDebugHelper(ctx.scene, ctx.sunDebugHelper);
+          ctx.sunDebugHelper = null;
+        }
+        if (ctx.sunDebugHelper) {
+          const sunDir = computeSunDirection(store.timeOfDay);
+          const camTarget = ctx.activeCharacter
+            ? new THREE.Vector3(pp.x, ctx.activeCharacter.mesh.position.y + 2, pp.z)
+            : ctx.cam.camera.position;
+          updateSunDebug(ctx.sunDebugHelper, sunDir, camTarget);
+        }
       }
 
       // Sync grid opacity

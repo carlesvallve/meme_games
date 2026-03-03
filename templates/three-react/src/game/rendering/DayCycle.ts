@@ -100,12 +100,12 @@ function brightenColor(hex: number, factor: number): number {
 /** Build a bright daytime version of the palette's own sky colors. */
 function buildDayColors(palette: SkyColors): SkyColors {
   return {
-    zenith: brightenColor(palette.zenith, 0.55),
-    horizon: brightenColor(palette.horizon, 0.5),
-    ground: brightenColor(palette.ground, 0.35),
-    sun: brightenColor(palette.sun, 0.3),
-    sunGlow: brightenColor(palette.sunGlow, 0.3),
-    fog: brightenColor(palette.fog, 0.5),
+    zenith: brightenColor(palette.zenith, 0.4),
+    horizon: brightenColor(palette.horizon, 0.35),
+    ground: brightenColor(palette.ground, 0.25),
+    sun: brightenColor(palette.sun, 0.2),
+    sunGlow: brightenColor(palette.sunGlow, 0.2),
+    fog: brightenColor(palette.fog, 0.35),
   };
 }
 
@@ -243,6 +243,32 @@ export function disposeSunDebugHelper(scene: THREE.Scene, helper: THREE.Group): 
   });
 }
 
+// ── Dungeon interior lighting (static, no day cycle) ────────────────
+
+/**
+ * Apply fixed interior lighting for dungeons.
+ * Single shadow-casting directional at a nice angle, warm ambient,
+ * no moon, no sky/star updates.
+ */
+export function applyDungeonLighting(
+  sceneLights: SceneLights,
+  lightPreset: LightPreset,
+): void {
+  applyLightPreset(sceneLights, lightPreset, false);
+
+  // Fixed directional from above-front for good wall/floor shadows
+  sceneLights.dirPrimary.position.set(8, 25, 12);
+  sceneLights.dirPrimary.castShadow = true;
+
+  // Remove moon from rendering entirely (saves per-fragment light computation)
+  sceneLights.dirMoon.visible = false;
+  sceneLights.dirMoon.castShadow = false;
+
+  // Warm ambient tint for interior feel
+  sceneLights.ambient.color.setHex(0x8878a0);
+  sceneLights.hemi.color.setHex(0x7878a0);
+}
+
 // ── Main update ──────────────────────────────────────────────────────
 
 const _farPos = new THREE.Vector3();
@@ -270,6 +296,9 @@ export function updateDayCycle(
   sceneLights.dirPrimary.position.copy(sunDir).multiplyScalar(30);
   sceneLights.dirPrimary.shadow.camera.updateProjectionMatrix();
 
+  // Ensure moon is in the scene (may have been hidden by dungeon lighting)
+  sceneLights.dirMoon.visible = true;
+
   // Moon directional light — opposite to sun, active at night
   const moonDir = sunDir.clone().negate();
   // Clamp moon above horizon so it always shines downward when active
@@ -291,22 +320,26 @@ export function updateDayCycle(
   sceneLights.dirRim.intensity *= dayScale;
 
   // Moon light: ramps up at night, cool blue-purple tint
-  const moonIntensity = nightT * 5.5;
+  const moonIntensity = nightT * 8.0;
   sceneLights.dirMoon.intensity = moonIntensity;
+
+  // Sun always casts shadows in exterior; moon provides fill light without shadows
+  sceneLights.dirPrimary.castShadow = true;
+  sceneLights.dirMoon.castShadow = false;
 
   // Ambient + hemisphere: boost at night for overall visibility
   const ambientScale = Math.max(dayScale, 0.6);
   sceneLights.ambient.intensity *= ambientScale;
   sceneLights.hemi.intensity *= ambientScale;
 
-  // Tint ambient toward blue-purple at night
-  _tmpColor.set(sceneLights.ambient.color);
+  // Tint ambient toward blue-purple at night (reset to base color first to avoid drift)
+  _tmpColor.setHex(0x7070a0); // original ambient color from createScene
   _tmpColor2.setHex(0x6068c0);
   _tmpColor.lerp(_tmpColor2, nightT * 0.7);
   sceneLights.ambient.color.copy(_tmpColor);
 
   // Tint hemisphere sky color toward cool blue at night
-  _tmpColor.set(sceneLights.hemi.color);
+  _tmpColor.setHex(0x8080b0); // original hemi sky color from createScene
   _tmpColor2.setHex(0x5858b0);
   _tmpColor.lerp(_tmpColor2, nightT * 0.6);
   sceneLights.hemi.color.copy(_tmpColor);

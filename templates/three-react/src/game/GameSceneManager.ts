@@ -169,6 +169,11 @@ export function createSceneManager(
     const terrainPreset =
       opts.presetOverride ?? useGameStore.getState().terrainPreset;
 
+    // Reset time of day for exterior maps (dungeons use static lighting)
+    if (terrainPreset !== 'voxelDungeon') {
+      useGameStore.getState().setTimeOfDay(DEFAULT_SCENE_SETTINGS.timeOfDay);
+    }
+
     if (opts.themeOverride) {
       useGameStore.getState().setCurrentTheme(opts.themeOverride);
     }

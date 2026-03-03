@@ -23,14 +23,14 @@ const DEFAULT_SKY: SkyColors = {
 
 const PALETTE_SKY: Record<string, Partial<SkyColors>> = {
   meadow:    { zenith: 0x1a2a5a, horizon: 0x6a80b0, ground: 0x1a2030, fog: 0x3a4860, sun: 0xfff8e0, sunGlow: 0xffcc60 },
-  autumn:    { zenith: 0x1a1840, horizon: 0x8a4830, ground: 0x12100a, fog: 0x4a2818, sun: 0xffe0a0, sunGlow: 0xff8030 },
+  autumn:    { zenith: 0x2a1830, horizon: 0x9a6838, ground: 0x12100a, fog: 0x5a3820, sun: 0xffe0a0, sunGlow: 0xff9040 },
   tropical:  { zenith: 0x0a2858, horizon: 0x40a0c0, ground: 0x0a1828, fog: 0x2a6080, sun: 0xfffff0, sunGlow: 0xffdd80 },
   snowland:  { zenith: 0x2a3050, horizon: 0x8090b0, ground: 0x1a1a28, fog: 0x5a6880, sun: 0xf0f0ff, sunGlow: 0xc0d0ff },
   sands:     { zenith: 0x2a2040, horizon: 0xc08840, ground: 0x1a1008, fog: 0x6a4820, sun: 0xfff0c0, sunGlow: 0xffa030 },
   obsidian:  { zenith: 0x080810, horizon: 0x301820, ground: 0x060608, fog: 0x180c10, sun: 0xff8060, sunGlow: 0xc03020 },
   highlands: { zenith: 0x182848, horizon: 0x5a7090, ground: 0x101820, fog: 0x384858, sun: 0xfff8e0, sunGlow: 0xffbb50 },
   enchanted: { zenith: 0x0a1040, horizon: 0x5030a0, ground: 0x080818, fog: 0x281860, sun: 0xe0c0ff, sunGlow: 0x9060ff },
-  swamp:     { zenith: 0x101820, horizon: 0x304028, ground: 0x080a08, fog: 0x1a2818, sun: 0xd0d8a0, sunGlow: 0x88a040 },
+  swamp:     { zenith: 0x141a10, horizon: 0x3a4828, ground: 0x0a0c08, fog: 0x283818, sun: 0xd0d8a0, sunGlow: 0x88a040 },
   coral:     { zenith: 0x0a2050, horizon: 0x50a0a0, ground: 0x081828, fog: 0x286868, sun: 0xfffff0, sunGlow: 0x80ffe0 },
   ash:       { zenith: 0x080808, horizon: 0x282020, ground: 0x040404, fog: 0x181010, sun: 0xffa060, sunGlow: 0xc04020 },
   mars:      { zenith: 0x1a0808, horizon: 0x6a2818, ground: 0x100808, fog: 0x401810, sun: 0xffc080, sunGlow: 0xff6030 },
@@ -97,17 +97,17 @@ void main() {
   vec3 moonDir = -uSunDir;
   float moonDot = max(0.0, dot(dir, moonDir));
   float moonAboveHorizon = step(0.0, moonDir.y);
-  float moonDisc = smoothstep(0.9985, 0.9995, moonDot) * moonAboveHorizon * uStarIntensity;
-  color = mix(color, vec3(0.85, 0.9, 1.0), moonDisc);
+  float moonDisc = smoothstep(0.996, 0.998, moonDot) * moonAboveHorizon * uStarIntensity;
+  color = mix(color, vec3(0.9, 0.93, 1.0), moonDisc);
   // Moon glow
-  float moonGlow = pow(moonDot, 32.0) * 0.2 * moonAboveHorizon * uStarIntensity;
-  color += vec3(0.4, 0.5, 0.7) * moonGlow;
+  float moonGlow = pow(moonDot, 16.0) * 0.3 * moonAboveHorizon * uStarIntensity;
+  color += vec3(0.5, 0.6, 0.8) * moonGlow;
 
   // Stars — sparse, avoid repeating patterns
   float starField = fract(sin(dot(floor(dir * 400.0), vec3(12.9898, 78.233, 45.164))) * 43758.5453);
   float starBright = smoothstep(0.999, 1.0, starField);           // rare bright stars
   float starDim = smoothstep(0.997, 0.999, starField) * 0.25;     // few faint stars
-  float horizonFade = smoothstep(0.05, 0.25, y);
+  float horizonFade = smoothstep(-0.05, 0.1, y);
   float sunFade = 1.0 - smoothstep(0.8, 1.0, sunDot);
   float starMask = (starBright + starDim) * horizonFade * sunFade * uStarIntensity;
   color += vec3(starMask * 0.6);

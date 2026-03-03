@@ -180,12 +180,32 @@ export const DEFAULT_TORCH_PARAMS: TorchParams = {
 
 export const DEFAULT_LIGHT_PRESET: LightPreset = 'default';
 
+/** Base intensity for each scene light — presets multiply these. */
+export const LIGHT_DEFAULTS = {
+  ambient: 1.0,
+  dirPrimary: 2.0,
+  dirFill: 1.0,
+  dirRim: 0.7,
+  hemi: 0.8,
+};
+
+/** Multiplier per light preset (applied to LIGHT_DEFAULTS). */
+export const LIGHT_PRESET_SCALES: Record<LightPreset, number> = {
+  default: 1.5,
+  bright: 2.25,
+  dark: 0.25,
+  none: 0,
+};
+
+/** Extra multiplier for exterior (heightmap) terrain. */
+export const LIGHT_EXTERIOR_SCALE = 1.6;
+
 export const DEFAULT_POST_PROCESS: PostProcessSettings = {
   enabled: true,
   bloom: { enabled: true, strength: 0.3, radius: 0.4, threshold: 0.85 },
   ssao: { enabled: true, radius: 0.5, minDistance: 0.001, maxDistance: 0.1 },
   vignette: { enabled: true, offset: 1.0, darkness: 1.2 },
-  colorGrade: { enabled: true, brightness: 0, contrast: 0.1, saturation: 0.1 },
+  colorGrade: { enabled: true, brightness: 0, contrast: 0.1, saturation: 0 },
 };
 
 export const DEFAULT_PARTICLE_TOGGLES: ParticleToggles = {
