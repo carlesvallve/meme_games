@@ -9,7 +9,7 @@ import {
   randomInRange,
   getCharacterAnimScale,
 } from './VoxCharacterDB';
-import { Entity, Layer } from '../Entity';
+import { Entity, Layer } from '../core/Entity';
 import type { Environment } from '../environment';
 import type { NavGrid } from '../pathfinding';
 import { Behavior, type BehaviorAgent } from '../behaviors/Behavior';
@@ -321,6 +321,10 @@ export class Character implements BehaviorAgent {
         const stats = getCharacterStats(getArchetype(rosterEntry.name));
         this.hp = this.maxHp = Math.round(randomInRange(stats.hp));
         this.params.speed = randomInRange(stats.movSpeed);
+        // Boost player-controlled monsters so they feel responsive
+        if (!this.isEnemy && rosterEntry.category === 'enemy') {
+          this.params.speed = Math.max(this.params.speed * 1.25, 2.0);
+        }
         this.params.attackDamage = Math.floor(randomInRange(stats.damage));
         this.params.attackCooldown = 1 / randomInRange(stats.atkSpeed);
         this.critChance = stats.critChance;
@@ -601,8 +605,9 @@ export class Character implements BehaviorAgent {
       }
     }
 
-    // Slow down on stairs for smoother traversal
-    const effSpeed = this.terrain.isOnStairs(oldX, oldZ) ? speed * 0.5 : speed;
+    // Slow down on stairs for smoother traversal (cap reduction so slow chars stay playable)
+    const onStairs = this.terrain.isOnStairs(oldX, oldZ);
+    const effSpeed = onStairs ? Math.max(speed * 0.7, Math.min(speed, 1.5)) : speed;
     const newX = oldX + effDx * effSpeed * dt;
     const newZ = oldZ + effDz * effSpeed * dt;
 
@@ -666,6 +671,9 @@ export class Character implements BehaviorAgent {
           // no step/land sounds for flyers
         } else if (impactSpeed > 1 && this.footSfxTimer >= FOOT_SFX_COOLDOWN) {
           const vol = this.isEnemy ? 0.5 : 0.7;
+          // On stairs or small drops, play a step instead of heavy land thud
+          const onStairs = this.terrain.isOnStairs(this.mesh.position.x, this.mesh.position.z);
+          const isSmallDrop = impactSpeed < 3;
           if (stepMode === 'jumper') {
             if (Math.random() < 0.5)
               audioSystem.sfxAt(
@@ -674,6 +682,13 @@ export class Character implements BehaviorAgent {
                 this.mesh.position.z,
                 vol,
               );
+          } else if (onStairs || isSmallDrop) {
+            audioSystem.sfxAt(
+              'step',
+              this.mesh.position.x,
+              this.mesh.position.z,
+              vol * 0.6,
+            );
           } else {
             audioSystem.sfxAt(
               'land',

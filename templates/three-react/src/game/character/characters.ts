@@ -1,41 +1,75 @@
 import * as THREE from 'three';
-import { ALL_VOX_CHARACTERS, getArchetype, type VoxCharEntry } from './VoxCharacterDB';
+import { VOX_HEROES, VOX_ENEMIES, getArchetype, type VoxCharEntry } from './VoxCharacterDB';
 
 // ── Character slots ──
-// One slot per hero; all VOX_HEROES are shown on the start screen grid.
+// 12 hero slots (one per hero archetype) + 8 monster slots (random unique enemy archetypes).
 
 export type CharacterType =
   | 'slot0' | 'slot1' | 'slot2' | 'slot3' | 'slot4' | 'slot5'
-  | 'slot6' | 'slot7' | 'slot8' | 'slot9' | 'slot10';
+  | 'slot6' | 'slot7' | 'slot8' | 'slot9' | 'slot10' | 'slot11'
+  | 'slot12' | 'slot13' | 'slot14' | 'slot15' | 'slot16' | 'slot17'
+  | 'slot18' | 'slot19' | 'slot20' | 'slot21' | 'slot22' | 'slot23';
 
-const ALL_SLOTS: CharacterType[] = [
+const HERO_SLOTS: CharacterType[] = [
   'slot0', 'slot1', 'slot2', 'slot3', 'slot4', 'slot5',
-  'slot6', 'slot7', 'slot8', 'slot9', 'slot10',
+  'slot6', 'slot7', 'slot8', 'slot9', 'slot10', 'slot11',
 ];
 
+const MONSTER_SLOTS: CharacterType[] = [
+  'slot12', 'slot13', 'slot14', 'slot15', 'slot16', 'slot17',
+  'slot18', 'slot19', 'slot20', 'slot21', 'slot22', 'slot23',
+];
+
+const ALL_SLOTS: CharacterType[] = [...HERO_SLOTS, ...MONSTER_SLOTS];
+
 // ── VOX Roster ──
-// Each slot maps to a unique character *type* (archetype).
-// If a type has variants (e.g. Blob A/B/C/D), one is picked at random.
+// Heroes: one per archetype (random variant if multiple exist).
+// Monsters: 8 random unique enemy archetypes (random variant each).
 
 function pickRoster(): Record<CharacterType, VoxCharEntry> {
-  // Group all characters by base archetype
-  const groups = new Map<string, VoxCharEntry[]>();
-  for (const entry of ALL_VOX_CHARACTERS) {
+  // Heroes — shuffle and assign one per hero slot
+  const heroShuffled = [...VOX_HEROES].sort(() => Math.random() - 0.5);
+  const heroEntries = HERO_SLOTS.map((slot, i) => [slot, heroShuffled[i % heroShuffled.length]]);
+
+  // Monsters — group enemies by archetype, pick 8 random unique archetypes
+  const enemyGroups = new Map<string, VoxCharEntry[]>();
+  for (const entry of VOX_ENEMIES) {
     const archetype = getArchetype(entry.name);
-    let group = groups.get(archetype);
-    if (!group) { group = []; groups.set(archetype, group); }
+    let group = enemyGroups.get(archetype);
+    if (!group) { group = []; enemyGroups.set(archetype, group); }
     group.push(entry);
   }
 
-  // Pick one random variant per archetype, then shuffle
-  const uniqueTypes = [...groups.values()].map(
-    variants => variants[Math.floor(Math.random() * variants.length)],
-  );
-  const shuffled = uniqueTypes.sort(() => Math.random() - 0.5);
+  // Pick one random variant per archetype, shuffle, take 8
+  const uniqueEnemies = [...enemyGroups.values()]
+    .map(variants => variants[Math.floor(Math.random() * variants.length)])
+    .sort(() => Math.random() - 0.5)
+    .slice(0, MONSTER_SLOTS.length);
 
-  return Object.fromEntries(
-    ALL_SLOTS.map((slot, i) => [slot, shuffled[i % shuffled.length]]),
-  ) as Record<CharacterType, VoxCharEntry>;
+  const monsterEntries = MONSTER_SLOTS.map((slot, i) => [slot, uniqueEnemies[i % uniqueEnemies.length]]);
+
+  return Object.fromEntries([...heroEntries, ...monsterEntries]) as Record<CharacterType, VoxCharEntry>;
+}
+
+/** Re-roll only monster slots, keeping heroes the same. */
+export function rerollMonsters(): void {
+  const enemyGroups = new Map<string, VoxCharEntry[]>();
+  for (const entry of VOX_ENEMIES) {
+    const archetype = getArchetype(entry.name);
+    let group = enemyGroups.get(archetype);
+    if (!group) { group = []; enemyGroups.set(archetype, group); }
+    group.push(entry);
+  }
+
+  const uniqueEnemies = [...enemyGroups.values()]
+    .map(variants => variants[Math.floor(Math.random() * variants.length)])
+    .sort(() => Math.random() - 0.5)
+    .slice(0, MONSTER_SLOTS.length);
+
+  for (let i = 0; i < MONSTER_SLOTS.length; i++) {
+    voxRoster[MONSTER_SLOTS[i]] = uniqueEnemies[i % uniqueEnemies.length];
+  }
+  _wr.__voxRoster = voxRoster;
 }
 
 // Persist roster across Vite HMR so character skins don't reshuffle on code edits
@@ -52,9 +86,18 @@ export function getSlots(): CharacterType[] {
   return ALL_SLOTS;
 }
 
+export function getHeroSlots(): CharacterType[] {
+  return HERO_SLOTS;
+}
+
+export function getMonsterSlots(): CharacterType[] {
+  return MONSTER_SLOTS;
+}
+
 // ── Per-slot colors (fixed for visual distinction) ──
 
 export const CHARACTER_TEAM_COLORS: Record<CharacterType, string> = {
+  // Heroes
   slot0: '#e94560',
   slot1: '#4a9eff',
   slot2: '#44cc66',
@@ -66,6 +109,20 @@ export const CHARACTER_TEAM_COLORS: Record<CharacterType, string> = {
   slot8: '#88ccff',
   slot9: '#ccff88',
   slot10: '#ffcc00',
+  slot11: '#ff5577',
+  // Monsters
+  slot12: '#cc4444',
+  slot13: '#8844aa',
+  slot14: '#44aa88',
+  slot15: '#aa8844',
+  slot16: '#4488cc',
+  slot17: '#aa4488',
+  slot18: '#88aa44',
+  slot19: '#cc8844',
+  slot20: '#6644cc',
+  slot21: '#cc6666',
+  slot22: '#44cccc',
+  slot23: '#aaaa44',
 };
 
 // ── Names from roster ──

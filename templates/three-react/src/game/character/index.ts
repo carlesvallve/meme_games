@@ -38,8 +38,11 @@ export {
   CHARACTER_NAMES,
   VOX_CHARACTER_HEIGHT,
   getSlots,
+  getHeroSlots,
+  getMonsterSlots,
   getCharacterName,
   rerollRoster,
+  rerollMonsters,
   voxRoster,
   createCharacterMesh,
 } from './characters';

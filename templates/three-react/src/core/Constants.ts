@@ -1,3 +1,6 @@
+// Template scaffolding — part of the @sttg/game-base contract.
+// Not used by the dungeon-crawler example (which manages its own sizing/colors via the store),
+// but kept so new games scaffolded from this template have sensible defaults.
 import { createDisplayConfig } from '@sttg/game-base';
 
 const { DPR, PX, GAME } = createDisplayConfig();

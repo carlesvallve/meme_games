@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { Environment } from '../environment';
 import { useGameStore } from '../../store';
-import { Entity, Layer } from '../Entity';
+import { Entity, Layer } from '../core/Entity';
 import type { SavedCollectible } from '../dungeon';
 
 interface CollectibleObj {

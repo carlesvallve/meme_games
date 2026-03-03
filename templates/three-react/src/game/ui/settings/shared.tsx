@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Layer } from '../../game/Entity';
+import { Layer } from '../../core/Entity';
 
 /* ── Constants ── */
 

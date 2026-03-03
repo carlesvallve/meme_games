@@ -1,4 +1,4 @@
-import { useGameStore } from '../store';
+import { useGameStore } from '../../store';
 
 export function MenuScreen() {
   const phase = useGameStore((s) => s.phase);
@@ -26,7 +26,7 @@ export function MenuScreen() {
         alignItems: 'center',
         justifyContent: 'center',
         background: isPaused ? 'rgba(0,0,0,0.5)' : 'rgba(0,0,0,0.6)',
-        pointerEvents: 'auto',
+        pointerEvents: 'none',
       }}
     >
       <h1
@@ -53,6 +53,7 @@ export function MenuScreen() {
       <button
         onClick={handleClick}
         style={{
+          pointerEvents: 'auto',
           padding: '14px 48px',
           fontSize: 20,
           fontWeight: 700,

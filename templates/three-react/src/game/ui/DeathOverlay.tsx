@@ -1,4 +1,4 @@
-import { useGameStore } from '../store';
+import { useGameStore } from '../../store';
 
 export function DeathOverlay() {
   const phase = useGameStore((s) => s.phase);

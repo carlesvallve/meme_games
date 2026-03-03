@@ -13,7 +13,7 @@
 //  • Entrance tiles replace walls near door positions.
 
 import * as THREE from 'three';
-import { Entity, Layer } from '../Entity';
+import { Entity, Layer } from '../core/Entity';
 import { getFirstTile, getRandomTile, getTileById, getDungeonTiles } from './VoxDungeonDB';
 import type { TileRole } from './VoxDungeonDB';
 import { preloadTheme, getTileGeometry, setCellSize, getWallTargetHeight, clearCache } from './VoxDungeonLoader';

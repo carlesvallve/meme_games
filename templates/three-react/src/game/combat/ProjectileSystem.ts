@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { ProjectileConfig } from '../character';
 import type { Enemy } from '../character';
-import { Entity, entityRegistry, Layer } from '../Entity';
+import { Entity, entityRegistry, Layer } from '../core/Entity';
 import { audioSystem } from '../../utils/AudioSystem';
 
 // ── Constants ────────────────────────────────────────────────────────

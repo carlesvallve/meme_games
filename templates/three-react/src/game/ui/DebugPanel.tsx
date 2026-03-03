@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useGameStore, type MovementParams } from '../store';
+import { useGameStore, type MovementParams } from '../../store';
 
 interface ParamDef {
   key: keyof MovementParams;
@@ -13,8 +13,20 @@ const PARAMS: ParamDef[] = [
   { key: 'speed', label: 'Speed', min: 1, max: 16, step: 0.5 },
   { key: 'stepHeight', label: 'Step Height', min: 0, max: 2, step: 0.1 },
   { key: 'slopeHeight', label: 'Slope Height', min: 0, max: 4, step: 0.1 },
-  { key: 'capsuleRadius', label: 'Capsule Radius', min: 0.05, max: 1.5, step: 0.05 },
-  { key: 'arrivalReach', label: 'Arrival Reach', min: 0.02, max: 0.5, step: 0.01 },
+  {
+    key: 'capsuleRadius',
+    label: 'Capsule Radius',
+    min: 0.05,
+    max: 1.5,
+    step: 0.05,
+  },
+  {
+    key: 'arrivalReach',
+    label: 'Arrival Reach',
+    min: 0.02,
+    max: 0.5,
+    step: 0.01,
+  },
   { key: 'hopHeight', label: 'Hop Intensity', min: 0, max: 0.5, step: 0.01 },
   { key: 'magnetRadius', label: 'Magnet Radius', min: 0, max: 10, step: 0.5 },
   { key: 'magnetSpeed', label: 'Magnet Speed', min: 1, max: 32, step: 1 },
@@ -77,17 +89,28 @@ export function DebugPanel() {
                 gap: 6,
               }}
             >
-              <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>{label}</span>
+              <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>
+                {label}
+              </span>
               <input
-                type="range"
+                type='range'
                 min={min}
                 max={max}
                 step={step}
                 value={params[key] as number}
-                onChange={(e) => setParam(key, parseFloat(e.target.value) as any)}
+                onChange={(e) =>
+                  setParam(key, parseFloat(e.target.value) as any)
+                }
                 style={{ flex: 1, height: 14, accentColor: '#6af' }}
               />
-              <span style={{ color: '#fff', width: 36, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+              <span
+                style={{
+                  color: '#fff',
+                  width: 36,
+                  textAlign: 'right',
+                  fontVariantNumeric: 'tabular-nums',
+                }}
+              >
                 {(params[key] as number).toFixed(step < 0.1 ? 2 : 1)}
               </span>
             </div>

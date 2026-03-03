@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { useGameStore } from '../../store';
-import { entityRegistry, Layer } from '../Entity';
+import { entityRegistry, Layer } from '../core/Entity';
 import { revealUniforms } from '../rendering/RevealShader';
 import type { SpeechBubbleData } from '../../types';
 import type { Character } from '../character';
