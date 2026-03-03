@@ -22,11 +22,8 @@ export interface DebrisBox {
 }
 
 export type TerrainPreset =
-  | 'scattered'
-  | 'terraced'
+  | 'basic'
   | 'heightmap'
-  | 'dungeon'
-  | 'rooms'
   | 'voxelDungeon';
 
 // ── Shared mutable state ────────────────────────────────────────────

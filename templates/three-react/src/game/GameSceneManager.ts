@@ -97,6 +97,7 @@ export function createSceneManager(
       const d = DEFAULT_SCENE_SETTINGS;
       store.setDungeonSize(d.dungeonSize);
       store.setRoomSpacing(d.roomSpacing);
+      store.setRoomSpacingMax(d.roomSpacingMax);
       store.setDoorChance(d.doorChance);
       store.setHeightChance(d.heightChance);
       store.setLoopChance(d.loopChance);

@@ -55,7 +55,7 @@ export function createScene(paletteName = 'meadow'): { scene: THREE.Scene; light
 
   // Primary directional (with shadows)
   const dirPrimary = new THREE.DirectionalLight(0xffffff, DEFAULTS.dirPrimary);
-  dirPrimary.position.set(10, 20, 10);
+  dirPrimary.position.set(8, 30, 10);
   dirPrimary.castShadow = true;
   dirPrimary.shadow.mapSize.set(2048, 2048);
   dirPrimary.shadow.camera.near = 0.5;

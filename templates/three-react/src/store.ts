@@ -199,8 +199,8 @@ export const DEFAULT_SCENE_SETTINGS = {
   terrainPreset: 'voxelDungeon' as TerrainPreset,
   heightmapStyle: 'islands' as HeightmapStyle,
   paletteName: 'random',
-  wallGap: 1,
-  roomSpacing: 3,
+  roomSpacing: 2,
+  roomSpacingMax: 5,
   tileSize: 0.75,
   gridOpacity: 0.25,
   resolutionScale: 1,
@@ -234,8 +234,8 @@ interface SavedSettings {
   terrainPreset?: TerrainPreset;
   heightmapStyle?: HeightmapStyle;
   paletteName?: string;
-  wallGap?: number;
   roomSpacing?: number;
+  roomSpacingMax?: number;
   tileSize?: number;
   gridOpacity?: number;
   resolutionScale?: number;
@@ -284,8 +284,8 @@ function saveSettings(): void {
     terrainPreset: s.terrainPreset,
     heightmapStyle: s.heightmapStyle,
     paletteName: s.paletteName,
-    wallGap: s.wallGap,
     roomSpacing: s.roomSpacing,
+    roomSpacingMax: s.roomSpacingMax,
     tileSize: s.tileSize,
     gridOpacity: s.gridOpacity,
     resolutionScale: s.resolutionScale,
@@ -358,8 +358,8 @@ interface GameStore {
   heightmapStyle: HeightmapStyle;
   paletteName: string; // user selection: 'random' or specific name
   paletteActive: string; // actual palette in use (for display)
-  wallGap: number;
   roomSpacing: number;
+  roomSpacingMax: number;
   tileSize: number;
   gridOpacity: number;
   resolutionScale: number;
@@ -478,8 +478,8 @@ interface GameStore {
   setHeightmapStyle: (style: HeightmapStyle) => void;
   setPaletteName: (name: string) => void;
   setPaletteActive: (name: string) => void;
-  setWallGap: (gap: number) => void;
   setRoomSpacing: (spacing: number) => void;
+  setRoomSpacingMax: (spacing: number) => void;
   setTileSize: (size: number) => void;
   setGridOpacity: (gridOpacity: number) => void;
   setResolutionScale: (scale: number) => void;
@@ -507,6 +507,7 @@ interface GameStore {
   onRegenerateScene: (() => void) | null;
   onRemesh: (() => void) | null;
   onRandomizePalette: (() => void) | null;
+  onApplyPalette: ((name: string) => void) | null;
   onResetCharacterParams: (() => void) | null;
   onResetCameraParams: (() => void) | null;
   onResetLightParams: (() => void) | null;
@@ -564,8 +565,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
   heightmapStyle: saved.heightmapStyle ?? DEFAULT_SCENE_SETTINGS.heightmapStyle,
   paletteName: saved.paletteName ?? DEFAULT_SCENE_SETTINGS.paletteName,
   paletteActive: '',
-  wallGap: saved.wallGap ?? DEFAULT_SCENE_SETTINGS.wallGap,
   roomSpacing: saved.roomSpacing ?? DEFAULT_SCENE_SETTINGS.roomSpacing,
+  roomSpacingMax: saved.roomSpacingMax ?? DEFAULT_SCENE_SETTINGS.roomSpacingMax,
   tileSize: saved.tileSize ?? DEFAULT_SCENE_SETTINGS.tileSize,
   gridOpacity: saved.gridOpacity ?? DEFAULT_SCENE_SETTINGS.gridOpacity,
   resolutionScale:
@@ -736,8 +737,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
   setHeightmapStyle: (heightmapStyle) => set({ heightmapStyle }),
   setPaletteName: (paletteName) => set({ paletteName }),
   setPaletteActive: (paletteActive) => set({ paletteActive }),
-  setWallGap: (wallGap) => set({ wallGap }),
   setRoomSpacing: (roomSpacing) => set({ roomSpacing }),
+  setRoomSpacingMax: (roomSpacingMax) => set({ roomSpacingMax }),
   setTileSize: (tileSize) => set({ tileSize }),
   setGridOpacity: (gridOpacity) => set({ gridOpacity }),
   setResolutionScale: (resolutionScale) => set({ resolutionScale }),
@@ -765,6 +766,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
   onRegenerateScene: null,
   onRemesh: null,
   onRandomizePalette: null,
+  onApplyPalette: null,
   onResetCharacterParams: null,
   onResetCameraParams: null,
   onResetLightParams: null,

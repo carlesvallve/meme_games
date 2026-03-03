@@ -651,10 +651,7 @@ export function createGameLoop(
       const playerWorldPos = new THREE.Vector3(
         pp.x, ctx.activeCharacter.mesh.position.y + 0.5, pp.z,
       );
-      const isDungeonPreset =
-        ctx.terrain.preset === 'dungeon' ||
-        ctx.terrain.preset === 'rooms' ||
-        ctx.terrain.preset === 'voxelDungeon';
+      const isDungeonPreset = ctx.terrain.preset === 'voxelDungeon';
       updateReveal(playerWorldPos, ctx.cam.camera.position, isDungeonPreset, ctx.terrain.preset);
 
       // Sync light preset

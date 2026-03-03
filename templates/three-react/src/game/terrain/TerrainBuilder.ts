@@ -69,7 +69,6 @@ export class TerrainBuilder {
   // ── Box placement forwarding ──────────────────────────────────────
 
   createScatteredDebris(): void { this.boxPlacer.createScatteredDebris(); }
-  createTerracedDebris(): void { this.boxPlacer.createTerracedDebris(); }
   placeBox(x: number, z: number, w: number, d: number, h: number, skipZFight = false): boolean {
     return this.boxPlacer.placeBox(x, z, w, d, h, skipZFight);
   }

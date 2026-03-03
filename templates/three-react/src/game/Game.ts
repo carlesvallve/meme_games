@@ -55,7 +55,6 @@ function terrainParamsKey(): string {
     terrainPreset: s.terrainPreset,
     heightmapStyle: s.heightmapStyle,
     paletteName: s.paletteName,
-    wallGap: s.wallGap,
     roomSpacing: s.roomSpacing,
     tileSize: s.tileSize,
     doorChance: s.doorChance,

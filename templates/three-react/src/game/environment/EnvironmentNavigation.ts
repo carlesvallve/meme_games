@@ -381,7 +381,7 @@ export class EnvironmentNavigation {
     }
 
     // Dungeon/rooms/voxelDungeon: pick directly from NavGrid spawn-region cells
-    if ((this.ctx.preset === 'dungeon' || this.ctx.preset === 'rooms' || this.ctx.preset === 'voxelDungeon') && this.ctx.navGrid) {
+    if (this.ctx.preset === 'voxelDungeon' && this.ctx.navGrid) {
       for (let attempt = 0; attempt < 50; attempt++) {
         const cell = this.ctx.navGrid.getRandomSpawnCell();
         if (!cell) break;

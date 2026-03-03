@@ -5,9 +5,10 @@ import { PlayerPanel } from './PlayerPanel';
 import { EnemyPanel } from './EnemyPanel';
 import { CameraPanel } from './CameraPanel';
 import { LightPanel } from './LightPanel';
+import { PostFXPanel } from './PostFXPanel';
 import { ScenePanel } from './ScenePanel';
 
-type ActivePanel = 'player' | 'enemy' | 'camera' | 'light' | 'scene' | null;
+type ActivePanel = 'player' | 'enemy' | 'camera' | 'light' | 'postfx' | 'scene' | null;
 
 export function SettingsPanel() {
   const [active, setActive] = useState<ActivePanel>(null);
@@ -43,6 +44,7 @@ export function SettingsPanel() {
       {active === 'enemy' && <EnemyPanel />}
       {active === 'camera' && <CameraPanel />}
       {active === 'light' && <LightPanel />}
+      {active === 'postfx' && <PostFXPanel />}
       {active === 'scene' && <ScenePanel />}
 
       {/* Tab buttons */}
@@ -83,6 +85,12 @@ export function SettingsPanel() {
           style={btnStyle(active === 'light')}
         >
           Light
+        </button>
+        <button
+          onClick={() => toggle('postfx')}
+          style={btnStyle(active === 'postfx')}
+        >
+          PostFX
         </button>
       </div>
     </div>

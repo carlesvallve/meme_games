@@ -84,18 +84,17 @@ export interface DungeonOutput {
 }
 
 /**
- * High-level entry point: generate a full dungeon or rooms layout.
+ * High-level entry point: generate a BSP dungeon layout.
  * Returns box definitions and a walk mask for NavGrid integration.
  */
 export function generateDungeon(
-  mode: 'dungeon' | 'rooms',
   groundSize: number,
-  wallGap = 1,
   cellSizeOverride?: number,
   roomSpacing?: number,
   doorChance = 1.0,
   seed?: number,
   loopChance = 0.35,
+  roomSpacingMax?: number,
 ): DungeonOutput {
   // Initialize seeded RNG — use provided seed or generate a random one
   const actualSeed = seed ?? (Math.random() * 0xFFFFFFFF) >>> 0;
@@ -105,44 +104,23 @@ export function generateDungeon(
   const gridD = gridW;
   const wallHeight = 2.5;
 
-  const result = mode === 'dungeon'
-    ? generateBSPDungeon(gridW, gridD, 2, 6, roomSpacing ?? 2, doorChance, loopChance)
-    : generateAdjacentRooms(gridW, gridD, 4, 4, wallGap, doorChance);
+  const result = generateBSPDungeon(gridW, gridD, 2, 6, roomSpacing ?? 2, doorChance, loopChance, roomSpacingMax);
 
   const boxes = convertToBoxDefs(result, cellSize, wallHeight, groundSize);
 
   // Convert grid-space door defs to world-space
-  // For rooms preset: filter out doors without walls on both sides (prevents doors in open corridors)
-  // For dungeon preset: skip filter — detectCorridorDoors already ensures corridor-room boundary placement
   const halfWorld = groundSize / 2;
-  const { openGrid, gridW: gw, gridD: gd } = result;
-  const isOpenCell = (gx: number, gz: number): boolean => {
-    if (gx < 0 || gx >= gw || gz < 0 || gz >= gd) return false;
-    return openGrid[gz * gw + gx];
-  };
+  const { gridW: gw, gridD: gd } = result;
 
   const doors: DoorDef[] = [];
   const shiftedGridDoors: DoorDef[] = [];
-  const isVoxelDungeon = cellSizeOverride !== undefined; // voxel dungeon uses cellSizeOverride
-  // console.log(`[DOOR] mode=${mode}, gridDoors=${(result.doors || []).length}, corridors=${result.corridors.length}, isVoxelDungeon=${isVoxelDungeon}`);
   const roomGrid = result.roomOwnership;
   for (const d of result.doors || []) {
-    // Skip wall-flanking check for voxel dungeon (walls are full cells, not edges)
-    // and when roomOwnership exists (wallGap=0 — walls are room-boundary based)
-    if (!roomGrid && !isVoxelDungeon) {
-      const gx = Math.round(d.x);
-      const gz = Math.round(d.z);
-      const hasWalls = d.orientation === 'NS'
-        ? !isOpenCell(gx, gz - 1) && !isOpenCell(gx, gz + 1)
-        : !isOpenCell(gx - 1, gz) && !isOpenCell(gx + 1, gz);
-      if (!hasWalls) continue;
-    }
-
     let wx = -halfWorld + (d.x + 0.5) * cellSize;
     let wz = -halfWorld + (d.z + 0.5) * cellSize;
 
     // For voxel dungeon: nudge door half a cell toward the nearest room
-    if (isVoxelDungeon && roomGrid) {
+    if (roomGrid) {
       const dirs: [number, number][] = [[0, -1], [0, 1], [-1, 0], [1, 0]];
       for (const [sx, sz] of dirs) {
         const nx = d.x + sx, nz = d.z + sz;
@@ -333,9 +311,12 @@ function splitBSP(rect: Rect, minSize: number, depth: number, maxDepth: number):
   return node;
 }
 
-function placeRoomsInBSP(node: BSPNode, minRoomSize: number, padding: number, maxRoomSize: number): void {
+function placeRoomsInBSP(node: BSPNode, minRoomSize: number, minPadding: number, maxPadding: number, maxRoomSize: number): void {
   if (!node.left && !node.right) {
-    // Leaf node — place room inset by padding, capped at maxRoomSize
+    // Leaf node — randomize padding within [minPadding, maxPadding],
+    // capped so the room still fits.
+    const maxFitPad = Math.floor((Math.min(node.rect.w, node.rect.d) - minRoomSize) / 2);
+    const padding = minPadding + Math.floor(rng.next() * (Math.min(maxPadding, maxFitPad) - minPadding + 1));
     const availW = node.rect.w - padding * 2;
     const availD = node.rect.d - padding * 2;
     if (availW < minRoomSize || availD < minRoomSize) {
@@ -352,8 +333,8 @@ function placeRoomsInBSP(node: BSPNode, minRoomSize: number, padding: number, ma
     node.room = { x, z, w, d };
     return;
   }
-  if (node.left) placeRoomsInBSP(node.left, minRoomSize, padding, maxRoomSize);
-  if (node.right) placeRoomsInBSP(node.right, minRoomSize, padding, maxRoomSize);
+  if (node.left) placeRoomsInBSP(node.left, minRoomSize, minPadding, maxPadding, maxRoomSize);
+  if (node.right) placeRoomsInBSP(node.right, minRoomSize, minPadding, maxPadding, maxRoomSize);
 }
 
 function collectRooms(node: BSPNode): Rect[] {
@@ -681,19 +662,23 @@ export function generateBSPDungeon(
   roomSpacingOverride?: number,
   doorChance = 1.0,
   loopChance = 0.35,
+  roomSpacingMaxOverride?: number,
 ): DungeonResult {
   const border = 2;
-  const roomSpacing = Math.max(1, roomSpacingOverride ?? 3);
+  const roomSpacingMin = Math.max(1, roomSpacingOverride ?? 3);
+  const roomSpacingMax = Math.max(roomSpacingMin, roomSpacingMaxOverride ?? roomSpacingMin);
   // padding = per-side inset. Gap between sibling rooms = 2*padding.
-  // We want gap ≈ roomSpacing, so padding = ceil(roomSpacing/2), min 1.
-  const padding = Math.max(1, Math.ceil(roomSpacing / 2));
+  // Use min padding for BSP partitioning so all leaves can fit rooms,
+  // then randomize padding per leaf during room placement for variation.
+  const minPadding = Math.max(1, Math.ceil(roomSpacingMin / 2));
+  const maxPadding = Math.max(minPadding, Math.ceil(roomSpacingMax / 2));
   const usableRect: Rect = { x: border, z: border, w: gridW - border * 2, d: gridD - border * 2 };
 
   // minSize for BSP split must account for padding so every leaf can fit a room
-  const minPartitionSize = minRoomSize + padding * 2;
+  const minPartitionSize = minRoomSize + minPadding * 2;
   const maxRoomSize = 7; // cap room dimensions for balanced layouts
   const root = splitBSP(usableRect, minPartitionSize, 0, maxDepth);
-  placeRoomsInBSP(root, minRoomSize, padding, maxRoomSize);
+  placeRoomsInBSP(root, minRoomSize, minPadding, maxPadding, maxRoomSize);
 
   const openGrid = new Array(gridW * gridD).fill(false);
 
@@ -745,227 +730,6 @@ export function generateBSPDungeon(
   return { rooms, corridors, openGrid, gridW, gridD, doors, roomOwnership: Array.from(roomGrid), loopCorridors: loopResult.count };
 }
 
-/**
- * Generate a grid of adjacent rooms separated by wall strips with door openings.
- * Grid slots are computed, each room is inset by wallGap cells to create wall strips,
- * then doors punch openings through the walls between neighbors.
- * @param wallGap - Inset per edge (0 = shared wall, 1 = 2-cell gap between rooms, etc.)
- */
-export function generateAdjacentRooms(
-  gridW: number,
-  gridD: number,
-  cols = 4,
-  rows = 4,
-  wallGap = 1,
-  doorChance = 1.0,
-): DungeonResult {
-  const border = 1;
-  const openGrid = new Array(gridW * gridD).fill(false);
-  const rooms: DungeonRoom[] = [];
-  const corridors: DungeonCorridor[] = [];
-  const doors: DoorDef[] = [];
-
-  const usableW = gridW - border * 2;
-  const usableD = gridD - border * 2;
-
-  // Distribute slot sizes across columns and rows
-  const colWidths = distributeEvenly(usableW, cols);
-  const rowHeights = distributeEvenly(usableD, rows);
-
-  // Compute slot start positions
-  const colStarts: number[] = [];
-  let cx = border;
-  for (let i = 0; i < cols; i++) { colStarts.push(cx); cx += colWidths[i]; }
-
-  const rowStarts: number[] = [];
-  let rz = border;
-  for (let i = 0; i < rows; i++) { rowStarts.push(rz); rz += rowHeights[i]; }
-
-  const inset = Math.max(1, wallGap - 1);
-
-  // Place rooms
-  const roomGrid: (DungeonRoom | null)[][] = [];
-  for (let ry = 0; ry < rows; ry++) {
-    roomGrid[ry] = [];
-    for (let rx = 0; rx < cols; rx++) {
-      // Randomly skip ~15% of rooms for irregular layouts (not when wallGap=0, rooms must tile)
-      if (wallGap > 0 && rng.next() < 0.15 && rooms.length > 2) {
-        roomGrid[ry][rx] = null;
-        continue;
-      }
-
-      const slotX = colStarts[rx];
-      const slotZ = rowStarts[ry];
-      const slotW = colWidths[rx];
-      const slotD = rowHeights[ry];
-
-      let rect: Rect;
-
-      if (wallGap === 0) {
-        // wallGap=0: rooms fill entire slot, walls added between rooms after carving
-        rect = {
-          x: slotX,
-          z: slotZ,
-          w: slotW,
-          d: slotD,
-        };
-      } else {
-        // wallGap>0: inset rooms to create corridor gaps
-        let roomW = Math.max(1, slotW - inset * 2);
-        let roomD = Math.max(1, slotD - inset * 2);
-
-        // Random size variation: shrink 0-2 cells per edge, biased toward square
-        const maxShrink = 2;
-        const shrinkW = Math.floor(rng.next() * Math.min(maxShrink + 1, Math.max(0, roomW - 2)));
-        const shrinkD = Math.floor(rng.next() * Math.min(maxShrink + 1, Math.max(0, roomD - 2)));
-
-        if (roomW - shrinkW > roomD - shrinkD + 2) {
-          roomW = Math.max(2, roomW - shrinkW - 1);
-        } else {
-          roomW = Math.max(2, roomW - shrinkW);
-        }
-        if (roomD - shrinkD > roomW + 2) {
-          roomD = Math.max(2, roomD - shrinkD - 1);
-        } else {
-          roomD = Math.max(2, roomD - shrinkD);
-        }
-
-        const maxOffX = slotW - inset * 2 - roomW;
-        const maxOffZ = slotD - inset * 2 - roomD;
-        const offX = maxOffX > 0 ? Math.floor(rng.next() * (maxOffX + 1)) : 0;
-        const offZ = maxOffZ > 0 ? Math.floor(rng.next() * (maxOffZ + 1)) : 0;
-
-        rect = {
-          x: slotX + inset + offX,
-          z: slotZ + inset + offZ,
-          w: roomW,
-          d: roomD,
-        };
-      }
-
-      // Carve room interior
-      for (let gz = rect.z; gz < rect.z + rect.d; gz++) {
-        for (let gx = rect.x; gx < rect.x + rect.w; gx++) {
-          if (gx >= 0 && gx < gridW && gz >= 0 && gz < gridD) {
-            openGrid[gz * gridW + gx] = true;
-          }
-        }
-      }
-
-      const room: DungeonRoom = { rect };
-      rooms.push(room);
-      roomGrid[ry][rx] = room;
-    }
-  }
-
-  if (wallGap === 0) {
-    // wallGap=0: rooms fill their slots and touch directly.
-    // Build roomOwnership grid so convertToBoxDefs can generate shared thin walls
-    // between cells belonging to different rooms.
-    const roomOwnership = new Array<number>(gridW * gridD).fill(-1);
-    for (let ri = 0; ri < rooms.length; ri++) {
-      const r = rooms[ri].rect;
-      for (let gz = r.z; gz < r.z + r.d; gz++) {
-        for (let gx = r.x; gx < r.x + r.w; gx++) {
-          if (gx >= 0 && gx < gridW && gz >= 0 && gz < gridD) {
-            roomOwnership[gz * gridW + gx] = ri;
-          }
-        }
-      }
-    }
-
-    // Place doors between adjacent rooms (~70% chance per boundary)
-    // Door cells get roomOwnership = -2 to suppress wall generation at that edge
-    const doorCells = new Set<string>();
-    for (let ry = 0; ry < rows; ry++) {
-      for (let rx = 0; rx < cols; rx++) {
-        const room = roomGrid[ry][rx];
-        if (!room) continue;
-
-        // East neighbor
-        if (rx + 1 < cols && roomGrid[ry][rx + 1]) {
-          const east = roomGrid[ry][rx + 1]!;
-          const boundaryX = room.rect.x + room.rect.w - 1; // last col of this room
-          const nextX = east.rect.x; // first col of east room
-          const zMin = Math.max(room.rect.z, east.rect.z);
-          const zMax = Math.min(room.rect.z + room.rect.d, east.rect.z + east.rect.d);
-
-          if (rng.next() < doorChance && zMax - zMin >= 1) {
-            const margin = zMax - zMin > 2 ? 1 : 0;
-            const doorZ = zMin + margin + Math.floor(rng.next() * Math.max(1, zMax - zMin - margin * 2));
-            const doorGridX = boundaryX + 0.5;
-            doors.push({ x: doorGridX, z: doorZ, orientation: 'NS', gapWidth: 1 });
-            doorCells.add(`${boundaryX},${doorZ}`);
-            doorCells.add(`${nextX},${doorZ}`);
-          }
-        }
-
-        // South neighbor
-        if (ry + 1 < rows && roomGrid[ry + 1][rx]) {
-          const south = roomGrid[ry + 1][rx]!;
-          const boundaryZ = room.rect.z + room.rect.d - 1;
-          const nextZ = south.rect.z;
-          const xMin = Math.max(room.rect.x, south.rect.x);
-          const xMax = Math.min(room.rect.x + room.rect.w, south.rect.x + south.rect.w);
-
-          if (rng.next() < doorChance && xMax - xMin >= 1) {
-            const margin = xMax - xMin > 2 ? 1 : 0;
-            const doorX = xMin + margin + Math.floor(rng.next() * Math.max(1, xMax - xMin - margin * 2));
-            const doorGridZ = boundaryZ + 0.5;
-            doors.push({ x: doorX, z: doorGridZ, orientation: 'EW', gapWidth: 1 });
-            doorCells.add(`${doorX},${boundaryZ}`);
-            doorCells.add(`${doorX},${nextZ}`);
-          }
-        }
-      }
-    }
-
-    // Mark door cells in roomOwnership as -2 (suppress wall generation there)
-    for (const key of doorCells) {
-      const [gxs, gzs] = key.split(',');
-      const gx = parseInt(gxs), gz = parseInt(gzs);
-      if (gx >= 0 && gx < gridW && gz >= 0 && gz < gridD) {
-        roomOwnership[gz * gridW + gx] = -2;
-      }
-    }
-
-    return { rooms, corridors, openGrid, gridW, gridD, doors, roomOwnership };
-  }
-
-  // wallGap>0: use punchDoor to carve through wall gaps
-  for (let ry = 0; ry < rows; ry++) {
-    for (let rx = 0; rx < cols; rx++) {
-      const room = roomGrid[ry][rx];
-      if (!room) continue;
-
-      if (rx + 1 < cols && roomGrid[ry][rx + 1]) {
-        const east = roomGrid[ry][rx + 1]!;
-        punchDoor(room.rect, east.rect, 'east', openGrid, gridW, gridD, corridors, doors);
-      }
-      if (ry + 1 < rows && roomGrid[ry + 1][rx]) {
-        const south = roomGrid[ry + 1][rx]!;
-        punchDoor(room.rect, south.rect, 'south', openGrid, gridW, gridD, corridors, doors);
-      }
-    }
-  }
-
-  ensureConnectivity(rooms, openGrid, gridW, gridD, corridors);
-
-  // Apply minimum distance filter to room doors
-  const MIN_DOOR_DIST_SQ = 5 * 5;
-  const filteredDoors: DoorDef[] = [];
-  for (const d of doors) {
-    const tooClose = filteredDoors.some(fd => {
-      const dx = d.x - fd.x;
-      const dz = d.z - fd.z;
-      return dx * dx + dz * dz < MIN_DOOR_DIST_SQ;
-    });
-    if (tooClose) continue;
-    filteredDoors.push(d);
-  }
-
-  return { rooms, corridors, openGrid, gridW, gridD, doors: filteredDoors };
-}
 
 /**
  * Detect door positions where corridors enter rooms in a BSP dungeon.
@@ -1088,80 +852,6 @@ function detectCorridorDoors(
   return doors;
 }
 
-/** Distribute total into n roughly-equal segments */
-function distributeEvenly(total: number, n: number): number[] {
-  const base = Math.floor(total / n);
-  const sizes = new Array(n).fill(base);
-  let remainder = total - base * n;
-  for (let i = 0; i < remainder; i++) sizes[i]++;
-  return sizes;
-}
-
-/**
- * Punch a 1-cell door through the wall strip between two rooms.
- * Carves all cells in the gap between room A's edge and room B's edge.
- * Records a DoorDef at the midpoint of the gap for door mesh placement.
- */
-function punchDoor(
-  a: Rect, b: Rect,
-  direction: 'east' | 'south',
-  openGrid: boolean[],
-  gridW: number,
-  gridD: number,
-  corridors: DungeonCorridor[],
-  doors: DoorDef[],
-): void {
-  const cells: { gx: number; gz: number }[] = [];
-
-  if (direction === 'east') {
-    // Wall strip runs from a.x+a.w to b.x along Z overlap
-    const gapStart = a.x + a.w;
-    const gapEnd = b.x;
-    const zMin = Math.max(a.z, b.z);
-    const zMax = Math.min(a.z + a.d, b.z + b.d);
-    if (zMax - zMin < 1) return;
-    // Pick door Z position (avoid corners)
-    const margin = zMax - zMin > 2 ? 1 : 0;
-    const doorZ = zMin + margin + Math.floor(rng.next() * Math.max(1, zMax - zMin - margin * 2));
-    if (doorZ >= gridD) return;
-    for (let gx = gapStart; gx < gapEnd; gx++) {
-      if (gx >= 0 && gx < gridW) {
-        openGrid[doorZ * gridW + gx] = true;
-        cells.push({ gx, gz: doorZ });
-      }
-    }
-    // ~60% chance to place a door at midpoint of the gap
-    if (rng.next() < 0.7) {
-      const midGX = (gapStart + gapEnd - 1) / 2;
-      doors.push({ x: midGX, z: doorZ, orientation: 'NS', gapWidth: 1 });
-    }
-  } else {
-    // Wall strip runs from a.z+a.d to b.z along X overlap
-    const gapStart = a.z + a.d;
-    const gapEnd = b.z;
-    const xMin = Math.max(a.x, b.x);
-    const xMax = Math.min(a.x + a.w, b.x + b.w);
-    if (xMax - xMin < 1) return;
-    const margin = xMax - xMin > 2 ? 1 : 0;
-    const doorX = xMin + margin + Math.floor(rng.next() * Math.max(1, xMax - xMin - margin * 2));
-    if (doorX >= gridW) return;
-    for (let gz = gapStart; gz < gapEnd; gz++) {
-      if (gz >= 0 && gz < gridD) {
-        openGrid[gz * gridW + doorX] = true;
-        cells.push({ gx: doorX, gz });
-      }
-    }
-    // ~60% chance to place a door at midpoint of the gap
-    if (rng.next() < 0.7) {
-      const midGZ = (gapStart + gapEnd - 1) / 2;
-      doors.push({ x: doorX, z: midGZ, orientation: 'EW', gapWidth: 1 });
-    }
-  }
-
-  if (cells.length > 0) {
-    corridors.push({ cells });
-  }
-}
 
 /**
  * Eliminate 1-thick walls: any closed cell that has open cells on opposite

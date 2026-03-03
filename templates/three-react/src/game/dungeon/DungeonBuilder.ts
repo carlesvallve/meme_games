@@ -59,35 +59,11 @@ export class DungeonBuilder {
     this.ctx.roomVisibility.registerMesh(obj, roomIds, activeOnly);
   }
 
-  // ── Simple dungeon (rooms / dungeon presets) ────────────────────
-
-  createDungeonDebris(): void {
-    const { wallGap, doorChance } = useGameStore.getState();
-    const output = generateDungeon(this.ctx.preset as 'dungeon' | 'rooms', this.ctx.groundSize, wallGap, undefined, undefined, doorChance, this.ctx.dungeonSeed);
-    this.ctx.walkMask = output.walkMask;
-    this.ctx.effectiveGroundSize = this.ctx.groundSize;
-
-    this.ctx._roomCount = output.roomCount;
-
-    for (const def of output.boxes) {
-      this.placeBoxFn(def.x, def.z, def.w, def.d, def.h, true);
-    }
-
-    if (output.doors.length > 0) {
-      this.ctx.doorSystem = new DoorSystem(
-        this.ctx.group,
-        this.terrainLike,
-        output.doors,
-        output.walkMask.cellSize,
-      );
-    }
-  }
-
-  // ── Voxel dungeon (voxelDungeon preset) ─────────────────────────
+  // ── Voxel dungeon ──────────────────────────────────────────────
 
   createVoxelDungeonDebris(): void {
-    const { wallGap, roomSpacing, tileSize, doorChance, heightChance, loopChance, dungeonVariant } = useGameStore.getState();
-    const output = generateDungeon('dungeon', this.ctx.groundSize, wallGap, tileSize, roomSpacing, doorChance, this.ctx.dungeonSeed, loopChance);
+    const { roomSpacing, roomSpacingMax, tileSize, doorChance, heightChance, loopChance, dungeonVariant } = useGameStore.getState();
+    const output = generateDungeon(this.ctx.groundSize, tileSize, roomSpacing, doorChance, this.ctx.dungeonSeed, loopChance, roomSpacingMax);
     this.ctx.walkMask = output.walkMask;
     this.ctx.effectiveGroundSize = this.ctx.groundSize;
     const cellSize = output.walkMask.cellSize;
@@ -353,7 +329,7 @@ export class DungeonBuilder {
       heightLevels: levelSet.size,
       maxLevel,
       regionSplitBumps,
-      params: { roomSpacing, doorChance, heightChance, loopChance, tileSize },
+      params: { roomGap: `${roomSpacing}-${roomSpacingMax}`, doorChance, heightChance, loopChance, tileSize },
     });
 
     // Split corridor IDs by height level so corridor cells at different heights
