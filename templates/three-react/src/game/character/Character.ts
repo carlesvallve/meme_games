@@ -347,6 +347,9 @@ export class Character implements BehaviorAgent {
           self.groundY = v;
         },
         isEnemy: this.isEnemy,
+        get isMoving() {
+          return self._wasMoving;
+        },
         params: this.params,
         terrain: this.terrain,
         playActionAnim: () => this.playActionAnim(),

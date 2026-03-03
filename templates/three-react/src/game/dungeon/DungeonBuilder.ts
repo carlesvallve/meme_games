@@ -328,21 +328,37 @@ export class DungeonBuilder {
         const stairIdx = stair.gz * gridW + stair.gx;
         const stairH = cellHeightsArr[stairIdx];
         let highIdx = -1, lowIdx = -1;
-        let bestHighH = stairH, bestLowH = stairH;
+        let bestHighH = stairH, bestLowH = Infinity;
         for (const [ddx, ddz] of [[0, -1], [0, 1], [-1, 0], [1, 0]]) {
           const nx = stair.gx + ddx, nz = stair.gz + ddz;
           if (nx < 0 || nx >= gridW || nz < 0 || nz >= gridD) continue;
           const nIdx = nz * gridW + nx;
           const nH = cellHeightsArr[nIdx];
           if (nH > bestHighH) { bestHighH = nH; highIdx = nIdx; }
-          if (nH <= bestLowH && visOwnership[nIdx] !== -1) { bestLowH = nH; lowIdx = nIdx; }
+          if (nH < bestLowH && visOwnership[nIdx] !== -1) { bestLowH = nH; lowIdx = nIdx; }
         }
-        // Find a valid lower rid: prefer low cell, then stair cell, then any neighbor below high
+        // Find a valid lower rid: prefer lowest neighbor, then walk further down the stair axis
         let lowerRid = -1;
         if (lowIdx >= 0 && visOwnership[lowIdx] !== -1) lowerRid = visOwnership[lowIdx];
-        if (lowerRid === -1 && visOwnership[stairIdx] !== -1) lowerRid = visOwnership[stairIdx];
         if (lowerRid === -1) {
-          // Fallback: any neighbor at the low height with a valid rid
+          // Walk 2-3 cells in the "down" direction (opposite stair direction)
+          // to find a cell at the lower height level
+          const downDx = stair.axis === 'x' ? -stair.direction : 0;
+          const downDz = stair.axis === 'z' ? -stair.direction : 0;
+          for (let step = 1; step <= 3; step++) {
+            const nx = stair.gx + downDx * step, nz = stair.gz + downDz * step;
+            if (nx < 0 || nx >= gridW || nz < 0 || nz >= gridD) break;
+            const nIdx = nz * gridW + nx;
+            const nRid = visOwnership[nIdx];
+            if (nRid !== -1 && cellHeightsArr[nIdx] < stairH) {
+              lowerRid = nRid;
+              if (lowIdx < 0) lowIdx = nIdx;
+              break;
+            }
+          }
+        }
+        if (lowerRid === -1) {
+          // Fallback: any neighbor with valid rid that isn't the high cell
           for (const [ddx, ddz] of [[0, -1], [0, 1], [-1, 0], [1, 0]]) {
             const nx = stair.gx + ddx, nz = stair.gz + ddz;
             if (nx < 0 || nx >= gridW || nz < 0 || nz >= gridD) continue;

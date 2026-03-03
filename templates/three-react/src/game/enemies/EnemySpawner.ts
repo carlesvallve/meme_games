@@ -11,7 +11,7 @@ import { useGameStore } from '../../store';
 
 // ── Constants ──
 
-const FRENZY_SPEED_MULT = 1.8;
+const FRENZY_SPEED_MULT = 1.25;
 const FRENZY_ALERT_Y = 0.75;
 const STAGGER_MIN = 2.0;
 const STAGGER_MAX = 5.0;
