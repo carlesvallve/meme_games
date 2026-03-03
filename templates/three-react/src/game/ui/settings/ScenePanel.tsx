@@ -57,6 +57,10 @@ export function ScenePanel() {
   const setTestFloor = useGameStore((s) => s.setTestFloor);
   const doorChance = useGameStore((s) => s.doorChance);
   const setDoorChance = useGameStore((s) => s.setDoorChance);
+  const heightChance = useGameStore((s) => s.heightChance);
+  const setHeightChance = useGameStore((s) => s.setHeightChance);
+  const loopChance = useGameStore((s) => s.loopChance);
+  const setLoopChance = useGameStore((s) => s.setLoopChance);
   const dungeonSize = useGameStore((s) => s.dungeonSize);
   const setDungeonSize = useGameStore((s) => s.setDungeonSize);
   const roomLabels = useGameStore((s) => s.roomLabels);
@@ -248,14 +252,20 @@ export function ScenePanel() {
                 step={4}
                 onChange={(v) => setDungeonSize(Math.round(v))}
               />
-              <Slider
-                label='Tile Size'
-                value={tileSize}
-                min={0.5}
-                max={2}
-                step={0.25}
-                onChange={(v) => setTileSize(v)}
-              />
+              <div style={rowStyle}>
+                <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>
+                  Tile Size
+                </span>
+                <select
+                  value={tileSize}
+                  onChange={(e) => setTileSize(Number(e.target.value))}
+                  style={selectStyle}
+                >
+                  <option value={0.25} disabled>0.25 — 1×1</option>
+                  <option value={0.5} disabled>0.50 — 2×2</option>
+                  <option value={0.75}>0.75 — 3×3</option>
+                </select>
+              </div>
               <div style={rowStyle}>
                 <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>
                   Variant
@@ -281,6 +291,22 @@ export function ScenePanel() {
                 max={1}
                 step={0.1}
                 onChange={(v) => setDoorChance(v)}
+              />
+              <Slider
+                label='Height Chance'
+                value={heightChance}
+                min={0}
+                max={1}
+                step={0.05}
+                onChange={(v) => setHeightChance(v)}
+              />
+              <Slider
+                label='Loop Chance'
+                value={loopChance}
+                min={0}
+                max={1}
+                step={0.05}
+                onChange={(v) => setLoopChance(v)}
               />
               <Toggle
                 label='Room Labels'

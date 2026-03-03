@@ -9,6 +9,17 @@ import { SeededRandom } from '../../utils/SeededRandom';
 
 const STEPS_PER_TILE = 6;
 
+// ── Height variation tuning ────────────────────────────────────────
+// HEIGHT_LEVEL_SCALE: heightChance (0–1) × this = maxLevels.
+//   e.g. 6 → heightChance 0.55 gives 3 levels, 1.0 gives 6 levels.
+const HEIGHT_LEVEL_SCALE = 6;
+// HEIGHT_AMPLITUDE: noise amplitude multiplier. Higher = more rooms reach max level.
+//   2.0 → conservative (level 3 very rare), 2.5 → moderate, 3.0 → aggressive.
+const HEIGHT_AMPLITUDE = 2.5;
+// HEIGHT_NOISE_SCALE: spatial frequency of height blobs (0.2 = broad, 0.5 = choppy).
+//   Dungeon grids are 24–60 cells, so 0.35 gives ~2–4 blobs across the map.
+const HEIGHT_NOISE_SCALE = 0.35;
+
 // ── Embedded value noise (self-contained, no TerrainNoise dependency) ──
 
 function buildHeightPerm(seed: number): Uint8Array {
@@ -147,11 +158,8 @@ export function computeCellHeights(
 
   // Sample noise at each room center to get raw height
   const perm = buildHeightPerm(rng.int(0, 0x7FFFFFFF));
-  // Noise scale: controls spatial frequency of height blobs.
-  // Dungeon grids are typically 24–60 cells, so 0.35 gives ~2–4 blobs across the map.
-  const noiseScale = 0.35;
-  // Max levels of height variation — _heightChance 0→0, 0.1→1, 0.3→2, 0.55→3, 0.65→4, 1.0→6
-  const maxLevels = Math.round(_heightChance * 6);
+  const noiseScale = HEIGHT_NOISE_SCALE;
+  const maxLevels = Math.round(_heightChance * HEIGHT_LEVEL_SCALE);
 
   const roomHeight = new Float32Array(rooms.length);
   // Get entrance room center for offset (entrance always at height 0)
@@ -167,9 +175,7 @@ export function computeCellHeights(
     const cz = r.z + r.d / 2;
     // Sample noise, subtract entrance noise so entrance is at ~0
     const raw = fbmHeight(cx * noiseScale, cz * noiseScale, perm, 3) - entranceNoise;
-    // Use absolute value so both positive and negative noise produce elevation,
-    // then scale by maxLevels * 2 to get proper range (raw is typically ±0.3)
-    const level = Math.min(maxLevels, Math.round(Math.abs(raw) * maxLevels * 2));
+    const level = Math.min(maxLevels, Math.round(Math.abs(raw) * maxLevels * HEIGHT_AMPLITUDE));
     roomHeight[rid] = level * levelH;
   }
   // Force entrance room to 0
