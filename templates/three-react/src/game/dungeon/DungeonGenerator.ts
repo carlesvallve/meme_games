@@ -7,6 +7,34 @@ import { SeededRandom } from '../../utils/SeededRandom';
 /** Module-level seeded RNG — set at start of generateDungeon(), used by all internal helpers. */
 let rng = new SeededRandom(0);
 
+// ── Lightweight spatial noise for loop corridor modulation ──────────
+
+function buildPerm256(seed: number): Uint8Array {
+  const p = new Uint8Array(512);
+  for (let i = 0; i < 256; i++) p[i] = i;
+  let s = seed | 0;
+  for (let i = 255; i > 0; i--) {
+    s = (s * 1664525 + 1013904223) | 0;
+    const j = ((s >>> 0) % (i + 1));
+    const tmp = p[i]; p[i] = p[j]; p[j] = tmp;
+  }
+  for (let i = 0; i < 256; i++) p[i + 256] = p[i];
+  return p;
+}
+
+/** Value noise 0–1 with smoothstep interpolation. */
+function valNoise2D(x: number, z: number, perm: Uint8Array): number {
+  const xi = Math.floor(x), zi = Math.floor(z);
+  const tx = x - xi, tz = z - zi;
+  const stx = tx * tx * (3 - 2 * tx), stz = tz * tz * (3 - 2 * tz);
+  const ix = xi & 255, iz = zi & 255;
+  const v00 = perm[perm[ix] + iz] / 255;
+  const v10 = perm[perm[(ix + 1) & 255] + iz] / 255;
+  const v01 = perm[perm[ix] + ((iz + 1) & 255)] / 255;
+  const v11 = perm[perm[(ix + 1) & 255] + ((iz + 1) & 255)] / 255;
+  return (v00 + stx * (v10 - v00)) + stz * ((v01 + stx * (v11 - v01)) - (v00 + stx * (v10 - v00)));
+}
+
 export interface BoxDef {
   x: number;
   z: number;
@@ -51,6 +79,8 @@ export interface DungeonOutput {
   exitRoom: number;
   /** Seed used for this generation (for deterministic replay) */
   seed: number;
+  /** Number of extra loop corridors carved for circular paths */
+  loopCorridors: number;
 }
 
 /**
@@ -65,6 +95,7 @@ export function generateDungeon(
   roomSpacing?: number,
   doorChance = 1.0,
   seed?: number,
+  loopChance = 0.35,
 ): DungeonOutput {
   // Initialize seeded RNG — use provided seed or generate a random one
   const actualSeed = seed ?? (Math.random() * 0xFFFFFFFF) >>> 0;
@@ -75,7 +106,7 @@ export function generateDungeon(
   const wallHeight = 2.5;
 
   const result = mode === 'dungeon'
-    ? generateBSPDungeon(gridW, gridD, 2, 6, roomSpacing ?? 2, doorChance)
+    ? generateBSPDungeon(gridW, gridD, 2, 6, roomSpacing ?? 2, doorChance, loopChance)
     : generateAdjacentRooms(gridW, gridD, 4, 4, wallGap, doorChance);
 
   const boxes = convertToBoxDefs(result, cellSize, wallHeight, groundSize);
@@ -231,6 +262,7 @@ export function generateDungeon(
     entranceRoom,
     exitRoom,
     seed: actualSeed,
+    loopCorridors: result.loopCorridors ?? 0,
   };
 }
 
@@ -260,6 +292,8 @@ export interface DungeonResult {
   doors?: DoorDef[];
   /** Per-cell room index (-1 = not in a room). Used to generate shared walls between rooms. */
   roomOwnership?: number[];
+  /** Number of extra loop corridors carved */
+  loopCorridors?: number;
 }
 
 // ── BSP Tree ───────────────────────────────────────────────────────
@@ -470,9 +504,10 @@ function addLoopCorridors(
   gridW: number,
   corridors: DungeonCorridor[],
   mstAdj: Map<number, number[]>,
-): Set<number> {
+  loopChance = 0.35,
+): { protectedCells: Set<number>; count: number } {
   const protectedCells = new Set<number>();
-  if (rooms.length < 3) return protectedCells;
+  if (rooms.length < 3) return { protectedCells, count: 0 };
 
   // BFS hop distance between all room pairs through MST
   const mstHops = (from: number, to: number): number => {
@@ -501,14 +536,19 @@ function addLoopCorridors(
     }
   }
 
+  // Filter out pairs that are too far apart physically — prevents very long corridors.
+  // Max manhattan distance scales with grid size but stays reasonable.
+  const maxCorridorDist = Math.max(12, Math.floor(gridW * 0.4));
+  const eligible = pairs.filter(p => p.dist <= maxCorridorDist);
+
   // Score: prioritise cross-branch connections (high hops, low physical dist).
   // score = hops / dist — higher is better (far in tree, close physically).
-  pairs.sort((a, b) => (b.hops / b.dist) - (a.hops / a.dist));
+  eligible.sort((a, b) => (b.hops / b.dist) - (a.hops / a.dist));
 
   const extraConnections = new Map<number, number>();
-  const maxExtraPerRoom = 1;
+  const maxExtraPerRoom = loopChance > 0.5 ? 2 : 1;
   let added = 0;
-  const maxLoops = Math.max(2, Math.floor(rooms.length * 0.35));
+  const maxLoops = loopChance <= 0 ? 0 : Math.max(1, Math.floor(rooms.length * loopChance));
 
   const carveLoop = (pair: Pair): boolean => {
     const { a, b } = pair;
@@ -542,26 +582,41 @@ function addLoopCorridors(
     return true;
   };
 
+  // Spatial noise: modulates per-pair acceptance based on midpoint position.
+  // High-noise areas get denser loop connectivity, low-noise areas stay linear.
+  const loopPerm = buildPerm256(rng.int(0, 0x7FFFFFFF));
+  const loopNoiseScale = 0.12; // blob size relative to grid
+
+  const spatialAccept = (pair: Pair): boolean => {
+    const ca = roomCenter(rooms[pair.a].rect);
+    const cb = roomCenter(rooms[pair.b].rect);
+    const mx = (ca.gx + cb.gx) / 2;
+    const mz = (ca.gz + cb.gz) / 2;
+    // Noise 0–1 at midpoint, biased by loopChance
+    const n = valNoise2D(mx * loopNoiseScale, mz * loopNoiseScale, loopPerm);
+    // Threshold: low loopChance → only high-noise spots get loops
+    // high loopChance → most spots get loops
+    const threshold = 1.0 - loopChance;
+    return n > threshold && rng.next() < 0.8;
+  };
+
   // Phase 1: Cross-branch connections (hops >= 4, sorted by score)
-  for (const pair of pairs) {
+  for (const pair of eligible) {
     if (added >= maxLoops) break;
     if (pair.hops < 4) continue;
-    if (rng.next() > 0.5) continue; // 50% chance
+    if (!spatialAccept(pair)) continue;
     carveLoop(pair);
   }
 
   // Phase 2: Fill remaining budget with shorter loops
-  for (const pair of pairs) {
+  for (const pair of eligible) {
     if (added >= maxLoops) break;
     if (pair.hops >= 4) continue; // already handled
-    if (rng.next() > 0.5) continue;
+    if (!spatialAccept(pair)) continue;
     carveLoop(pair);
   }
 
-  if (added > 0) {
-    // console.log(`[Dungeon] Added ${added} loop corridors total (${protectedCells.size} protected cells)`);
-  }
-  return protectedCells;
+  return { protectedCells, count: added };
 }
 
 /** Carve an L-shaped corridor between two grid points.
@@ -625,6 +680,7 @@ export function generateBSPDungeon(
   maxDepth = 6,
   roomSpacingOverride?: number,
   doorChance = 1.0,
+  loopChance = 0.35,
 ): DungeonResult {
   const border = 2;
   const roomSpacing = Math.max(1, roomSpacingOverride ?? 3);
@@ -661,13 +717,13 @@ export function generateBSPDungeon(
   const mstAdj = connectRoomsMST(rooms, openGrid, gridW, corridors);
 
   // Add extra loop corridors — prioritise cross-branch connections
-  const loopProtected = addLoopCorridors(rooms, openGrid, gridW, corridors, mstAdj);
+  const loopResult = addLoopCorridors(rooms, openGrid, gridW, corridors, mstAdj, loopChance);
 
   // Eliminate 1-thick walls, re-bridge, repeat
   // Loop corridor cells are protected from being closed.
-  eliminateThinWalls(openGrid, roomGrid, gridW, gridD, loopProtected);
+  eliminateThinWalls(openGrid, roomGrid, gridW, gridD, loopResult.protectedCells);
   ensureConnectivity(rooms, openGrid, gridW, gridD, corridors);
-  eliminateThinWalls(openGrid, roomGrid, gridW, gridD, loopProtected);
+  eliminateThinWalls(openGrid, roomGrid, gridW, gridD, loopResult.protectedCells);
 
   // Detect doors: where corridor cells meet room boundaries
   // Log corridor cell count for debugging
@@ -676,7 +732,6 @@ export function generateBSPDungeon(
   // console.log(`[DOOR] ${rooms.length} rooms, ${corridors.length} corridors (${totalCorridorCells} cells)`);
 
   const doors = detectCorridorDoors(corridors, roomGrid, openGrid, gridW, gridD, doorChance);
-  // console.log(`[DOOR] detectCorridorDoors found ${doors.length} doors`);
 
   // Stamp corridor cells with unique negative IDs (-2, -3, ...) so each corridor gets its own floor
   for (let ci = 0; ci < corridors.length; ci++) {
@@ -687,7 +742,7 @@ export function generateBSPDungeon(
     }
   }
 
-  return { rooms, corridors, openGrid, gridW, gridD, doors, roomOwnership: Array.from(roomGrid) };
+  return { rooms, corridors, openGrid, gridW, gridD, doors, roomOwnership: Array.from(roomGrid), loopCorridors: loopResult.count };
 }
 
 /**
@@ -940,75 +995,77 @@ function detectCorridorDoors(
 
   const isCorridor = (gx: number, gz: number): boolean => corridorSet.has(`${gx},${gz}`);
 
-  for (const corridor of corridors) {
-    for (const cell of corridor.cells) {
-      const { gx, gz } = cell;
-      if (roomGrid[gz * gridW + gx] >= 0) continue; // skip cells inside rooms
+  // Two rounds: first collect room-adjacent candidates (priority), then mid-corridor ones
+  for (let round = 0; round < 2; round++) {
+    for (const corridor of corridors) {
+      for (const cell of corridor.cells) {
+        const { gx, gz } = cell;
+        if (roomGrid[gz * gridW + gx] >= 0) continue; // skip cells inside rooms
 
-      const key = `${gx},${gz}`;
-      if (seen.has(key)) continue;
+        const key = `${gx},${gz}`;
+        if (seen.has(key)) continue;
 
-      // Check if this corridor cell is adjacent to any room
-      const hasRoomNeighbor =
-        (gx + 1 < gridW && roomGrid[gz * gridW + gx + 1] >= 0) ||
-        (gx - 1 >= 0 && roomGrid[gz * gridW + gx - 1] >= 0) ||
-        (gz + 1 < gridD && roomGrid[(gz + 1) * gridW + gx] >= 0) ||
-        (gz - 1 >= 0 && roomGrid[(gz - 1) * gridW + gx] >= 0);
-      if (!hasRoomNeighbor) continue;
+        // Check if this corridor cell is adjacent to any room
+        const hasRoomNeighbor =
+          (gx + 1 < gridW && roomGrid[gz * gridW + gx + 1] >= 0) ||
+          (gx - 1 >= 0 && roomGrid[gz * gridW + gx - 1] >= 0) ||
+          (gz + 1 < gridD && roomGrid[(gz + 1) * gridW + gx] >= 0) ||
+          (gz - 1 >= 0 && roomGrid[(gz - 1) * gridW + gx] >= 0);
 
-      // Determine orientation: check if perpendicular cells are also corridor
-      // If no corridor to north/south → corridor is 1-cell wide in Z → runs EW → NS door
-      // If no corridor to east/west → corridor is 1-cell wide in X → runs NS → EW door
-      const corrN = isCorridor(gx, gz - 1);
-      const corrS = isCorridor(gx, gz + 1);
-      const corrE = isCorridor(gx + 1, gz);
-      const corrW = isCorridor(gx - 1, gz);
+        // Round 0: room-adjacent only. Round 1: mid-corridor cells too.
+        if (round === 0 && !hasRoomNeighbor) continue;
+        if (round === 1 && hasRoomNeighbor) continue; // already processed
 
-      let orientation: 'NS' | 'EW';
-      if (!corrN && !corrS) {
-        orientation = 'NS'; // narrow in Z → door runs NS
-      } else if (!corrE && !corrW) {
-        orientation = 'EW'; // narrow in X → door runs EW
-      } else {
-        continue; // corridor is wide or intersection — skip
+        // Determine orientation: check if perpendicular cells are also corridor or open
+        // The cell must be a 1-cell-wide chokepoint in one direction
+        const openOrCorrN = isCorridor(gx, gz - 1) || (gz - 1 >= 0 && roomGrid[(gz - 1) * gridW + gx] >= 0);
+        const openOrCorrS = isCorridor(gx, gz + 1) || (gz + 1 < gridD && roomGrid[(gz + 1) * gridW + gx] >= 0);
+        const openOrCorrE = isCorridor(gx + 1, gz) || (gx + 1 < gridW && roomGrid[gz * gridW + gx + 1] >= 0);
+        const openOrCorrW = isCorridor(gx - 1, gz) || (gx - 1 >= 0 && roomGrid[gz * gridW + gx - 1] >= 0);
+
+        let orientation: 'NS' | 'EW';
+        if (!openOrCorrN && !openOrCorrS) {
+          orientation = 'NS'; // narrow in Z → door runs NS, blocks EW
+        } else if (!openOrCorrE && !openOrCorrW) {
+          orientation = 'EW'; // narrow in X → door runs EW, blocks NS
+        } else {
+          continue; // not a chokepoint — skip
+        }
+
+        seen.add(key);
+        candidates.push({ x: gx, z: gz, orientation, gapWidth: 1 });
       }
-
-      // Validate door placement: floor in front & behind, walls on each side.
-      // NS door (runs N-S, blocks E-W): floor east & west, walls north & south
-      // EW door (runs E-W, blocks N-S): floor north & south, walls east & west
-      if (orientation === 'NS') {
-        const floorE = gx + 1 < gridW && openGrid[gz * gridW + gx + 1];
-        const floorW = gx - 1 >= 0 && openGrid[gz * gridW + gx - 1];
-        const wallN = gz - 1 < 0 || !openGrid[(gz - 1) * gridW + gx];
-        const wallS = gz + 1 >= gridD || !openGrid[(gz + 1) * gridW + gx];
-        if (!floorE || !floorW || !wallN || !wallS) continue;
-      } else {
-        const floorN = gz - 1 >= 0 && openGrid[(gz - 1) * gridW + gx];
-        const floorS = gz + 1 < gridD && openGrid[(gz + 1) * gridW + gx];
-        const wallE = gx + 1 >= gridW || !openGrid[gz * gridW + gx + 1];
-        const wallW = gx - 1 < 0 || !openGrid[gz * gridW + gx - 1];
-        if (!floorN || !floorS || !wallE || !wallW) continue;
-      }
-
-      seen.add(key);
-
-      candidates.push({ x: gx, z: gz, orientation, gapWidth: 1 });
     }
   }
 
   // console.log(`[DOOR] candidates=${candidates.length}, corridorCells=${corridorSet.size}`);
 
-  // Shuffle so selection isn't biased by scan order
-  for (let i = candidates.length - 1; i > 0; i--) {
-    const j = Math.floor(rng.next() * (i + 1));
-    [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
+  // Partition: room-adjacent candidates first, then mid-corridor
+  const roomAdj: DoorDef[] = [];
+  const midCorr: DoorDef[] = [];
+  for (const c of candidates) {
+    const adj =
+      (c.x + 1 < gridW && roomGrid[c.z * gridW + c.x + 1] >= 0) ||
+      (c.x - 1 >= 0 && roomGrid[c.z * gridW + c.x - 1] >= 0) ||
+      (c.z + 1 < gridD && roomGrid[(c.z + 1) * gridW + c.x] >= 0) ||
+      (c.z - 1 >= 0 && roomGrid[(c.z - 1) * gridW + c.x] >= 0);
+    (adj ? roomAdj : midCorr).push(c);
   }
 
-  // Filter: min distance between doors + doorChance
+  // Shuffle each group independently
+  for (const arr of [roomAdj, midCorr]) {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(rng.next() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+  }
+
+  // Process room-adjacent first (priority), then mid-corridor
+  const ordered = [...roomAdj, ...midCorr];
   const MIN_DIST_SQ = 3 * 3;
   const doors: DoorDef[] = [];
 
-  for (const c of candidates) {
+  for (const c of ordered) {
     if (rng.next() > doorChance) continue;
     const tooClose = doors.some(d => {
       const dx = c.x - d.x;

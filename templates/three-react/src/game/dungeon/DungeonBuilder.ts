@@ -86,8 +86,8 @@ export class DungeonBuilder {
   // ── Voxel dungeon (voxelDungeon preset) ─────────────────────────
 
   createVoxelDungeonDebris(): void {
-    const { wallGap, roomSpacing, tileSize, doorChance, dungeonVariant } = useGameStore.getState();
-    const output = generateDungeon('dungeon', this.ctx.groundSize, wallGap, tileSize, roomSpacing, doorChance, this.ctx.dungeonSeed);
+    const { wallGap, roomSpacing, tileSize, doorChance, heightChance, loopChance, dungeonVariant } = useGameStore.getState();
+    const output = generateDungeon('dungeon', this.ctx.groundSize, wallGap, tileSize, roomSpacing, doorChance, this.ctx.dungeonSeed, loopChance);
     this.ctx.walkMask = output.walkMask;
     this.ctx.effectiveGroundSize = this.ctx.groundSize;
     const cellSize = output.walkMask.cellSize;
@@ -164,7 +164,7 @@ export class DungeonBuilder {
     const { cellHeights: cellHeightsArr, stairs, ladderHints } = computeCellHeights(
       output.roomOwnership, visualOpenGrid,
       output.entranceRoom, output.rooms, gridW, gridD,
-      output.corridors, stepH, wallVoxH, stairRng,
+      output.corridors, stepH, wallVoxH, stairRng, heightChance,
     );
     this.ctx.cellHeights = cellHeightsArr;
     this.ctx.dungeonCellSize = cellSize;
@@ -217,6 +217,101 @@ export class DungeonBuilder {
       }
     }
 
+    // ── Break up oversized visibility regions ──
+    // Flood-fill like RoomVisibility (stop at doors + height diffs) to find connected
+    // regions. If any region is too large, bump corridor heights to split it.
+    let regionSplitBumps = 0;
+    {
+      const heightThreshold = 0.15; // matches RoomVisibility constructor
+      const MAX_REGION_CELLS = 120;
+      const doorCells = new Set<number>();
+      for (const gd of output.gridDoors) {
+        doorCells.add(Math.round(gd.z) * gridW + Math.round(gd.x));
+      }
+      const visited = new Uint8Array(gridW * gridD);
+      const dirs4: [number, number][] = [[0, -1], [0, 1], [-1, 0], [1, 0]];
+
+      for (let startIdx = 0; startIdx < gridW * gridD; startIdx++) {
+        if (visited[startIdx]) continue;
+        if (!visualOpenGrid[startIdx]) continue;
+
+        // Flood-fill this region
+        const region: number[] = [];
+        const queue: number[] = [startIdx];
+        visited[startIdx] = 1;
+        while (queue.length > 0) {
+          const idx = queue.pop()!;
+          region.push(idx);
+          const gx = idx % gridW;
+          const gz = (idx - gx) / gridW;
+          for (const [dx, dz] of dirs4) {
+            const nx = gx + dx, nz = gz + dz;
+            if (nx < 0 || nx >= gridW || nz < 0 || nz >= gridD) continue;
+            const nidx = nz * gridW + nx;
+            if (visited[nidx]) continue;
+            if (!visualOpenGrid[nidx]) continue;
+            if (doorCells.has(nidx)) continue;
+            const hDiff = Math.abs(cellHeightsArr[nidx] - cellHeightsArr[idx]);
+            if (hDiff > heightThreshold) continue;
+            visited[nidx] = 1;
+            queue.push(nidx);
+          }
+        }
+
+        if (region.length <= MAX_REGION_CELLS) continue;
+
+        // Region too large — find corridor cells that connect different rooms
+        // and bump their height to split the region.
+        // Strategy: find corridor cells adjacent to two different rooms, pick
+        // the ones farthest from entrance to bump up by 1 level.
+        const entranceGx = output.rooms[output.entranceRoom].x +
+          Math.floor(output.rooms[output.entranceRoom].w / 2);
+        const entranceGz = output.rooms[output.entranceRoom].z +
+          Math.floor(output.rooms[output.entranceRoom].d / 2);
+
+        // Collect candidate corridor cells that border a room
+        type SplitCandidate = { idx: number; gx: number; gz: number; distSq: number };
+        const candidates: SplitCandidate[] = [];
+        for (const idx of region) {
+          if (output.roomOwnership[idx] >= 0) continue; // skip room cells
+          const gx = idx % gridW;
+          const gz = (idx - gx) / gridW;
+          // Must be adjacent to at least one room cell
+          let touchesRoom = false;
+          for (const [dx, dz] of dirs4) {
+            const nx = gx + dx, nz = gz + dz;
+            if (nx >= 0 && nx < gridW && nz >= 0 && nz < gridD) {
+              if (output.roomOwnership[nz * gridW + nx] >= 0) { touchesRoom = true; break; }
+            }
+          }
+          if (!touchesRoom) continue;
+          // Skip cells adjacent to stairs (don't break stair transitions)
+          let adjStair = false;
+          for (const [dx, dz] of dirs4) {
+            const nx = gx + dx, nz = gz + dz;
+            if (nx >= 0 && nx < gridW && nz >= 0 && nz < gridD) {
+              if (this.ctx.stairMap.has(nz * gridW + nx)) { adjStair = true; break; }
+            }
+          }
+          if (adjStair) continue;
+          if (this.ctx.stairMap.has(idx)) continue;
+          const ddx = gx - entranceGx, ddz = gz - entranceGz;
+          candidates.push({ idx, gx, gz, distSq: ddx * ddx + ddz * ddz });
+        }
+
+        // Sort by distance from entrance (bump cells farthest away first)
+        candidates.sort((a, b) => b.distSq - a.distSq);
+
+        // Bump a fraction of corridor cells to split the region
+        const bumpCount = Math.max(1, Math.floor(candidates.length * 0.3));
+        for (let bi = 0; bi < Math.min(bumpCount, candidates.length); bi++) {
+          const c = candidates[bi];
+          cellHeightsArr[c.idx] += stepH;
+          regionSplitBumps++;
+        }
+      }
+    }
+
     // Update entrance/exit room center Y with cell heights
     if (this.ctx.entranceRoomCenter && output.rooms.length > 0) {
       const er = output.rooms[output.entranceRoom];
@@ -230,6 +325,36 @@ export class DungeonBuilder {
       const xgz = Math.floor(xr.z + xr.d / 2);
       this.ctx.exitRoomCenter.y = cellHeightsArr[xgz * gridW + xgx];
     }
+
+    // Compute height stats for summary
+    let maxLevel = 0;
+    const levelSet = new Set<number>();
+    for (let i = 0; i < cellHeightsArr.length; i++) {
+      if (cellHeightsArr[i] > 0) {
+        const lvl = Math.round(cellHeightsArr[i] / wallVoxH);
+        levelSet.add(lvl);
+        if (lvl > maxLevel) maxLevel = lvl;
+      }
+    }
+
+    // ── Single dungeon generation summary ──
+    const floor = useGameStore.getState().floor;
+    console.log(`[Dungeon F${floor}]`, {
+      seed: this.ctx.dungeonSeed,
+      theme,
+      grid: `${gridW}x${gridD}`,
+      groundSize: this.ctx.groundSize,
+      rooms: output.rooms.length,
+      corridors: output.corridors.length,
+      loopCorridors: output.loopCorridors,
+      doors: output.doors.length,
+      stairs: stairs.length,
+      ladders: ladderHints.length,
+      heightLevels: levelSet.size,
+      maxLevel,
+      regionSplitBumps,
+      params: { roomSpacing, doorChance, heightChance, loopChance, tileSize },
+    });
 
     // Split corridor IDs by height level so corridor cells at different heights
     // get different visibility IDs. Without this, a stair landing (raised to upper
@@ -250,6 +375,59 @@ export class DungeonBuilder {
         corridorHeightMap.set(key, synId);
       }
       visOwnership[i] = synId;
+    }
+
+    // Split corridor visibility IDs at door cells.
+    // Without this, cells on both sides of a mid-corridor door share the same
+    // synthetic ID — the flood-fill correctly stops at the door, but all objects
+    // registered under the shared ID still light up on both sides.
+    // Fix: flood-fill each corridor segment, treating doors as barriers, and
+    // assign a fresh synthetic ID to each disconnected segment.
+    {
+      const doorCellSet = new Set<number>();
+      for (const gd of output.gridDoors) {
+        doorCellSet.add(Math.round(gd.z) * gridW + Math.round(gd.x));
+      }
+      const dirs4: [number, number][] = [[0, -1], [0, 1], [-1, 0], [1, 0]];
+      const visited = new Uint8Array(gridW * gridD);
+      for (let startIdx = 0; startIdx < gridW * gridD; startIdx++) {
+        if (visited[startIdx]) continue;
+        const rid = visOwnership[startIdx];
+        if (rid >= 0 || rid === -1) continue; // only process corridor cells
+        if (doorCellSet.has(startIdx)) continue; // door cells get their own ID below
+
+        // Flood-fill this corridor segment, stopping at doors
+        const segmentId = nextSyntheticId--;
+        const queue: number[] = [startIdx];
+        visited[startIdx] = 1;
+        visOwnership[startIdx] = segmentId;
+        while (queue.length > 0) {
+          const idx = queue.pop()!;
+          const gx = idx % gridW;
+          const gz = (idx - gx) / gridW;
+          for (const [dx, dz] of dirs4) {
+            const nx = gx + dx, nz = gz + dz;
+            if (nx < 0 || nx >= gridW || nz < 0 || nz >= gridD) continue;
+            const nidx = nz * gridW + nx;
+            if (visited[nidx]) continue;
+            const nrid = visOwnership[nidx];
+            if (nrid >= 0 || nrid === -1) continue; // not a corridor cell
+            if (doorCellSet.has(nidx)) continue; // stop at door cells
+            // Also stop at height differences (same as RoomVisibility)
+            const hDiff = Math.abs(cellHeightsArr[nidx] - cellHeightsArr[idx]);
+            if (hDiff > 0.15) continue;
+            visited[nidx] = 1;
+            visOwnership[nidx] = segmentId;
+            queue.push(nidx);
+          }
+        }
+      }
+      // Door cells themselves: assign unique IDs so they don't bridge segments
+      for (const doorIdx of doorCellSet) {
+        const rid = visOwnership[doorIdx];
+        if (rid >= 0 || rid === -1) continue;
+        visOwnership[doorIdx] = nextSyntheticId--;
+      }
     }
 
     const voxConfig = {

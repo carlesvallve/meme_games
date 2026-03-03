@@ -207,6 +207,8 @@ export const DEFAULT_SCENE_SETTINGS = {
   testProp: '' as string, // empty = normal templates, category name = spawn only that
   testFloor: '' as string, // empty = random ground tiles, tile id = use only that
   doorChance: 0.7,
+  heightChance: 0.55, // probability of height change between rooms (0–1)
+  loopChance: 0.35, // loop corridor budget as fraction of rooms (0–1)
   roomLabels: true, // voxelDungeon: show room name labels (e.g. "Barracks")
   natureEnabled: true,
   useBiomes: true,
@@ -216,6 +218,7 @@ export const DEFAULT_SCENE_SETTINGS = {
   hmrCacheEnabled: false,
   dungeonVariant: 'random',
   dungeonSize: 40,
+  progressiveLayout: true, // dungeon layout scales with floor (size, height, doors)
 };
 
 // ── localStorage persistence ──────────────────────────────────────────
@@ -239,6 +242,8 @@ interface SavedSettings {
   testProp?: string;
   testFloor?: string;
   doorChance?: number;
+  heightChance?: number;
+  loopChance?: number;
   roomLabels?: boolean;
   natureEnabled?: boolean;
   useBiomes?: boolean;
@@ -248,6 +253,7 @@ interface SavedSettings {
   hmrCacheEnabled?: boolean;
   dungeonVariant?: string;
   dungeonSize?: number;
+  progressiveLayout?: boolean;
   progressionRecipe?: string;
   postProcess?: PostProcessSettings;
   characterPushEnabled?: boolean;
@@ -286,6 +292,8 @@ function saveSettings(): void {
     testProp: s.testProp,
     testFloor: s.testFloor,
     doorChance: s.doorChance,
+    heightChance: s.heightChance,
+    loopChance: s.loopChance,
     roomLabels: s.roomLabels,
     natureEnabled: s.natureEnabled,
     useBiomes: s.useBiomes,
@@ -295,6 +303,7 @@ function saveSettings(): void {
     hmrCacheEnabled: s.hmrCacheEnabled,
     dungeonVariant: s.dungeonVariant,
     dungeonSize: s.dungeonSize,
+    progressiveLayout: s.progressiveLayout,
     progressionRecipe: s.progressionRecipe,
     postProcess: s.postProcess,
     characterPushEnabled: s.characterPushEnabled,
@@ -357,6 +366,10 @@ interface GameStore {
   testProp: string;
   testFloor: string;
   doorChance: number;
+  heightChance: number;
+  setHeightChance: (chance: number) => void;
+  loopChance: number;
+  setLoopChance: (chance: number) => void;
   roomLabels: boolean;
   natureEnabled: boolean;
   setNatureEnabled: (on: boolean) => void;
@@ -377,6 +390,8 @@ interface GameStore {
   setProgressionRecipe: (name: string) => void;
   dungeonSize: number;
   setDungeonSize: (size: number) => void;
+  progressiveLayout: boolean;
+  setProgressiveLayout: (on: boolean) => void;
   postProcess: PostProcessSettings;
   setPostProcess: (settings: PostProcessSettings) => void;
   setPostProcessParam: <K extends keyof PostProcessSettings>(
@@ -558,6 +573,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
   testProp: saved.testProp ?? DEFAULT_SCENE_SETTINGS.testProp,
   testFloor: saved.testFloor ?? DEFAULT_SCENE_SETTINGS.testFloor,
   doorChance: saved.doorChance ?? DEFAULT_SCENE_SETTINGS.doorChance,
+  heightChance: saved.heightChance ?? DEFAULT_SCENE_SETTINGS.heightChance,
+  setHeightChance: (heightChance) => set({ heightChance }),
+  loopChance: saved.loopChance ?? DEFAULT_SCENE_SETTINGS.loopChance,
+  setLoopChance: (loopChance) => set({ loopChance }),
   roomLabels: saved.roomLabels ?? DEFAULT_SCENE_SETTINGS.roomLabels,
   natureEnabled: saved.natureEnabled ?? DEFAULT_SCENE_SETTINGS.natureEnabled,
   setNatureEnabled: (natureEnabled) => set({ natureEnabled }),
@@ -580,6 +599,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
   setProgressionRecipe: (progressionRecipe) => set({ progressionRecipe }),
   dungeonSize: saved.dungeonSize ?? DEFAULT_SCENE_SETTINGS.dungeonSize,
   setDungeonSize: (dungeonSize) => set({ dungeonSize }),
+  progressiveLayout: saved.progressiveLayout ?? DEFAULT_SCENE_SETTINGS.progressiveLayout,
+  setProgressiveLayout: (progressiveLayout) => set({ progressiveLayout }),
   postProcess: saved.postProcess ?? { ...DEFAULT_POST_PROCESS },
   setPostProcess: (postProcess) => set({ postProcess }),
   setPostProcessParam: (key, value) =>

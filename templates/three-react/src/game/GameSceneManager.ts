@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { useGameStore } from '../store';
+import { useGameStore, DEFAULT_SCENE_SETTINGS } from '../store';
 import type { ParticleToggles } from '../store';
 import type { ParticleSystem } from '../types';
 import { entityRegistry } from './core/Entity';
@@ -85,6 +85,22 @@ export function createSceneManager(
     const store = useGameStore.getState();
     store.setEnemyParam('allowedTypes', pool);
     store.setZoneName(cfg.zoneName);
+
+    // Apply dungeon layout progression from recipe, or restore defaults when disabled
+    if (store.progressiveLayout) {
+      if (cfg.dungeonSize != null) store.setDungeonSize(cfg.dungeonSize);
+      if (cfg.roomSpacing != null) store.setRoomSpacing(cfg.roomSpacing);
+      if (cfg.doorChance != null) store.setDoorChance(cfg.doorChance);
+      if (cfg.heightChance != null) store.setHeightChance(cfg.heightChance);
+      if (cfg.loopChance != null) store.setLoopChance(cfg.loopChance);
+    } else {
+      const d = DEFAULT_SCENE_SETTINGS;
+      store.setDungeonSize(d.dungeonSize);
+      store.setRoomSpacing(d.roomSpacing);
+      store.setDoorChance(d.doorChance);
+      store.setHeightChance(d.heightChance);
+      store.setLoopChance(d.loopChance);
+    }
 
     if (announce) {
       const themed = getThemedFloor(floor);

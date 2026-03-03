@@ -1,13 +1,53 @@
 // ── StairSystem ─────────────────────────────────────────────────────
-// Room-level height variation via BFS. Each room gets a height level.
-// Stairs placed at room-corridor boundaries where heights differ by 1 level.
-// Ladders hinted where heights differ by >1 level.
+// Room-level height variation via noise-based heightmap. Each room gets
+// a height sampled from 2D value noise at its center, quantized to
+// integer levels. Stairs placed at 1-level diffs, ladders at 2+.
 // Corridors are always flat at the lower of their connected rooms.
 
 import * as THREE from 'three';
 import { SeededRandom } from '../../utils/SeededRandom';
 
 const STEPS_PER_TILE = 6;
+
+// ── Embedded value noise (self-contained, no TerrainNoise dependency) ──
+
+function buildHeightPerm(seed: number): Uint8Array {
+  const p = new Uint8Array(512);
+  for (let i = 0; i < 256; i++) p[i] = i;
+  let s = seed | 0;
+  for (let i = 255; i > 0; i--) {
+    s = (s * 1664525 + 1013904223) | 0;
+    const j = ((s >>> 0) % (i + 1));
+    const tmp = p[i]; p[i] = p[j]; p[j] = tmp;
+  }
+  for (let i = 0; i < 256; i++) p[i + 256] = p[i];
+  return p;
+}
+
+function smoothstepH(t: number): number { return t * t * (3 - 2 * t); }
+
+function valueNoise(x: number, z: number, perm: Uint8Array): number {
+  const xi = Math.floor(x), zi = Math.floor(z);
+  const tx = smoothstepH(x - xi), tz = smoothstepH(z - zi);
+  const ix = xi & 255, iz = zi & 255;
+  const v00 = perm[perm[ix] + iz] / 255;
+  const v10 = perm[perm[(ix + 1) & 255] + iz] / 255;
+  const v01 = perm[perm[ix] + ((iz + 1) & 255)] / 255;
+  const v11 = perm[perm[(ix + 1) & 255] + ((iz + 1) & 255)] / 255;
+  return (v00 + tx * (v10 - v00)) + tz * ((v01 + tx * (v11 - v01)) - (v00 + tx * (v10 - v00)));
+}
+
+/** Multi-octave fractal noise for organic height variation. */
+function fbmHeight(x: number, z: number, perm: Uint8Array, octaves: number): number {
+  let value = 0, amp = 1, freq = 1, maxAmp = 0;
+  for (let i = 0; i < octaves; i++) {
+    value += valueNoise(x * freq, z * freq, perm) * amp;
+    maxAmp += amp;
+    amp *= 0.5;
+    freq *= 2.0;
+  }
+  return value / maxAmp; // normalized 0–1
+}
 
 export interface StairDef {
   gx: number;
@@ -73,7 +113,12 @@ export function computeCellHeights(
     corridorInfos.push({ rooms: [...touched], cells: corridor.cells });
   }
 
-  // ── 2. BFS room graph → assign room heights ──
+  // ── 2. Noise-based room heights ──
+  // Sample 2D fractal noise at each room's center, quantize to integer levels.
+  // _heightChance controls max number of levels (amplitude).
+  // This creates organic terrain: flat areas, rolling hills, occasional plateaus.
+
+  // Build adjacency for BFS reachability check
   const roomAdj = new Map<number, number[]>();
   for (const ci of corridorInfos) {
     for (let a = 0; a < ci.rooms.length; a++) {
@@ -86,10 +131,9 @@ export function computeCellHeights(
     }
   }
 
-  const roomHeight = new Float32Array(rooms.length);
+  // BFS to mark reachable rooms (still needed for stair/ladder placement)
   const roomVisited = new Uint8Array(rooms.length);
   roomVisited[entranceRoom] = 1;
-
   const queue = [entranceRoom];
   let head = 0;
   while (head < queue.length) {
@@ -97,20 +141,39 @@ export function computeCellHeights(
     for (const neighbor of roomAdj.get(rid) ?? []) {
       if (roomVisited[neighbor]) continue;
       roomVisited[neighbor] = 1;
-      // Height change distribution per BFS hop:
-      //   40% → +1 level (stairs)
-      //   10% → +2 levels (ladder)
-      //   10% → -1 level (stairs, adds variety)
-      //   40% → flat (no change)
-      const roll = rng.next();
-      const delta = roll < 0.40 ? levelH
-        : roll < 0.50 ? 2 * levelH
-        : roll < 0.60 ? -levelH
-        : 0;
-      roomHeight[neighbor] = Math.max(0, roomHeight[rid] + delta);
       queue.push(neighbor);
     }
   }
+
+  // Sample noise at each room center to get raw height
+  const perm = buildHeightPerm(rng.int(0, 0x7FFFFFFF));
+  // Noise scale: controls spatial frequency of height blobs.
+  // Dungeon grids are typically 24–60 cells, so 0.35 gives ~2–4 blobs across the map.
+  const noiseScale = 0.35;
+  // Max levels of height variation — _heightChance 0→0, 0.1→1, 0.3→2, 0.55→3, 0.65→4, 1.0→6
+  const maxLevels = Math.round(_heightChance * 6);
+
+  const roomHeight = new Float32Array(rooms.length);
+  // Get entrance room center for offset (entrance always at height 0)
+  const eRoom = rooms[entranceRoom];
+  const eCX = eRoom.x + eRoom.w / 2;
+  const eCZ = eRoom.z + eRoom.d / 2;
+  const entranceNoise = fbmHeight(eCX * noiseScale, eCZ * noiseScale, perm, 3);
+
+  for (let rid = 0; rid < rooms.length; rid++) {
+    if (!roomVisited[rid]) continue;
+    const r = rooms[rid];
+    const cx = r.x + r.w / 2;
+    const cz = r.z + r.d / 2;
+    // Sample noise, subtract entrance noise so entrance is at ~0
+    const raw = fbmHeight(cx * noiseScale, cz * noiseScale, perm, 3) - entranceNoise;
+    // Use absolute value so both positive and negative noise produce elevation,
+    // then scale by maxLevels * 2 to get proper range (raw is typically ±0.3)
+    const level = Math.min(maxLevels, Math.round(Math.abs(raw) * maxLevels * 2));
+    roomHeight[rid] = level * levelH;
+  }
+  // Force entrance room to 0
+  roomHeight[entranceRoom] = 0;
 
   // ── 3. Set cell heights ──
   // Room cells

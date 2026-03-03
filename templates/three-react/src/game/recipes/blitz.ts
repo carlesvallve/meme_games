@@ -21,6 +21,11 @@ export const BLITZ: ProgressionRecipe = {
       densityMult: 1.2,
       hpMult: 1.0,
       damageMult: 1.0,
+      dungeonSize: 30,
+      roomSpacing: 3,
+      heightChance: 0.25,
+      doorChance: 0.5,
+      loopChance: 0.15,
     },
     {
       floors: [3, 4],
@@ -34,6 +39,11 @@ export const BLITZ: ProgressionRecipe = {
       densityMult: 1.3,
       hpMult: 1.6,
       damageMult: 1.4,
+      dungeonSize: 38,
+      roomSpacing: 3,
+      heightChance: 0.45,
+      doorChance: 0.7,
+      loopChance: 0.35,
     },
     {
       floors: [5, 6],
@@ -47,6 +57,11 @@ export const BLITZ: ProgressionRecipe = {
       densityMult: 1.5,
       hpMult: 2.5,
       damageMult: 2.0,
+      dungeonSize: 46,
+      roomSpacing: 2,
+      heightChance: 0.6,
+      doorChance: 0.8,
+      loopChance: 0.5,
     },
   ],
 
@@ -81,5 +96,6 @@ export const BLITZ: ProgressionRecipe = {
   overshootScaling: {
     hpPerFloor: 0.5,
     damagePerFloor: 0.3,
+    dungeonSizePerFloor: 3,
   },
 };

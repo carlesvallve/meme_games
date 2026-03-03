@@ -76,6 +76,10 @@ export function ScenePanel() {
   const setHmrCacheEnabled = useGameStore((s) => s.setHmrCacheEnabled);
   const remesh = useGameStore((s) => s.onRemesh);
   const randomizePalette = useGameStore((s) => s.onRandomizePalette);
+  const forceStairs = useGameStore((s) => s.forceStairs);
+  const setForceStairs = useGameStore((s) => s.setForceStairs);
+  const progressiveLayout = useGameStore((s) => s.progressiveLayout);
+  const setProgressiveLayout = useGameStore((s) => s.setProgressiveLayout);
 
   const hasPresetSettings =
     terrainPreset === 'heightmap' ||
@@ -285,8 +289,13 @@ export function ScenePanel() {
               />
               <Toggle
                 label='Force Stairs'
-                value={useGameStore((s) => s.forceStairs)}
-                onChange={useGameStore.getState().setForceStairs}
+                value={forceStairs}
+                onChange={setForceStairs}
+              />
+              <Toggle
+                label='Progressive Layout'
+                value={progressiveLayout}
+                onChange={setProgressiveLayout}
               />
               <div style={rowStyle}>
                 <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>

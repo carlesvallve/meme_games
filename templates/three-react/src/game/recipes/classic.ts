@@ -20,6 +20,11 @@ export const CLASSIC: ProgressionRecipe = {
       densityMult: 1.0,
       hpMult: 1.0,
       damageMult: 1.0,
+      dungeonSize: 24,
+      roomSpacing: 4,
+      heightChance: 0.1,
+      doorChance: 0.85,
+      loopChance: 0.0,
     },
     {
       floors: [4, 6],
@@ -33,6 +38,11 @@ export const CLASSIC: ProgressionRecipe = {
       densityMult: 1.0,
       hpMult: 1.2,
       damageMult: 1.1,
+      dungeonSize: 32,
+      roomSpacing: 3,
+      heightChance: 0.3,
+      doorChance: 0.8,
+      loopChance: 0.15,
     },
     {
       floors: [7, 9],
@@ -46,6 +56,11 @@ export const CLASSIC: ProgressionRecipe = {
       densityMult: 1.0,
       hpMult: 1.5,
       damageMult: 1.3,
+      dungeonSize: 40,
+      roomSpacing: 3,
+      heightChance: 0.5,
+      doorChance: 0.7,
+      loopChance: 0.4,
     },
     {
       floors: [10, 12],
@@ -59,6 +74,11 @@ export const CLASSIC: ProgressionRecipe = {
       densityMult: 1.0,
       hpMult: 2.0,
       damageMult: 1.5,
+      dungeonSize: 48,
+      roomSpacing: 2,
+      heightChance: 0.65,
+      doorChance: 0.8,
+      loopChance: 0.55,
     },
   ],
 
@@ -115,5 +135,6 @@ export const CLASSIC: ProgressionRecipe = {
   overshootScaling: {
     hpPerFloor: 0.25,
     damagePerFloor: 0.15,
+    dungeonSizePerFloor: 2,
   },
 };

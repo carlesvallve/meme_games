@@ -216,10 +216,12 @@ export class RoomVisibility {
         // if (distSq > MAX_FLOOD_DIST_SQ) continue;
         //
 
-        // Door cell: blocks if door is closed OR doorSystem not yet loaded
+        // Door cell: blocks expansion if closed, but still mark as reached
+        // so the door's floor tile and mesh stay visible to the player.
         const doorIdx = this.doorCellMap.get(nidx);
         if (doorIdx !== undefined) {
           if (!doorSystem || !doorSystem.isDoorOpen(doorIdx)) {
+            reached.add(nidx); // show door + floor, but don't expand through
             continue;
           }
         }
@@ -282,7 +284,10 @@ export class RoomVisibility {
             // Door check
             const doorIdx = this.doorCellMap.get(nidx);
             if (doorIdx !== undefined) {
-              if (!doorSystem || !doorSystem.isDoorOpen(doorIdx)) continue;
+              if (!doorSystem || !doorSystem.isDoorOpen(doorIdx)) {
+                reached.add(nidx);
+                continue;
+              }
             }
 
             // Height check (stay at bottom level)

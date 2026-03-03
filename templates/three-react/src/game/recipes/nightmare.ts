@@ -21,6 +21,11 @@ export const NIGHTMARE: ProgressionRecipe = {
       densityMult: 1.3,
       hpMult: 1.4,
       damageMult: 1.3,
+      dungeonSize: 34,
+      roomSpacing: 3,
+      heightChance: 0.35,
+      doorChance: 0.6,
+      loopChance: 0.2,
     },
     {
       floors: [4, 6],
@@ -34,6 +39,11 @@ export const NIGHTMARE: ProgressionRecipe = {
       densityMult: 1.5,
       hpMult: 2.0,
       damageMult: 1.8,
+      dungeonSize: 42,
+      roomSpacing: 2,
+      heightChance: 0.5,
+      doorChance: 0.7,
+      loopChance: 0.4,
     },
     {
       floors: [7, 9],
@@ -47,6 +57,11 @@ export const NIGHTMARE: ProgressionRecipe = {
       densityMult: 1.6,
       hpMult: 3.0,
       damageMult: 2.5,
+      dungeonSize: 50,
+      roomSpacing: 2,
+      heightChance: 0.65,
+      doorChance: 0.8,
+      loopChance: 0.6,
     },
   ],
 
@@ -88,5 +103,6 @@ export const NIGHTMARE: ProgressionRecipe = {
   overshootScaling: {
     hpPerFloor: 0.5,
     damagePerFloor: 0.3,
+    dungeonSizePerFloor: 2,
   },
 };
