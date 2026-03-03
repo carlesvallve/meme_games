@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useGameStore } from '../store';
+import { useGameStore } from '../../store';
 import { HUD } from './HUD';
 import { MenuScreen } from './MenuScreen';
 import { DeathOverlay } from './DeathOverlay';
@@ -26,7 +26,8 @@ function FPSCounter() {
         last = now;
         if (ref.current) {
           ref.current.textContent = `${fps} fps`;
-          ref.current.style.color = fps >= 50 ? '#8f8' : fps >= 30 ? '#ff8' : '#f88';
+          ref.current.style.color =
+            fps >= 50 ? '#8f8' : fps >= 30 ? '#ff8' : '#f88';
         }
       }
       raf = requestAnimationFrame(tick);
@@ -36,12 +37,21 @@ function FPSCounter() {
   }, []);
 
   return (
-    <div ref={ref} style={{
-      position: 'absolute', top: 8, right: 12,
-      color: '#8f8',
-      fontSize: 11, fontFamily: 'monospace', fontWeight: 600,
-      opacity: 0.7, pointerEvents: 'none', userSelect: 'none',
-    }}>
+    <div
+      ref={ref}
+      style={{
+        position: 'absolute',
+        top: 8,
+        right: 12,
+        color: '#8f8',
+        fontSize: 11,
+        fontFamily: 'monospace',
+        fontWeight: 600,
+        opacity: 0.7,
+        pointerEvents: 'none',
+        userSelect: 'none',
+      }}
+    >
       -- fps
     </div>
   );

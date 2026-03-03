@@ -3,7 +3,7 @@ import type { DungeonPropSystem, PlacedProp } from '../dungeon';
 import type { LootSystem } from './Loot';
 import type { GoreSystem } from './GoreSystem';
 import { sampleVertexColors, getGeometryYBounds } from './GoreSystem';
-import { Entity } from '../Entity';
+import { Entity } from '../core/Entity';
 import { audioSystem } from '../../utils/AudioSystem';
 
 /** Max vertical gap for melee prop hits */

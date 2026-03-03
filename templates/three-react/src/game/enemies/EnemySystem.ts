@@ -467,16 +467,16 @@ export class EnemySystem {
       const px = playerChar.mesh.position.x;
       const pz = playerChar.mesh.position.z;
 
-      // Skip processing for enemies outside active area (unless chasing/fleeing/frenzy)
+      // Skip processing for enemies outside active area (unless chasing/fleeing/frenzy-spawned)
       const isChasing = enemy.isCurrentlyChasing();
       const isFleeing = enemy.isCurrentlyFleeing();
-      const isFrenzy = this.potionSystem?.isFrenzy ?? false;
+      const isFrenzyEnemy = this.spawner.frenzyEnemies.has(enemy);
       if (
         roomVis &&
         !roomVis.isPositionActive(ex, ez) &&
         !isChasing &&
         !isFleeing &&
-        !isFrenzy
+        !isFrenzyEnemy
       ) {
         enemy.mesh.visible = false;
         enemy.hideHpBar();
@@ -507,12 +507,11 @@ export class EnemySystem {
         shouldChase = distSq < chaseRange * chaseRange;
       }
 
-      if (this.potionSystem?.isFrenzy) {
-        if (roomVis) {
-          shouldChase = true;
-        } else {
-          if (distSq < 64) shouldChase = true;
-        }
+      // Frenzy-spawned enemies get a wider leash but not infinite
+      if (isFrenzyEnemy) {
+        const FRENZY_LEASH_SQ = 12 * 12;
+        if (distSq < FRENZY_LEASH_SQ) shouldChase = true;
+        else shouldChase = false; // override: frenzy enemies beyond leash disengage
       }
 
       const aggroTime = this.aggroTimers.get(enemy);

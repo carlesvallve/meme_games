@@ -1,13 +1,13 @@
-import { useGameStore, DEFAULT_POST_PROCESS } from '../../store';
-import type { TerrainPreset } from '../../game/terrain';
-import type { HeightmapStyle } from '../../game/terrain';
-import { palettes } from '../../game/terrain';
+import { useGameStore, DEFAULT_POST_PROCESS } from '../../../store';
+import type { TerrainPreset } from '../../terrain';
+import type { HeightmapStyle } from '../../terrain';
+import { palettes } from '../../terrain';
 import {
   getPropCategories,
   getGroundTileIds,
   getDungeonVariants,
   swapGroundTiles,
-} from '../../game/dungeon';
+} from '../../dungeon';
 import {
   SettingsWindow,
   Section,

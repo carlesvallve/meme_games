@@ -3,7 +3,7 @@
 
 import * as THREE from 'three';
 import { loadVoxModel, buildVoxMesh, tintGeometry } from '../../utils/VoxModelLoader';
-import { Entity, Layer } from '../Entity';
+import { Entity, Layer } from '../core/Entity';
 import type { DungeonPropEntry, PropPlacement } from './VoxDungeonDB';
 import { getRandomProp, getRandomPropStyled, extractPropStyle, getPropsWhere, getRandomTile } from './VoxDungeonDB';
 import { loadTileEntry } from './VoxDungeonLoader';
@@ -1874,19 +1874,42 @@ export class DungeonPropSystem {
 
       this.parent.add(mesh);
 
-      // Point light to make the portal visually attractive
+      // Orb above portal: support bracket + glowing sphere
       const lightColor = isEntrance ? 0xffcc66 : 0x88bbff;
+      // Place orb right on top of the portal mesh
+      geo.computeBoundingBox();
+      const meshTop = mesh.position.y + (geo.boundingBox?.max.y ?? 0.5);
+      const orbY = meshTop + 0.1;
+      const orbX = mesh.position.x;
+      const orbZ = mesh.position.z;
+
+      // Support bracket (thin cylinder from portal top to orb)
+      const bracketHeight = 0.1;
+      const bracketGeo = new THREE.CylinderGeometry(0.025, 0.035, bracketHeight, 6);
+      const bracketMat = new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.6, metalness: 0.4 });
+      const bracket = new THREE.Mesh(bracketGeo, bracketMat);
+      bracket.position.set(orbX, orbY - bracketHeight * 0.5, orbZ);
+      bracket.castShadow = true;
+      this.parent.add(bracket);
+
+      // Small base plate where bracket meets the wall
+      const plateGeo = new THREE.CylinderGeometry(0.06, 0.06, 0.03, 8);
+      const plate = new THREE.Mesh(plateGeo, bracketMat.clone());
+      plate.position.set(orbX, orbY - bracketHeight, orbZ);
+      this.parent.add(plate);
+
+      // Glowing orb
+      const orbGeo = new THREE.SphereGeometry(0.08, 12, 12);
+      const orbMat = new THREE.MeshBasicMaterial({ color: lightColor });
+      const orb = new THREE.Mesh(orbGeo, orbMat);
+      orb.position.set(orbX, orbY, orbZ);
+      this.parent.add(orb);
+
+      // Point light emanating from the orb
       const light = new THREE.PointLight(lightColor, 8, cellSize * 6, 1.5);
-      light.position.set(wx, getFloorY(cell.gx, cell.gz) + wallHeight * 0.5, wz);
+      light.position.set(orbX, orbY, orbZ);
       this.parent.add(light);
       this.allLights.push(light);
-
-      // Debug: visible glowing sphere so we can spot entrance/exit
-      const bulbGeo = new THREE.SphereGeometry(0.12, 8, 8);
-      const bulbMat = new THREE.MeshBasicMaterial({ color: lightColor });
-      const bulb = new THREE.Mesh(bulbGeo, bulbMat);
-      bulb.position.copy(light.position);
-      this.parent.add(bulb);
 
       const dummyEntity = new Entity(mesh, { layer: Layer.Prop, radius: 0.01, weight: 0 });
       this.props.push({ mesh, entity: dummyEntity, entry: { id: tileEntry.id, category: 'entrance', voxPath: tileEntry.voxPath, baseHeight: 1, radius: 0.01, placement: 'wall_mount' as PropPlacement }, gridCell: { gx: cell.gx, gz: cell.gz } });

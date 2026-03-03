@@ -9,7 +9,7 @@ import * as THREE from 'three';
 import type { DoorDef } from './DungeonGenerator';
 import type { DebrisBox } from '../environment/EnvironmentContext';
 import type { TerrainLike } from './DungeonBuilder';
-import { Entity, Layer } from '../Entity';
+import { Entity, Layer } from '../core/Entity';
 import { getRandomTile } from './VoxDungeonDB';
 import { getCellSize, getWallTargetHeight } from './VoxDungeonLoader';
 import { loadVoxModel, buildVoxMesh } from '../../utils/VoxModelLoader';

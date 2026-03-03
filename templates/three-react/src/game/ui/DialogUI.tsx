@@ -1,4 +1,4 @@
-import { useGameStore } from '../store';
+import { useGameStore } from '../../store';
 
 interface DialogUIProps {
   message: string;

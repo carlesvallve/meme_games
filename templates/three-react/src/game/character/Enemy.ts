@@ -117,8 +117,8 @@ export class Enemy extends Character {
     isDungeon = false,
   ): void {
     const ctx: BehaviorContext = { navGrid, ladderDefs };
-    // In dungeons, chase range is infinite — chasing is controlled by flood-fill visibility
-    const behaviorChaseRange = isDungeon ? Infinity : this.params.chaseRange;
+    // In dungeons, use a generous but finite chase range — EnemySystem controls aggro via visibility
+    const behaviorChaseRange = isDungeon ? 20 : this.params.chaseRange;
     this.chaseBehavior = new ChaseBehavior(
       ctx,
       this.params,

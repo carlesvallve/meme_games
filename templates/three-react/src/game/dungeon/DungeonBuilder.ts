@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { Entity, Layer, entityRegistry } from '../Entity';
+import { Entity, Layer, entityRegistry } from '../core/Entity';
 import {
   generateDungeon,
   DoorSystem,

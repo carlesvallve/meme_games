@@ -1,3 +1,6 @@
+// Template scaffolding — part of the @sttg/game-base contract.
+// Not used by the dungeon-crawler example (which uses zustand for all state/events),
+// but kept so new games scaffolded from this template have a ready-made event bus.
 export { EventBus, eventBus } from '@sttg/game-base';
 
 export const Events = {

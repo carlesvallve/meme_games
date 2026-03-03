@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { Entity, entityRegistry } from '../Entity';
+import { Entity, entityRegistry } from '../core/Entity';
 import type { NavGrid } from '../pathfinding';
 import type { LadderDef } from '../dungeon';
 import { DoorSystem, DungeonPropSystem, RoomVisibility } from '../dungeon';

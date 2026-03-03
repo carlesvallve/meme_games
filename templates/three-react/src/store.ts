@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { CharacterType, SpeechBubbleData } from './types';
-import { Layer } from './game/Entity';
+import { Layer } from './game/core/Entity';
 import type { TerrainPreset } from './game/terrain';
 import type { HeightmapStyle } from './game/terrain';
 import { DEFAULT_CHARACTER_PARAMS } from './game/character';

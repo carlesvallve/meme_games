@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { Entity } from '../Entity';
+import { Entity } from '../core/Entity';
 import { NavGrid } from '../pathfinding';
 import type { SlopeDir } from '../pathfinding';
 import type { LadderDef, WalkMask, StairDef, LadderHint } from '../dungeon';

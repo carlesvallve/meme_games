@@ -22,7 +22,7 @@
  */
 
 import * as THREE from 'three';
-import { Entity, Layer } from '../Entity';
+import { Entity, Layer } from '../core/Entity';
 import type { SlopeDir } from '../pathfinding';
 import { EnvironmentContext, type TerrainPreset } from '../environment/EnvironmentContext';
 import { HALF, snapHalf, snapPos } from './TerrainBuilder';

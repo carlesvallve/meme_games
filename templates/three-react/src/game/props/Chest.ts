@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { Environment } from '../environment';
 import type { LootSystem } from '../combat/Loot';
-import { Entity, Layer, entityRegistry } from '../Entity';
+import { Entity, Layer, entityRegistry } from '../core/Entity';
 import { buildVoxelGeometry } from '../../utils/voxelMesh';
 import type { VoxelModel } from '../../types';
 import type { SavedChest } from '../dungeon';

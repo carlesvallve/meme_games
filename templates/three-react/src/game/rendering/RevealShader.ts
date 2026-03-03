@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { entityRegistry, Layer } from '../Entity';
+import { entityRegistry, Layer } from '../core/Entity';
 
 // Persist across Vite HMR so patched materials keep referencing the same uniform objects
 const _w = window as unknown as { __revealUniforms?: typeof _defaultUniforms };
