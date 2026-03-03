@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { useGameStore, DEFAULT_CAMERA_PARAMS, DEFAULT_LIGHT_PRESET, DEFAULT_TORCH_PARAMS, DEFAULT_PARTICLE_TOGGLES, DEFAULT_SCENE_SETTINGS, DEFAULT_ENEMY_PARAMS } from '../store';
 import { DEFAULT_CHARACTER_PARAMS } from './character';
 import { randomPalette, palettes } from './terrain';
+import { getSkyColors } from './rendering';
 import { audioSystem } from '../utils/AudioSystem';
 import { POTION_COLORS, EFFECT_META } from './combat';
 import { rerollRoster, VOX_HEROES, VOX_ENEMIES, voxRoster, getCharacterName, getArchetype, getCharacterStats, randomInRange, CHARACTER_TEAM_COLORS } from './character';
@@ -122,6 +123,7 @@ export function createCallbacks(
       ctx.terrain.applyPalette(palette, name);
       useGameStore.getState().setPaletteActive(name);
       ctx.sceneSky.setPalette(name);
+      ctx.baseSkyColors = getSkyColors(name);
     },
     onApplyPalette: (name: string) => {
       if (name === 'random') {
@@ -133,6 +135,7 @@ export function createCallbacks(
       ctx.terrain.applyPalette(pal, name);
       useGameStore.getState().setPaletteActive(name);
       ctx.sceneSky.setPalette(name);
+      ctx.baseSkyColors = getSkyColors(name);
     },
     onResetCharacterParams: () => {
       const d = DEFAULT_CHARACTER_PARAMS;
@@ -161,6 +164,11 @@ export function createCallbacks(
       for (const key of Object.keys(td) as (keyof typeof td)[]) {
         store.setTorchParam(key, td[key]);
       }
+      store.setTimeOfDay(DEFAULT_SCENE_SETTINGS.timeOfDay);
+      store.setDayCycleEnabled(DEFAULT_SCENE_SETTINGS.dayCycleEnabled);
+      store.setDayCycleSpeed(DEFAULT_SCENE_SETTINGS.dayCycleSpeed);
+      store.setFastNights(DEFAULT_SCENE_SETTINGS.fastNights);
+      store.setSunDebug(DEFAULT_SCENE_SETTINGS.sunDebug);
     },
     onSpawnEnemy: () => {
       if (ctx.enemySystem) ctx.enemySystem.spawnEnemies(1);

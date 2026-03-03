@@ -8,6 +8,7 @@ import {
   applyLightPreset,
   PostProcessStack,
   DeathSequence,
+  getSkyColors,
 } from './rendering';
 import { Environment } from './environment';
 import { CollectibleSystem, ChestSystem, SpeechBubbleSystem } from './props';
@@ -230,6 +231,8 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     raycaster: new THREE.Raycaster(),
     pointerNDC: new THREE.Vector2(),
     _planeHit: new THREE.Vector3(),
+    sunDebugHelper: null,
+    baseSkyColors: getSkyColors(useGameStore.getState().paletteActive || 'meadow'),
     debugLadderIndex: -1,
     pointerDragActive: false, lastDragX: 0, lastDragZ: 0,
     rafId: 0, lastTime: 0,

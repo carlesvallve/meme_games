@@ -7,6 +7,7 @@ export interface SceneLights {
   dirPrimary: THREE.DirectionalLight;
   dirFill: THREE.DirectionalLight;
   dirRim: THREE.DirectionalLight;
+  dirMoon: THREE.DirectionalLight;
   hemi: THREE.HemisphereLight;
 }
 
@@ -15,6 +16,7 @@ export interface SceneSky {
   lensflare: THREE.Object3D;
   setColors: (colors: SkyColors) => void;
   setPalette: (paletteName: string) => void;
+  setStarIntensity: (v: number) => void;
   dispose: () => void;
 }
 
@@ -77,6 +79,19 @@ export function createScene(paletteName = 'meadow'): { scene: THREE.Scene; light
   dirRim.position.set(5, 8, -15);
   scene.add(dirRim);
 
+  // Moon directional (shadow-casting, active at night)
+  const dirMoon = new THREE.DirectionalLight(0x6070b0, 0);
+  dirMoon.position.set(-8, 30, -10);
+  dirMoon.castShadow = true;
+  dirMoon.shadow.mapSize.set(1024, 1024);
+  dirMoon.shadow.camera.near = 0.5;
+  dirMoon.shadow.camera.far = 60;
+  dirMoon.shadow.camera.left = -d;
+  dirMoon.shadow.camera.right = d;
+  dirMoon.shadow.camera.top = d;
+  dirMoon.shadow.camera.bottom = -d;
+  scene.add(dirMoon);
+
   // Hemisphere
   const hemi = new THREE.HemisphereLight(0x8080b0, 0x2a2a45, DEFAULTS.hemi);
   scene.add(hemi);
@@ -104,6 +119,9 @@ export function createScene(paletteName = 'meadow'): { scene: THREE.Scene; light
       const c = getSkyColors(name);
       this.setColors(c);
     },
+    setStarIntensity(v: number) {
+      sky.setStarIntensity(v);
+    },
     dispose() {
       scene.remove(sky.mesh);
       scene.remove(lensflare);
@@ -111,5 +129,5 @@ export function createScene(paletteName = 'meadow'): { scene: THREE.Scene; light
     },
   };
 
-  return { scene, lights: { ambient, dirPrimary, dirFill, dirRim, hemi }, sceneSky };
+  return { scene, lights: { ambient, dirPrimary, dirFill, dirRim, dirMoon, hemi }, sceneSky };
 }

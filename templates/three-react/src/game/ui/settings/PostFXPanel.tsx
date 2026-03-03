@@ -19,10 +19,13 @@ export function PostFXPanel() {
           value={postProcess.enabled}
           onChange={(v) => setPostProcess({ ...postProcess, enabled: v })}
         />
-        {postProcess.enabled && (
-          <>
+      </Section>
+
+      {postProcess.enabled && (
+        <>
+          <Section label='Bloom'>
             <Toggle
-              label='Bloom'
+              label='Enabled'
               value={postProcess.bloom.enabled}
               onChange={(v) =>
                 setPostProcess({
@@ -74,9 +77,11 @@ export function PostFXPanel() {
                 />
               </>
             )}
+          </Section>
 
+          <Section label='SSAO'>
             <Toggle
-              label='SSAO'
+              label='Enabled'
               value={postProcess.ssao.enabled}
               onChange={(v) =>
                 setPostProcess({
@@ -115,9 +120,11 @@ export function PostFXPanel() {
                 />
               </>
             )}
+          </Section>
 
+          <Section label='Vignette'>
             <Toggle
-              label='Vignette'
+              label='Enabled'
               value={postProcess.vignette.enabled}
               onChange={(v) =>
                 setPostProcess({
@@ -156,9 +163,11 @@ export function PostFXPanel() {
                 />
               </>
             )}
+          </Section>
 
+          <Section label='Color Grade'>
             <Toggle
-              label='Color Grade'
+              label='Enabled'
               value={postProcess.colorGrade.enabled}
               onChange={(v) =>
                 setPostProcess({
@@ -210,16 +219,16 @@ export function PostFXPanel() {
                 />
               </>
             )}
+          </Section>
 
-            <button
-              onClick={() => setPostProcess({ ...DEFAULT_POST_PROCESS })}
-              style={resetBtnStyle}
-            >
-              Reset PostFX
-            </button>
-          </>
-        )}
-      </Section>
+          <button
+            onClick={() => setPostProcess({ ...DEFAULT_POST_PROCESS })}
+            style={resetBtnStyle}
+          >
+            Reset PostFX
+          </button>
+        </>
+      )}
     </SettingsWindow>
   );
 }

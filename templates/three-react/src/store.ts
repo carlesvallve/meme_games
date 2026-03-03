@@ -215,6 +215,11 @@ export const DEFAULT_SCENE_SETTINGS = {
   debugBiomes: false,
   debugProjectileStick: false,
   forceStairs: false,
+  timeOfDay: 10,
+  dayCycleEnabled: false,
+  dayCycleSpeed: 1,
+  fastNights: true,
+  sunDebug: false,
   hmrCacheEnabled: false,
   dungeonVariant: 'random',
   dungeonSize: 40,
@@ -250,6 +255,11 @@ interface SavedSettings {
   debugBiomes?: boolean;
   debugProjectileStick?: boolean;
   forceStairs?: boolean;
+  timeOfDay?: number;
+  dayCycleEnabled?: boolean;
+  dayCycleSpeed?: number;
+  fastNights?: boolean;
+  sunDebug?: boolean;
   hmrCacheEnabled?: boolean;
   dungeonVariant?: string;
   dungeonSize?: number;
@@ -300,6 +310,11 @@ function saveSettings(): void {
     debugBiomes: s.debugBiomes,
     debugProjectileStick: s.debugProjectileStick,
     forceStairs: s.forceStairs,
+    timeOfDay: s.timeOfDay,
+    dayCycleEnabled: s.dayCycleEnabled,
+    dayCycleSpeed: s.dayCycleSpeed,
+    fastNights: s.fastNights,
+    sunDebug: s.sunDebug,
     hmrCacheEnabled: s.hmrCacheEnabled,
     dungeonVariant: s.dungeonVariant,
     dungeonSize: s.dungeonSize,
@@ -381,6 +396,16 @@ interface GameStore {
   setDebugProjectileStick: (on: boolean) => void;
   forceStairs: boolean;
   setForceStairs: (on: boolean) => void;
+  timeOfDay: number;
+  setTimeOfDay: (v: number) => void;
+  dayCycleEnabled: boolean;
+  setDayCycleEnabled: (v: boolean) => void;
+  dayCycleSpeed: number;
+  setDayCycleSpeed: (v: number) => void;
+  fastNights: boolean;
+  setFastNights: (v: boolean) => void;
+  sunDebug: boolean;
+  setSunDebug: (v: boolean) => void;
   hmrCacheEnabled: boolean;
   setHmrCacheEnabled: (on: boolean) => void;
   dungeonVariant: string;
@@ -412,6 +437,9 @@ interface GameStore {
     key: K,
     value: (RangedParams & { enabled: boolean })[K],
   ) => void;
+
+  enemiesEnabled: boolean;
+  setEnemiesEnabled: (v: boolean) => void;
 
   /** If true, characters push each other apart when overlapping; if false, only the non-player is pushed (player stays put). */
   characterPushEnabled: boolean;
@@ -591,6 +619,16 @@ export const useGameStore = create<GameStore>((set, get) => ({
     set({ debugProjectileStick }),
   forceStairs: saved.forceStairs ?? DEFAULT_SCENE_SETTINGS.forceStairs,
   setForceStairs: (forceStairs) => set({ forceStairs }),
+  timeOfDay: saved.timeOfDay ?? DEFAULT_SCENE_SETTINGS.timeOfDay,
+  setTimeOfDay: (timeOfDay) => set({ timeOfDay }),
+  dayCycleEnabled: saved.dayCycleEnabled ?? DEFAULT_SCENE_SETTINGS.dayCycleEnabled,
+  setDayCycleEnabled: (dayCycleEnabled) => set({ dayCycleEnabled }),
+  dayCycleSpeed: saved.dayCycleSpeed ?? DEFAULT_SCENE_SETTINGS.dayCycleSpeed,
+  setDayCycleSpeed: (dayCycleSpeed) => set({ dayCycleSpeed }),
+  fastNights: saved.fastNights ?? DEFAULT_SCENE_SETTINGS.fastNights,
+  setFastNights: (fastNights) => set({ fastNights }),
+  sunDebug: saved.sunDebug ?? DEFAULT_SCENE_SETTINGS.sunDebug,
+  setSunDebug: (sunDebug) => set({ sunDebug }),
   hmrCacheEnabled:
     saved.hmrCacheEnabled ?? DEFAULT_SCENE_SETTINGS.hmrCacheEnabled,
   setHmrCacheEnabled: (hmrCacheEnabled) => set({ hmrCacheEnabled }),
@@ -638,6 +676,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
         ranged: { ...s.enemyParams.ranged, [key]: value } as any,
       },
     })),
+
+  enemiesEnabled: true,
+  setEnemiesEnabled: (enemiesEnabled) => set({ enemiesEnabled }),
 
   characterPushEnabled: saved.characterPushEnabled ?? true,
   setCharacterPushEnabled: (characterPushEnabled) =>
