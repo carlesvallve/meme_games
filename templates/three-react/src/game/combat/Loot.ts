@@ -165,13 +165,13 @@ export class LootSystem {
     this.terrain = terrain;
 
     this.coinGeo = new THREE.OctahedronGeometry(0.05, 0);
-    this.foodGeo = new THREE.BoxGeometry(0.06, 0.04, 0.06);
+    this.foodGeo = new THREE.SphereGeometry(0.06, 6, 4);
     this.foodMat = new THREE.MeshStandardMaterial({
-      color: 0xaa3322,
-      emissive: 0x441100,
-      emissiveIntensity: 0.3,
-      roughness: 0.8,
-      metalness: 0.0,
+      color: 0xff4444,
+      emissive: 0xff2222,
+      emissiveIntensity: 0.6,
+      roughness: 0.4,
+      metalness: 0.1,
     });
     this.potionGeoFallback = new THREE.SphereGeometry(0.05, 6, 4);
 
@@ -320,7 +320,7 @@ export class LootSystem {
   }
 
   /** Spawn a food item (meat chunk) at the given position. */
-  spawnFood(position: THREE.Vector3, hungerValue = 25): void {
+  spawnFood(position: THREE.Vector3, hungerValue = 15): void {
     const mesh = new THREE.Mesh(this.foodGeo, this.foodMat);
     mesh.position.copy(position);
     mesh.position.y += 0.15;
@@ -355,7 +355,7 @@ export class LootSystem {
     };
 
     // Add floating label
-    const label = createPotionLabel('meat', '#cc8844');
+    const label = createPotionLabel('FOOD', '#ff8844');
     mesh.add(label);
     item.label = label;
 
@@ -756,7 +756,7 @@ export class LootSystem {
         this.spawnSparkles(item);
         this.addPotionLabel(item);
       } else if (isFood) {
-        const label = createPotionLabel('meat', '#cc8844');
+        const label = createPotionLabel('FOOD', '#ff8844');
         mesh.add(label);
         item.label = label;
       }

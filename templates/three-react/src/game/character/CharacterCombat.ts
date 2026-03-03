@@ -7,6 +7,7 @@ export interface CombatOwner {
   mesh: THREE.Mesh;
   groundY: number;
   isEnemy: boolean;
+  isMoving: boolean;
   params: MovementParams;
   terrain: Environment;
   /** Trigger VOX action animation */
@@ -39,9 +40,9 @@ export class CharacterCombat {
 
   // ── Regeneration ──────────────────────────────────────────────────
   /** Seconds after last damage before regen activates. */
-  regenDelay = 5.0;
+  regenDelay = 8.0;
   /** HP per second once regen is active. */
-  regenRate = 0.1;
+  regenRate = 0.05;
   /** Seconds since last damage was taken. */
   timeSinceLastDamage = 999;
 
@@ -53,7 +54,7 @@ export class CharacterCombat {
   /** Maximum hunger. */
   maxHunger = 100;
   /** Hunger points lost per second. */
-  hungerDecayRate = 0.15;
+  hungerDecayRate = 0.5;
   /** HP lost per second when hunger ≤ starvation threshold. */
   starvationDamage = 0.2;
   /** Hunger threshold below which starvation damage kicks in. */
@@ -300,8 +301,13 @@ export class CharacterCombat {
     }
 
     // ── Hunger decay (non-enemy characters) ───────────────────────────
+    // Only decays when the player is active (moving, attacking, taking damage)
     if (this.hungerEnabled && this.isAlive) {
-      this.hunger = Math.max(0, this.hunger - this.hungerDecayRate * dt);
+      const isActive =
+        owner.isMoving || this.isAttacking || this.timeSinceLastDamage < 1.0;
+      if (isActive) {
+        this.hunger = Math.max(0, this.hunger - this.hungerDecayRate * dt);
+      }
 
       // Starvation: slow HP drain when very hungry (never kills — floor at 1)
       if (this.hunger <= this.starvationThreshold) {

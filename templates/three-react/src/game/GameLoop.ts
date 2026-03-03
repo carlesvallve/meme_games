@@ -765,7 +765,7 @@ export function createGameLoop(
         audioSystem.sfx('coin');
         ctx.enemySystem?.spawnPickupLabel(
           activePos.x, activePos.y, activePos.z,
-          `+${loot.foodHunger} Food`, '#cc8844',
+          `+${loot.foodHunger} Food`, '#ff8844',
         );
       }
 
