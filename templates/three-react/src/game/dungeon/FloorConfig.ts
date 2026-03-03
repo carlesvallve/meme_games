@@ -53,6 +53,7 @@ export function getFloorConfig(floor: number): FloorZoneConfig {
     ...last,
     hpMult: last.hpMult + overshoot * overshootScaling.hpPerFloor,
     damageMult: last.damageMult + overshoot * overshootScaling.damagePerFloor,
+    dungeonSize: (last.dungeonSize ?? 40) + overshoot * (overshootScaling.dungeonSizePerFloor ?? 2),
   };
 }
 

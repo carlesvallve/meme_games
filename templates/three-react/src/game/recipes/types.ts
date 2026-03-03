@@ -16,6 +16,17 @@ export interface FloorZoneConfig {
   densityMult: number;             // enemy density multiplier (1.0 = baseline)
   hpMult: number;                  // HP scaling multiplier
   damageMult: number;              // damage scaling multiplier
+  // ── Dungeon layout progression (optional — defaults used if omitted) ──
+  /** Dungeon world size in meters (default 40). */
+  dungeonSize?: number;
+  /** Room grid spacing — lower = more/smaller rooms (default 3). */
+  roomSpacing?: number;
+  /** Probability of height change between rooms 0–1 (default 0.55). */
+  heightChance?: number;
+  /** Door spawn probability 0–1 (default 0.7). */
+  doorChance?: number;
+  /** Loop corridor budget as fraction of rooms 0–1 (default 0.35). */
+  loopChance?: number;
 }
 
 /** A special encounter on a specific floor. */
@@ -46,5 +57,7 @@ export interface ProgressionRecipe {
   overshootScaling: {
     hpPerFloor: number;
     damagePerFloor: number;
+    /** Extra dungeon size per floor beyond last zone (default 2). */
+    dungeonSizePerFloor?: number;
   };
 }

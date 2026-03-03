@@ -17,7 +17,6 @@ import {
   PotionEffectSystem,
   PotionVFX,
 } from './combat';
-import { findPath } from './pathfinding';
 import { audioSystem } from '../utils/AudioSystem';
 import type { GameInstance } from '../types';
 import type { GameContext } from './GameContext';
@@ -26,7 +25,6 @@ import { createCharacterManager } from './GameCharacters';
 import { createInputManager } from './GameInput';
 import { createCallbacks } from './GameCallbacks';
 import { createGameLoop } from './GameLoop';
-
 // ── HMR terrain cache ─────────────────────────────────────────────
 interface TerrainCache {
   terrain: Environment;
@@ -220,7 +218,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     particleSystems: { dust: null, lightRain: null, rain: null, debris: null },
     prevToggles: { dust: false, lightRain: false, rain: false, debris: false },
     kickedPotions: [],
-    needsFullRegen: false, exitTriggered: false, portalCooldown: 0,
+    needsFullRegen: !hmrReused, exitTriggered: false, portalCooldown: 0,
     potionHudTimer: 0, hmrReused,
     hitstopTimer: 0,
     currentLightPreset: initialLightPreset,
