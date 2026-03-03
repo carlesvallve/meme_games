@@ -33,9 +33,20 @@ export function EnemyPanel() {
   const progressionRecipe = useGameStore((s) => s.progressionRecipe);
   const setProgressionRecipe = useGameStore((s) => s.setProgressionRecipe);
 
+  const enemiesEnabled = useGameStore((s) => s.enemiesEnabled);
+  const setEnemiesEnabled = useGameStore((s) => s.setEnemiesEnabled);
+
   return (
     <SettingsWindow>
-      <Section label='Progression' accent={accent} first>
+      <Section label='Enemies' accent={accent} first>
+        <Toggle
+          label='Enabled'
+          value={enemiesEnabled}
+          onChange={setEnemiesEnabled}
+        />
+      </Section>
+
+      <Section label='Progression' accent={accent}>
         <div style={rowStyle}>
           <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>
             Recipe

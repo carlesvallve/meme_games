@@ -61,6 +61,7 @@ uniform vec3 uGround;
 uniform vec3 uSunColor;
 uniform vec3 uSunGlow;
 uniform vec3 uSunDir;
+uniform float uStarIntensity;
 
 varying vec3 vWorldDir;
 
@@ -78,18 +79,29 @@ void main() {
     color = mix(uHorizon, uGround, t);
   }
 
-  // Sun disc
+  // Sun disc (only when above horizon)
   float sunDot = max(0.0, dot(dir, uSunDir));
-  float sunDisc = smoothstep(0.997, 0.999, sunDot);
+  float sunAboveHorizon = step(0.0, uSunDir.y);
+  float sunDisc = smoothstep(0.997, 0.999, sunDot) * sunAboveHorizon;
   color = mix(color, uSunColor, sunDisc);
 
-  // Sun glow (soft halo)
-  float glow = pow(sunDot, 24.0) * 0.6;
+  // Sun glow (soft halo, only when sun visible)
+  float glow = pow(sunDot, 24.0) * 0.6 * sunAboveHorizon;
   color += uSunGlow * glow;
 
   // Subtle wider glow
-  float wideGlow = pow(sunDot, 6.0) * 0.15;
+  float wideGlow = pow(sunDot, 6.0) * 0.15 * sunAboveHorizon;
   color += uSunGlow * wideGlow;
+
+  // Moon disc (opposite to sun, visible at night)
+  vec3 moonDir = -uSunDir;
+  float moonDot = max(0.0, dot(dir, moonDir));
+  float moonAboveHorizon = step(0.0, moonDir.y);
+  float moonDisc = smoothstep(0.9985, 0.9995, moonDot) * moonAboveHorizon * uStarIntensity;
+  color = mix(color, vec3(0.85, 0.9, 1.0), moonDisc);
+  // Moon glow
+  float moonGlow = pow(moonDot, 32.0) * 0.2 * moonAboveHorizon * uStarIntensity;
+  color += vec3(0.4, 0.5, 0.7) * moonGlow;
 
   // Stars — sparse, avoid repeating patterns
   float starField = fract(sin(dot(floor(dir * 400.0), vec3(12.9898, 78.233, 45.164))) * 43758.5453);
@@ -97,7 +109,7 @@ void main() {
   float starDim = smoothstep(0.997, 0.999, starField) * 0.25;     // few faint stars
   float horizonFade = smoothstep(0.05, 0.25, y);
   float sunFade = 1.0 - smoothstep(0.8, 1.0, sunDot);
-  float starMask = (starBright + starDim) * horizonFade * sunFade;
+  float starMask = (starBright + starDim) * horizonFade * sunFade * uStarIntensity;
   color += vec3(starMask * 0.6);
 
   gl_FragColor = vec4(color, 1.0);
@@ -121,6 +133,7 @@ export class ProceduralSky {
         uSunColor: { value: new THREE.Color(colors.sun) },
         uSunGlow: { value: new THREE.Color(colors.sunGlow) },
         uSunDir: { value: sunDir },
+        uStarIntensity: { value: 1.0 },
       },
       side: THREE.BackSide,
       depthWrite: false,
@@ -143,6 +156,10 @@ export class ProceduralSky {
 
   setSunDirection(dir: THREE.Vector3): void {
     this.material.uniforms.uSunDir.value.copy(dir).normalize();
+  }
+
+  setStarIntensity(intensity: number): void {
+    this.material.uniforms.uStarIntensity.value = intensity;
   }
 
   dispose(): void {

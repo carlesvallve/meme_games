@@ -9,6 +9,7 @@ import type { CollectibleSystem, ChestSystem, SpeechBubbleSystem } from './props
 import type { ParticleToggles, LightPreset } from '../store';
 import type { ParticleSystem } from '../types';
 import type { LevelSnapshot } from './dungeon';
+import type { SkyColors } from './rendering';
 
 export interface KickedPotion {
   mesh: THREE.Mesh;
@@ -101,6 +102,10 @@ export interface GameContext {
   raycaster: THREE.Raycaster;
   pointerNDC: THREE.Vector2;
   _planeHit: THREE.Vector3;
+
+  // Day cycle
+  sunDebugHelper: THREE.Group | null;
+  baseSkyColors: SkyColors;
 
   // Debug
   debugLadderIndex: number;

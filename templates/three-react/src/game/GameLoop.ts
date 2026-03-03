@@ -4,7 +4,13 @@ import {
   applyLightPreset,
   updateReveal,
   patchSceneArchitecture,
+  updateDayCycle,
+  createSunDebugHelper,
+  updateSunDebug,
+  disposeSunDebugHelper,
+  computeSunDirection,
 } from './rendering';
+import { getSkyColors } from './rendering';
 import {
   setDebugProjectileStick,
   POTION_COLORS,
@@ -378,6 +384,14 @@ export function createGameLoop(
 
       // Enemy system
       if (ctx.enemySystem) {
+        const enemiesOn = useGameStore.getState().enemiesEnabled;
+        // Hide/show all enemies when toggled
+        for (const enemy of ctx.enemySystem.getEnemies()) {
+          if (!enemiesOn && enemy.mesh.visible) enemy.mesh.visible = false;
+        }
+        if (!enemiesOn) {
+          // Skip update & spawning entirely when enemies disabled
+        } else {
         const showSlashEffect =
           useGameStore.getState().characterParams.melee.showSlashEffect;
         ctx.enemySystem.update(
@@ -406,6 +420,7 @@ export function createGameLoop(
           showSlashEffect,
           ctx.cam.camera,
         );
+        } // end enemiesOn else
       }
 
       // Kicked potions
@@ -654,13 +669,47 @@ export function createGameLoop(
       const isDungeonPreset = ctx.terrain.preset === 'voxelDungeon';
       updateReveal(playerWorldPos, ctx.cam.camera.position, isDungeonPreset, ctx.terrain.preset);
 
-      // Sync light preset
+      // Sync light preset + day cycle
       const preset = useGameStore.getState().lightPreset;
       const isExterior = ctx.terrain.preset === 'heightmap';
-      if (preset !== ctx.currentLightPreset || isExterior !== ctx.lastIsExterior) {
-        ctx.currentLightPreset = preset;
-        ctx.lastIsExterior = isExterior;
-        applyLightPreset(ctx.sceneLights, preset, isExterior);
+      ctx.currentLightPreset = preset;
+      ctx.lastIsExterior = isExterior;
+
+      // Advance day cycle if enabled
+      const store = useGameStore.getState();
+      let timeOfDay = store.timeOfDay;
+      if (store.dayCycleEnabled) {
+        const isNight = timeOfDay >= 18 || timeOfDay < 6;
+        const speedMul = (store.fastNights && isNight) ? 2.0 : 1.0;
+        timeOfDay = (timeOfDay + dt * store.dayCycleSpeed * speedMul) % 24;
+        useGameStore.setState({ timeOfDay });
+      }
+
+      // Update day cycle (handles lights, sky, fog, stars)
+      updateDayCycle(
+        ctx.sceneLights,
+        ctx.sceneSky,
+        preset,
+        isExterior,
+        timeOfDay,
+        ctx.baseSkyColors,
+        ctx.scene.fog as THREE.Fog | null,
+      );
+
+      // Sun debug helper
+      const sunDebugWanted = store.sunDebug;
+      if (sunDebugWanted && !ctx.sunDebugHelper) {
+        ctx.sunDebugHelper = createSunDebugHelper(ctx.scene);
+      } else if (!sunDebugWanted && ctx.sunDebugHelper) {
+        disposeSunDebugHelper(ctx.scene, ctx.sunDebugHelper);
+        ctx.sunDebugHelper = null;
+      }
+      if (ctx.sunDebugHelper) {
+        const sunDir = computeSunDirection(timeOfDay);
+        const camTarget = ctx.activeCharacter
+          ? new THREE.Vector3(pp.x, ctx.activeCharacter.mesh.position.y + 2, pp.z)
+          : ctx.cam.camera.position;
+        updateSunDebug(ctx.sunDebugHelper, sunDir, camTarget);
       }
 
       // Sync grid opacity
