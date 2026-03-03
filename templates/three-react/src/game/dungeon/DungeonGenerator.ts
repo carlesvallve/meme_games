@@ -995,12 +995,19 @@ function detectCorridorDoors(
 
   const isCorridor = (gx: number, gz: number): boolean => corridorSet.has(`${gx},${gz}`);
 
+  // Helper: is a cell actually open (walkable) in the grid?
+  const isOpen = (gx: number, gz: number): boolean => {
+    if (gx < 0 || gx >= gridW || gz < 0 || gz >= gridD) return false;
+    return openGrid[gz * gridW + gx];
+  };
+
   // Two rounds: first collect room-adjacent candidates (priority), then mid-corridor ones
   for (let round = 0; round < 2; round++) {
     for (const corridor of corridors) {
       for (const cell of corridor.cells) {
         const { gx, gz } = cell;
         if (roomGrid[gz * gridW + gx] >= 0) continue; // skip cells inside rooms
+        if (!isOpen(gx, gz)) continue; // door cell must be walkable
 
         const key = `${gx},${gz}`;
         if (seen.has(key)) continue;
@@ -1016,20 +1023,22 @@ function detectCorridorDoors(
         if (round === 0 && !hasRoomNeighbor) continue;
         if (round === 1 && hasRoomNeighbor) continue; // already processed
 
-        // Determine orientation: check if perpendicular cells are also corridor or open
-        // The cell must be a 1-cell-wide chokepoint in one direction
-        const openOrCorrN = isCorridor(gx, gz - 1) || (gz - 1 >= 0 && roomGrid[(gz - 1) * gridW + gx] >= 0);
-        const openOrCorrS = isCorridor(gx, gz + 1) || (gz + 1 < gridD && roomGrid[(gz + 1) * gridW + gx] >= 0);
-        const openOrCorrE = isCorridor(gx + 1, gz) || (gx + 1 < gridW && roomGrid[gz * gridW + gx + 1] >= 0);
-        const openOrCorrW = isCorridor(gx - 1, gz) || (gx - 1 >= 0 && roomGrid[gz * gridW + gx - 1] >= 0);
+        // Chokepoint check: perpendicular cells must be closed (walls),
+        // AND passage cells on both sides must be open (walkable).
+        // Use openGrid directly — more reliable than corridor/room checks
+        // since eliminateThinWalls may have closed some cells.
+        const openN = isOpen(gx, gz - 1);
+        const openS = isOpen(gx, gz + 1);
+        const openE = isOpen(gx + 1, gz);
+        const openW = isOpen(gx - 1, gz);
 
         let orientation: 'NS' | 'EW';
-        if (!openOrCorrN && !openOrCorrS) {
-          orientation = 'NS'; // narrow in Z → door runs NS, blocks EW
-        } else if (!openOrCorrE && !openOrCorrW) {
-          orientation = 'EW'; // narrow in X → door runs EW, blocks NS
+        if (!openN && !openS && openE && openW) {
+          orientation = 'NS'; // walls N+S, passage E-W
+        } else if (!openE && !openW && openN && openS) {
+          orientation = 'EW'; // walls E+W, passage N-S
         } else {
-          continue; // not a chokepoint — skip
+          continue; // not a clean chokepoint — skip
         }
 
         seen.add(key);
