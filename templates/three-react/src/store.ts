@@ -383,6 +383,8 @@ interface GameStore {
   currentTheme: string;
   /** Current zone name derived from floor config (e.g. "Upper Cellars") */
   zoneName: string;
+  /** Current zone subtitle (e.g. "Autumn Hills") */
+  zoneSubtitle: string;
   /** Zone announcement to display on floor transition (title + optional subtitle), cleared after display */
   zoneAnnouncement: { title: string; subtitle?: string } | null;
   message: string | null;
@@ -498,9 +500,14 @@ interface GameStore {
   clearLevelCache: () => void;
   setCurrentTheme: (theme: string) => void;
   setZoneName: (name: string) => void;
+  setZoneSubtitle: (subtitle: string) => void;
   setZoneAnnouncement: (
     announcement: { title: string; subtitle?: string } | null,
   ) => void;
+  /** Shared zone transition: clears bottom-left labels (scramble out), then optionally
+   *  sets a centered announcement after a beat so it scrambles in during fade-out.
+   *  Pass null announcement for transitions without centered text (e.g. returning to overworld). */
+  beginZoneTransition: (announcement: { title: string; subtitle?: string } | null) => void;
   showMessage: (msg: string | null) => void;
 
   selectCharacter: (type: CharacterType) => void;
@@ -600,6 +607,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
   levelCache: {},
   currentTheme: '',
   zoneName: 'Upper Cellars',
+  zoneSubtitle: '',
   zoneAnnouncement: null,
   message: null,
 
@@ -751,7 +759,18 @@ export const useGameStore = create<GameStore>((set, get) => ({
     }),
   setCurrentTheme: (currentTheme) => set({ currentTheme }),
   setZoneName: (zoneName) => set({ zoneName }),
+  setZoneSubtitle: (zoneSubtitle) => set({ zoneSubtitle }),
   setZoneAnnouncement: (zoneAnnouncement) => set({ zoneAnnouncement }),
+  beginZoneTransition: (announcement) => {
+    // Clear bottom-left labels immediately (scramble out)
+    set({ zoneName: '', zoneSubtitle: '' });
+    // If there's an announcement, set it after a beat so scramble-out starts first
+    if (announcement) {
+      setTimeout(() => {
+        useGameStore.getState().setZoneAnnouncement(announcement);
+      }, 100);
+    }
+  },
   showMessage: (message) => set({ message }),
 
   selectCharacter: (type) => set({ selectedCharacter: type, phase: 'playing' }),

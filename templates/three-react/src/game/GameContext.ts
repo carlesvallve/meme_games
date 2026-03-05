@@ -20,6 +20,7 @@ export interface KickedPotion {
   age: number;
   bounces: number;
   rolling: boolean;
+  stopped: boolean;
 }
 
 export interface CharInventory {
@@ -107,6 +108,15 @@ export interface GameContext {
   // Day cycle
   sunDebugHelper: THREE.Group | null;
   baseSkyColors: SkyColors;
+
+  // Overworld sky crossfade
+  skyCrossfade: {
+    from: SkyColors;
+    to: SkyColors;
+    progress: number; // 0→1
+    duration: number;  // seconds
+    active: boolean;
+  } | null;
 
   // Debug
   debugLadderIndex: number;

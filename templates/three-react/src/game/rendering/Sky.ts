@@ -29,7 +29,7 @@ const PALETTE_SKY: Record<string, Partial<SkyColors>> = {
   sands:     { zenith: 0x2a2040, horizon: 0xc08840, ground: 0x1a1008, fog: 0x6a4820, sun: 0xfff0c0, sunGlow: 0xffa030 },
   obsidian:  { zenith: 0x080810, horizon: 0x301820, ground: 0x060608, fog: 0x180c10, sun: 0xff8060, sunGlow: 0xc03020 },
   highlands: { zenith: 0x182848, horizon: 0x5a7090, ground: 0x101820, fog: 0x384858, sun: 0xfff8e0, sunGlow: 0xffbb50 },
-  enchanted: { zenith: 0x0a1040, horizon: 0x5030a0, ground: 0x080818, fog: 0x281860, sun: 0xe0c0ff, sunGlow: 0x9060ff },
+  enchanted: { zenith: 0x1a1838, horizon: 0x6a4878, ground: 0x100c18, fog: 0x3a2848, sun: 0xf0d8e0, sunGlow: 0xc080a0 },
   swamp:     { zenith: 0x141a10, horizon: 0x3a4828, ground: 0x0a0c08, fog: 0x283818, sun: 0xd0d8a0, sunGlow: 0x88a040 },
   coral:     { zenith: 0x0a2050, horizon: 0x50a0a0, ground: 0x081828, fog: 0x286868, sun: 0xfffff0, sunGlow: 0x80ffe0 },
   ash:       { zenith: 0x080808, horizon: 0x282020, ground: 0x040404, fog: 0x181010, sun: 0xffa060, sunGlow: 0xc04020 },
@@ -40,6 +40,27 @@ export function getSkyColors(paletteName: string): SkyColors {
   const override = PALETTE_SKY[paletteName];
   if (!override) return { ...DEFAULT_SKY };
   return { ...DEFAULT_SKY, ...override };
+}
+
+/** Linearly interpolate between two SkyColors by factor t (0→a, 1→b). */
+export function lerpSkyColors(a: SkyColors, b: SkyColors, t: number): SkyColors {
+  const clamp = Math.max(0, Math.min(1, t));
+  const lerpC = (c1: number, c2: number): number => {
+    const r1 = (c1 >> 16) & 0xff, g1 = (c1 >> 8) & 0xff, b1 = c1 & 0xff;
+    const r2 = (c2 >> 16) & 0xff, g2 = (c2 >> 8) & 0xff, b2 = c2 & 0xff;
+    const r = Math.round(r1 + (r2 - r1) * clamp);
+    const g = Math.round(g1 + (g2 - g1) * clamp);
+    const b = Math.round(b1 + (b2 - b1) * clamp);
+    return (r << 16) | (g << 8) | b;
+  };
+  return {
+    zenith: lerpC(a.zenith, b.zenith),
+    horizon: lerpC(a.horizon, b.horizon),
+    ground: lerpC(a.ground, b.ground),
+    sun: lerpC(a.sun, b.sun),
+    sunGlow: lerpC(a.sunGlow, b.sunGlow),
+    fog: lerpC(a.fog, b.fog),
+  };
 }
 
 // ── Procedural sky shader ───────────────────────────────────────────

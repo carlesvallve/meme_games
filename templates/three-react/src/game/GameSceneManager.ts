@@ -295,8 +295,11 @@ export function createSceneManager(
 
     const newPalette = ctx.terrain.getPaletteName();
     useGameStore.getState().setPaletteActive(newPalette);
-    ctx.sceneSky.setPalette(newPalette);
-    ctx.baseSkyColors = getSkyColors(newPalette);
+    // Overworld starts with a neutral sky — tile crossfade kicks in on first frame
+    const skyPalette = terrainPreset === 'overworld' ? 'highlands' : newPalette;
+    ctx.sceneSky.setPalette(skyPalette);
+    ctx.baseSkyColors = getSkyColors(skyPalette);
+    ctx.skyCrossfade = null;
     useGameStore.getState().setWalkableCells(ctx.navGrid.getWalkableCellCount());
     ctx.terrain.setGridOpacity(useGameStore.getState().gridOpacity);
 
@@ -512,21 +515,40 @@ export function createSceneManager(
   function changeFloor(direction: 'down' | 'up'): void {
     ctx.speechSystem.dismissAll();
 
+    // Pre-compute announcement for the target floor
+    const store0 = useGameStore.getState();
+    const currentFloor = store0.floor;
+    const owState = store0.overworldState;
+    const pending = owState?.pendingPoiDungeon;
+    const newFloor = direction === 'down' ? currentFloor + 1 : currentFloor - 1;
+    const isRetreat = direction === 'up' && currentFloor === 1 && pending;
+    const isConquest = direction === 'down' && pending && currentFloor >= pending.floorCount;
+
+    if ((isRetreat || isConquest) && pending) {
+      // No centered announcement — bottom-left will scramble in after fade
+      store0.beginZoneTransition(null);
+    } else if (pending) {
+      const skullPrefix = '\u2620'.repeat(pending.skulls) + ' ';
+      store0.beginZoneTransition({
+        title: skullPrefix + pending.name,
+        subtitle: generateDungeonFloorSubtitle(pending.poiSeed, newFloor, pending.floorCount),
+      });
+    } else {
+      store0.beginZoneTransition(null);
+    }
+
     ctx.postProcess.fadeTransition(() => {
       const store = useGameStore.getState();
-      const currentFloor = store.floor;
-      const owState = store.overworldState;
-      const pending = owState?.pendingPoiDungeon;
 
       // ── POI dungeon: retreat from floor 1 entrance ──
-      if (direction === 'up' && currentFloor === 1 && pending) {
-        returnToHeightmapFromDungeon(store, owState!, pending, false);
+      if (isRetreat) {
+        returnToHeightmapFromDungeon(store, owState!, pending!, false);
         return;
       }
 
       // ── POI dungeon: completed last floor → conquered ──
-      if (direction === 'down' && pending && currentFloor >= pending.floorCount) {
-        returnToHeightmapFromDungeon(store, owState!, pending, true);
+      if (isConquest) {
+        returnToHeightmapFromDungeon(store, owState!, pending!, true);
         return;
       }
 
@@ -534,18 +556,9 @@ export function createSceneManager(
       const snapshot = serializeLevel();
       store.saveLevelSnapshot(currentFloor, snapshot);
 
-      const newFloor =
-        direction === 'down' ? currentFloor + 1 : currentFloor - 1;
       store.setFloor(newFloor);
-      applyFloorConfig(newFloor, true);
-
-      // For POI dungeons, show floor-specific subtitle
-      if (pending) {
-        store.setZoneAnnouncement({
-          title: pending.name,
-          subtitle: generateDungeonFloorSubtitle(pending.poiSeed, newFloor, pending.floorCount),
-        });
-      }
+      // POI dungeons already set announcement via beginZoneTransition; non-POI still need it
+      applyFloorConfig(newFloor, !pending);
 
       const cached = store.getLevelSnapshot(newFloor);
       const seed = store.getFloorSeed(newFloor);
@@ -596,12 +609,15 @@ export function createSceneManager(
     store.setFloor(1);
     store.clearLevelCache();
 
-    // Announce (only on retreat — conquest is shown via the "Conquered" label on the dungeon entrance)
+    // Delay labels so they scramble in during fade-in
     const regionName = tileDef.label || 'Unknown Lands';
-    store.setZoneName(regionName);
-    if (!conquered) {
-      store.setZoneAnnouncement({ title: regionName, subtitle: 'You flee the darkness.' });
-    }
+    const styleName = tileDef.heightmapStyle.charAt(0).toUpperCase() + tileDef.heightmapStyle.slice(1);
+    const palName = tileDef.paletteName.charAt(0).toUpperCase() + tileDef.paletteName.slice(1);
+    setTimeout(() => {
+      const s = useGameStore.getState();
+      s.setZoneName(regionName);
+      s.setZoneSubtitle(`${palName} ${styleName}`);
+    }, 500);
 
     // Restore heightmap settings and terrain preset
     store.setTerrainPreset('heightmap');

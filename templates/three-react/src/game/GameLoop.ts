@@ -15,7 +15,7 @@ import {
   disposeSunDebugHelper,
   computeSunDirection,
 } from './rendering';
-import { getSkyColors } from './rendering';
+import { getSkyColors, lerpSkyColors } from './rendering';
 import {
   setDebugProjectileStick,
   POTION_COLORS,
@@ -54,6 +54,30 @@ export function createGameLoop(
 
   function triggerPlayerDeath(playerChar: Character): void {
     ctx.deathSequence.trigger(playerChar);
+  }
+
+  function getKickAutoTarget(px: number, pz: number, faceDirX: number, faceDirZ: number): { x: number; z: number } | null {
+    if (!ctx.enemySystem) return null;
+    let bestDist = Infinity;
+    let bestPos: { x: number; z: number } | null = null;
+    for (const enemy of ctx.enemySystem.getVisibleEnemies()) {
+      if (!enemy.isAlive) continue;
+      const ex = enemy.mesh.position.x;
+      const ez = enemy.mesh.position.z;
+      const dx = ex - px;
+      const dz = ez - pz;
+      const dist = Math.sqrt(dx * dx + dz * dz);
+      if (dist > 8 || dist < 0.1) continue;
+      const nx = dx / dist;
+      const nz = dz / dist;
+      const dot = faceDirX * nx + faceDirZ * nz;
+      if (dot < 0.3) continue;
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestPos = { x: ex, z: ez };
+      }
+    }
+    return bestPos;
   }
 
   function explodeKickedPotion(kp: typeof ctx.kickedPotions[0]): void {
@@ -113,20 +137,19 @@ export function createGameLoop(
         ctx.needsFullRegen = false;
         ctx.postProcess.fadeTransition(
           () => {
-            // Reset to overworld on new game (clears dungeon state if died inside one)
+            // Reset to overworld on new game with a fresh seed
             const store = useGameStore.getState();
-            const owState = store.overworldState;
-            if (owState?.pendingPoiDungeon) {
-              store.setOverworldState({ ...owState, pendingPoiDungeon: null });
-            }
+            const newSeed = (Math.random() * 0xffffffff) >>> 0;
             store.setTerrainPreset('overworld');
             store.setProgressionRecipe('Classic');
             store.setFloor(1);
             store.clearLevelCache();
+            store.setOverworldState(null);
+            ctx.lastOverworldTile = null;
             sceneManager.regenerateScene({
               character: selected,
               presetOverride: 'overworld',
-              seed: owState?.baseSeed,
+              seed: newSeed,
             });
           },
           9999,
@@ -154,6 +177,9 @@ export function createGameLoop(
       // Track which overworld tile the player is standing on → show announcement on change
       if (isOverworld && playerChar.isAlive && owState) {
         const pos = playerChar.getPosition();
+        // Update player pos for proximity-based label toggling
+        const owMap = ctx.terrain.getOverworldMap();
+        if (owMap) owMap.playerPos = { x: pos.x, z: pos.z };
         const standingTile = getTileAtWorldPos(pos.x, pos.z);
         if (standingTile !== null && standingTile !== ctx.lastOverworldTile) {
           ctx.lastOverworldTile = standingTile;
@@ -161,7 +187,42 @@ export function createGameLoop(
           const regionName = tileDef.label || 'Unknown Lands';
           const styleName = tileDef.heightmapStyle.charAt(0).toUpperCase() + tileDef.heightmapStyle.slice(1);
           const palName = tileDef.paletteName.charAt(0).toUpperCase() + tileDef.paletteName.slice(1);
-          useGameStore.getState().setZoneAnnouncement({ title: regionName, subtitle: `${palName} ${styleName}` });
+          useGameStore.getState().setZoneName(regionName);
+          useGameStore.getState().setZoneSubtitle(`${palName} ${styleName}`);
+          // Start sky crossfade to this tile's palette
+          const targetSky = getSkyColors(tileDef.paletteName);
+          ctx.skyCrossfade = {
+            from: { ...ctx.baseSkyColors },
+            to: targetSky,
+            progress: 0,
+            duration: 0.5,
+            active: true,
+          };
+        }
+        // Tick sky crossfade
+        if (ctx.skyCrossfade?.active) {
+          ctx.skyCrossfade.progress += dt / ctx.skyCrossfade.duration;
+          if (ctx.skyCrossfade.progress >= 1) {
+            ctx.skyCrossfade.progress = 1;
+            ctx.skyCrossfade.active = false;
+          }
+          // Smoothstep for nicer easing
+          const t = ctx.skyCrossfade.progress;
+          const smooth = t * t * (3 - 2 * t);
+          ctx.baseSkyColors = lerpSkyColors(ctx.skyCrossfade.from, ctx.skyCrossfade.to, smooth);
+        }
+      }
+
+      // Clamp character to overworld map bounds
+      if (isOverworld && playerChar.isAlive) {
+        const half = OW_TOTAL_SIZE / 2;
+        const margin = 0.3;
+        const p = playerChar.getPosition();
+        const cx = Math.max(-half + margin, Math.min(half - margin, p.x));
+        const cz = Math.max(-half + margin, Math.min(half - margin, p.z));
+        if (cx !== p.x || cz !== p.z) {
+          playerChar.mesh.position.x = cx;
+          playerChar.mesh.position.z = cz;
         }
       }
 
@@ -184,9 +245,12 @@ export function createGameLoop(
             zoomSpawnNorm: { nx, nz },
             zoomSpawnFacing: playerChar.getFacing(),
           });
+          const regionName = tileDef.label || 'Unknown Lands';
+          const styleName = tileDef.heightmapStyle.charAt(0).toUpperCase() + tileDef.heightmapStyle.slice(1);
+          const palName = tileDef.paletteName.charAt(0).toUpperCase() + tileDef.paletteName.slice(1);
+          useGameStore.getState().beginZoneTransition({ title: regionName, subtitle: `${palName} ${styleName}` });
           // Fade → load full heightmap with tile's seed/palette
           ctx.postProcess.fadeTransition(() => {
-            // Restore default camera params
             const store = useGameStore.getState();
             store.setCameraParam('distance', DEFAULT_CAMERA_PARAMS.distance);
             store.setCameraParam('pitchMin', DEFAULT_CAMERA_PARAMS.pitchMin);
@@ -195,12 +259,7 @@ export function createGameLoop(
             store.setCameraParam('maxDistance', DEFAULT_CAMERA_PARAMS.maxDistance);
             store.setPaletteName(tileDef.paletteName);
             store.setHeightmapStyle(tileDef.heightmapStyle);
-            // Show region name with biome subtitle
-            const regionName = tileDef.label || 'Unknown Lands';
             store.setZoneName(regionName);
-            const styleName = tileDef.heightmapStyle.charAt(0).toUpperCase() + tileDef.heightmapStyle.slice(1);
-            const palName = tileDef.paletteName.charAt(0).toUpperCase() + tileDef.paletteName.slice(1);
-            store.setZoneAnnouncement({ title: regionName, subtitle: `${palName} ${styleName}` });
             sceneManager.regenerateScene({
               presetOverride: 'heightmap',
               seed: tileDef.seed,
@@ -228,12 +287,18 @@ export function createGameLoop(
           ...curOw,
           savedPlayerPos: { x: cx, y: 0, z: cz },
         });
+        useGameStore.getState().beginZoneTransition(null);
         ctx.postProcess.fadeTransition(() => {
           const store = useGameStore.getState();
+          // Reset camera to a nice overworld distance
+          store.setCameraParam('distance', 18);
+          store.setCameraParam('minDistance', 10);
+          store.setCameraParam('maxDistance', 30);
+          store.setCameraParam('pitchMin', DEFAULT_CAMERA_PARAMS.pitchMin);
+          store.setCameraParam('pitchMax', DEFAULT_CAMERA_PARAMS.pitchMax);
           store.setTerrainPreset('overworld');
           store.setOverworldActiveTile(null);
-          const worldName = owState.worldName || 'Overworld';
-          store.setZoneName(worldName);
+          // No announcement for overworld — tile detection will set labels on next frame
           // Reset tile tracking so tile announcement fires on next frame
           ctx.lastOverworldTile = null;
           sceneManager.regenerateScene({
@@ -327,13 +392,13 @@ export function createGameLoop(
             store.setFloor(1);
             // Pre-apply floor config so store has correct dungeon layout
             sceneManager.applyFloorConfig(1, false, 'voxelDungeon');
-            store.setZoneName(nearestPoi.name);
-            store.setZoneAnnouncement({
-              title: nearestPoi.name,
-              subtitle: generateDungeonFloorSubtitle(nearestPoi.poiSeed, 1, floorCount),
-            });
+            const skullPrefix = '\u2620'.repeat(skulls) + ' ';
+            const dungeonTitle = skullPrefix + nearestPoi.name;
+            const dungeonSubtitle = generateDungeonFloorSubtitle(nearestPoi.poiSeed, 1, floorCount);
+            store.beginZoneTransition({ title: dungeonTitle, subtitle: dungeonSubtitle });
             ctx.postProcess.fadeTransition(() => {
               ctx.exitTriggered = false;
+              useGameStore.getState().setZoneName(dungeonTitle);
               sceneManager.regenerateScene({
                 presetOverride: 'voxelDungeon',
                 seed: nearestPoi!.poiSeed,
@@ -436,14 +501,22 @@ export function createGameLoop(
             pPos.x, pPos.z, potionInteractRadius, true,
           );
           if (badLoot) {
-            const kdx = badLoot.mesh.position.x - pPos.x;
-            const kdz = badLoot.mesh.position.z - pPos.z;
-            const kickDirX = kdx / (Math.sqrt(kdx * kdx + kdz * kdz) || 1);
-            const kickDirZ = kdz / (Math.sqrt(kdx * kdx + kdz * kdz) || 1);
+            let kdx = badLoot.mesh.position.x - pPos.x;
+            let kdz = badLoot.mesh.position.z - pPos.z;
+            let kickDirX = kdx / (Math.sqrt(kdx * kdx + kdz * kdz) || 1);
+            let kickDirZ = kdz / (Math.sqrt(kdx * kdx + kdz * kdz) || 1);
+            const autoTarget = getKickAutoTarget(pPos.x, pPos.z, kickDirX, kickDirZ);
+            if (autoTarget) {
+              const tdx = autoTarget.x - badLoot.mesh.position.x;
+              const tdz = autoTarget.z - badLoot.mesh.position.z;
+              const tLen = Math.sqrt(tdx * tdx + tdz * tdz) || 1;
+              kickDirX = tdx / tLen;
+              kickDirZ = tdz / tLen;
+            }
             const proj = ctx.lootSystem.kickPotion(badLoot, kickDirX, kickDirZ);
             if (proj) {
               ctx.kickedPotions.push({
-                ...proj, age: 0, bounces: 0, rolling: false,
+                ...proj, age: 0, bounces: 0, rolling: false, stopped: false,
               });
               audioSystem.sfx('thud');
               kickedAPotion = true;
@@ -459,8 +532,16 @@ export function createGameLoop(
               const pdz = prop.mesh.position.z - pPos.z;
               const pDist = Math.sqrt(pdx * pdx + pdz * pdz);
               if (pDist > potionInteractRadius) continue;
-              const kickDirX = pdx / (pDist || 1);
-              const kickDirZ = pdz / (pDist || 1);
+              let kickDirX = pdx / (pDist || 1);
+              let kickDirZ = pdz / (pDist || 1);
+              const propAutoTarget = getKickAutoTarget(pPos.x, pPos.z, kickDirX, kickDirZ);
+              if (propAutoTarget) {
+                const tdx = propAutoTarget.x - prop.mesh.position.x;
+                const tdz = propAutoTarget.z - prop.mesh.position.z;
+                const tLen = Math.sqrt(tdx * tdx + tdz * tdz) || 1;
+                kickDirX = tdx / tLen;
+                kickDirZ = tdz / tLen;
+              }
               const srcMesh = prop.mesh as THREE.Mesh;
               const mesh = new THREE.Mesh(srcMesh.geometry, srcMesh.material);
               mesh.scale.copy(srcMesh.scale);
@@ -471,8 +552,38 @@ export function createGameLoop(
               ctx.kickedPotions.push({
                 mesh, colorIndex: ci,
                 vx: kickDirX * 5, vy: 3, vz: kickDirZ * 5,
-                age: 0, bounces: 0, rolling: false,
+                age: 0, bounces: 0, rolling: false, stopped: false,
               });
+              audioSystem.sfx('thud');
+              kickedAPotion = true;
+              playerChar.startAttack(false);
+              break;
+            }
+          }
+          // Re-kick stopped potions on the ground
+          if (!kickedAPotion) {
+            for (const kp of ctx.kickedPotions) {
+              if (!kp.stopped) continue;
+              const kdx = kp.mesh.position.x - pPos.x;
+              const kdz = kp.mesh.position.z - pPos.z;
+              if (kdx * kdx + kdz * kdz > potionInteractRadius * potionInteractRadius) continue;
+              let kickDirX = kdx / (Math.sqrt(kdx * kdx + kdz * kdz) || 1);
+              let kickDirZ = kdz / (Math.sqrt(kdx * kdx + kdz * kdz) || 1);
+              const reTarget = getKickAutoTarget(pPos.x, pPos.z, kickDirX, kickDirZ);
+              if (reTarget) {
+                const tdx = reTarget.x - kp.mesh.position.x;
+                const tdz = reTarget.z - kp.mesh.position.z;
+                const tLen = Math.sqrt(tdx * tdx + tdz * tdz) || 1;
+                kickDirX = tdx / tLen;
+                kickDirZ = tdz / tLen;
+              }
+              kp.vx = kickDirX * 5;
+              kp.vy = 3;
+              kp.vz = kickDirZ * 5;
+              kp.age = 0;
+              kp.bounces = 0;
+              kp.rolling = false;
+              kp.stopped = false;
               audioSystem.sfx('thud');
               kickedAPotion = true;
               playerChar.startAttack(false);
@@ -658,6 +769,7 @@ export function createGameLoop(
       // Kicked potions
       for (let ki = ctx.kickedPotions.length - 1; ki >= 0; ki--) {
         const kp = ctx.kickedPotions[ki];
+        if (kp.stopped) continue;
         kp.age += gameDt;
 
         if (!kp.rolling) {
@@ -694,8 +806,7 @@ export function createGameLoop(
             } else {
               kp.mesh.position.x = oldX;
               kp.mesh.position.z = oldZ;
-              explodeKickedPotion(kp);
-              ctx.kickedPotions.splice(ki, 1);
+              kp.vx = 0; kp.vy = 0; kp.vz = 0; kp.stopped = true; kp.age = 0;
               continue;
             }
           }
@@ -741,16 +852,14 @@ export function createGameLoop(
             } else {
               kp.mesh.position.x = oldX;
               kp.mesh.position.z = oldZ;
-              explodeKickedPotion(kp);
-              ctx.kickedPotions.splice(ki, 1);
+              kp.vx = 0; kp.vz = 0; kp.stopped = true; kp.age = 0;
               continue;
             }
           }
 
           const speed = Math.sqrt(kp.vx * kp.vx + kp.vz * kp.vz);
           if (speed < 0.3) {
-            explodeKickedPotion(kp);
-            ctx.kickedPotions.splice(ki, 1);
+            kp.vx = 0; kp.vz = 0; kp.stopped = true; kp.age = 0;
             continue;
           }
         }
@@ -798,9 +907,8 @@ export function createGameLoop(
           continue;
         }
 
-        if (kp.age > 5) {
-          explodeKickedPotion(kp);
-          ctx.kickedPotions.splice(ki, 1);
+        if (kp.age > 5 && !kp.stopped) {
+          kp.vx = 0; kp.vz = 0; kp.stopped = true; kp.age = 0;
         }
       }
 

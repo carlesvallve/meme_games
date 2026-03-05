@@ -8,6 +8,7 @@ import type { VoxCharEntry } from '../character';
 import { audioSystem } from '../../utils/AudioSystem';
 import { buildRoomEnemyPool } from '../dungeon';
 import { useGameStore } from '../../store';
+import { createSvgIconSprite } from '../combat';
 
 // ── Constants ──
 
@@ -17,6 +18,9 @@ const STAGGER_MIN = 2.0;
 const STAGGER_MAX = 5.0;
 const MIN_ENTRANCE_DIST_SQ = 5 * 5;
 const MIN_TRANSITION_DIST_SQ = 3 * 3;
+
+/** Effects that get persistent icons above enemies */
+const STATUS_ICON_EFFECTS = new Set(['poison', 'slow', 'fragile', 'confusion', 'frenzy']);
 
 export { FRENZY_ALERT_Y };
 
@@ -43,7 +47,7 @@ export class EnemySpawner {
   // ── Frenzy tracking ──
   readonly frenzyEnemies = new Set<Enemy>();
   readonly frenzyAlertIcons = new Map<Enemy, THREE.Sprite>();
-  readonly confusionIcons = new Map<Enemy, THREE.Sprite>();
+  readonly statusIcons = new Map<Enemy, Map<string, THREE.Sprite>>();
 
   // ── Taunt state ──
   tauntTarget: Enemy | null = null;
@@ -288,21 +292,31 @@ export class EnemySpawner {
     this.frenzyAlertIcons.set(enemy, sprite);
   }
 
-  spawnConfusionIcon(enemy: Enemy): void {
-    if (this.confusionIcons.has(enemy)) return;
-    const sprite = this.createAlertSprite(0.25, 0.35, '#dddd22', '?');
+  spawnStatusIcon(enemy: Enemy, effectName: string): void {
+    if (!STATUS_ICON_EFFECTS.has(effectName)) return;
+    let enemyIcons = this.statusIcons.get(enemy);
+    if (!enemyIcons) {
+      enemyIcons = new Map();
+      this.statusIcons.set(enemy, enemyIcons);
+    }
+    if (enemyIcons.has(effectName)) return;
+    const sprite = createSvgIconSprite(effectName, null, 48);
+    sprite.scale.set(0.16, 0.16, 1);
     this.scene.add(sprite);
-    this.confusionIcons.set(enemy, sprite);
+    enemyIcons.set(effectName, sprite);
   }
 
-  cleanupConfusionIcon(enemy: Enemy): void {
-    const icon = this.confusionIcons.get(enemy);
+  cleanupStatusIcon(enemy: Enemy, effectName: string): void {
+    const enemyIcons = this.statusIcons.get(enemy);
+    if (!enemyIcons) return;
+    const icon = enemyIcons.get(effectName);
     if (icon) {
       this.scene.remove(icon);
       (icon.material as THREE.SpriteMaterial).map?.dispose();
       (icon.material as THREE.SpriteMaterial).dispose();
-      this.confusionIcons.delete(enemy);
+      enemyIcons.delete(effectName);
     }
+    if (enemyIcons.size === 0) this.statusIcons.delete(enemy);
   }
 
   cleanupFrenzyEnemy(enemy: Enemy): void {
@@ -361,18 +375,24 @@ export class EnemySpawner {
         this.tauntAlertIcon.quaternion.copy(camera.quaternion);
       }
     }
-    for (const [enemy, sprite] of this.confusionIcons) {
+    for (const [enemy, enemyIcons] of this.statusIcons) {
       if (!enemy.isAlive) {
-        this.cleanupConfusionIcon(enemy);
+        for (const [name] of enemyIcons) this.cleanupStatusIcon(enemy, name);
+        this.statusIcons.delete(enemy);
         continue;
       }
-      sprite.position.set(
-        enemy.mesh.position.x,
-        enemy.mesh.position.y + FRENZY_ALERT_Y,
-        enemy.mesh.position.z,
-      );
-      sprite.visible = enemy.mesh.visible;
-      sprite.quaternion.copy(camera.quaternion);
+      let idx = 0;
+      for (const [, sprite] of enemyIcons) {
+        const offsetX = (idx - (enemyIcons.size - 1) * 0.5) * 0.18;
+        sprite.position.set(
+          enemy.mesh.position.x + offsetX,
+          enemy.mesh.position.y + FRENZY_ALERT_Y,
+          enemy.mesh.position.z,
+        );
+        sprite.visible = enemy.mesh.visible;
+        sprite.quaternion.copy(camera.quaternion);
+        idx++;
+      }
     }
   }
 
@@ -380,7 +400,7 @@ export class EnemySpawner {
     return (
       this.frenzyAlertIcons.size > 0 ||
       this.tauntAlertIcon !== null ||
-      this.confusionIcons.size > 0
+      this.statusIcons.size > 0
     );
   }
 
@@ -523,12 +543,14 @@ export class EnemySpawner {
       (icon.material as THREE.SpriteMaterial).dispose();
     }
     this.frenzyAlertIcons.clear();
-    for (const [, icon] of this.confusionIcons) {
-      this.scene.remove(icon);
-      (icon.material as THREE.SpriteMaterial).map?.dispose();
-      (icon.material as THREE.SpriteMaterial).dispose();
+    for (const [, enemyIcons] of this.statusIcons) {
+      for (const [, icon] of enemyIcons) {
+        this.scene.remove(icon);
+        (icon.material as THREE.SpriteMaterial).map?.dispose();
+        (icon.material as THREE.SpriteMaterial).dispose();
+      }
     }
-    this.confusionIcons.clear();
+    this.statusIcons.clear();
     this.frenzyEnemies.clear();
   }
 }

@@ -65,7 +65,7 @@ const STATUS_SVG: Record<string, { path: string; color: string }> = {
 };
 
 /** Render an SVG path to a canvas-based Three.js sprite with optional number badge */
-function createSvgIconSprite(
+export function createSvgIconSprite(
   effect: string,
   num: number | null = null,
   size = 64,
