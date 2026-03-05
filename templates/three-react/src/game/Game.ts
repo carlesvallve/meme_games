@@ -261,6 +261,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     _planeHit: new THREE.Vector3(),
     sunDebugHelper: null,
     baseSkyColors: getSkyColors(useGameStore.getState().paletteActive || 'meadow'),
+    skyCrossfade: null,
     debugLadderIndex: -1,
     pointerDragActive: false, lastDragX: 0, lastDragZ: 0,
     rafId: 0, lastTime: 0,

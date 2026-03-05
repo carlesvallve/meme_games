@@ -1,4 +1,5 @@
 import { useGameStore, DEFAULT_POST_PROCESS } from '../../../store';
+import type { ParticleToggles } from '../../../store';
 import {
   SettingsWindow,
   Section,
@@ -7,13 +8,33 @@ import {
   resetBtnStyle,
 } from './shared';
 
+const PARTICLE_TOGGLES: { key: keyof ParticleToggles; label: string }[] = [
+  { key: 'dust', label: 'Dust' },
+  { key: 'lightRain', label: 'Drizzle' },
+  { key: 'rain', label: 'Rain' },
+  { key: 'debris', label: 'Debris' },
+];
+
 export function PostFXPanel() {
   const postProcess = useGameStore((s) => s.postProcess);
   const setPostProcess = useGameStore((s) => s.setPostProcess);
+  const particleToggles = useGameStore((s) => s.particleToggles);
+  const toggleParticle = useGameStore((s) => s.toggleParticle);
 
   return (
     <SettingsWindow>
-      <Section label='Post FX' first>
+      <Section label='Particles' first>
+        {PARTICLE_TOGGLES.map((t) => (
+          <Toggle
+            key={t.key}
+            label={t.label}
+            value={particleToggles[t.key]}
+            onChange={() => toggleParticle(t.key)}
+          />
+        ))}
+      </Section>
+
+      <Section label='Post FX'>
         <Toggle
           label='Enabled'
           value={postProcess.enabled}

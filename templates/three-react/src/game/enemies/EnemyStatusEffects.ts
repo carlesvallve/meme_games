@@ -15,8 +15,8 @@ export const ENEMY_POISON_TICK = 2.0;
 export const ENEMY_POISON_DAMAGE = 1;
 
 export interface StatusEffectCallbacks {
-  spawnConfusionIcon(enemy: Enemy): void;
-  cleanupConfusionIcon(enemy: Enemy): void;
+  spawnStatusIcon(enemy: Enemy, effectName: string): void;
+  cleanupStatusIcon(enemy: Enemy, effectName: string): void;
 }
 
 export class EnemyStatusEffects {
@@ -50,8 +50,8 @@ export class EnemyStatusEffects {
     }
     if (effectName === 'confusion') {
       enemy.setConfused(true);
-      this.callbacks.spawnConfusionIcon(enemy);
     }
+    this.callbacks.spawnStatusIcon(enemy, effectName);
   }
 
   tick(dt: number): void {
@@ -82,8 +82,8 @@ export class EnemyStatusEffects {
           }
           if (name === 'confusion') {
             enemy.setConfused(false);
-            this.callbacks.cleanupConfusionIcon(enemy);
           }
+          this.callbacks.cleanupStatusIcon(enemy, name);
         }
       }
       if (effects.size === 0) {

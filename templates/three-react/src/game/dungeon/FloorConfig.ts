@@ -2,7 +2,7 @@
 // Pure engine: reads the active ProgressionRecipe, provides lookup helpers.
 // All data lives in recipe files under ./recipes/.
 
-import { VOX_ENEMIES, getArchetype } from '../character/VoxCharacterDB';
+import { VOX_ENEMIES, getArchetype, getMonsterStats } from '../character/VoxCharacterDB';
 import type { ProgressionRecipe, FloorZoneConfig, ThemedFloor } from '../recipes/types';
 import { RECIPES, DEFAULT_RECIPE } from '../recipes';
 
@@ -75,6 +75,27 @@ export function getEnemyIdsByArchetype(archetype: string): string[] {
 
 // ── Build Weighted Enemy Pool ───────────────────────────────────────
 
+/** Tier labels used in variant-aware monster stats. */
+type MonsterTier = 'low' | 'mid' | 'high';
+
+/** Get IDs for an archetype, filtered to only variants matching the given tier.
+ *  For monsters without variant stats, all IDs are included. */
+function getIdsByArchetypeAndTier(archetype: string, tier: MonsterTier): string[] {
+  const allIds = getEnemyIdsByArchetype(archetype);
+  // Find the entry name for each ID so we can check variant stats
+  const filtered: string[] = [];
+  for (const id of allIds) {
+    const entry = VOX_ENEMIES.find(e => e.id === id);
+    if (!entry) continue;
+    const stats = getMonsterStats(entry.name);
+    // If stats have a tier field and it doesn't match, skip
+    if (stats.tier && stats.tier !== tier) continue;
+    filtered.push(id);
+  }
+  // If filtering removed everything (archetype has no variants with this tier), include all
+  return filtered.length > 0 ? filtered : allIds;
+}
+
 /** Build a flat list of VoxCharEntry IDs, weighted by tier, for a given floor. */
 export function buildFloorEnemyPool(floor: number): string[] {
   const cfg = getFloorConfig(floor);
@@ -82,19 +103,19 @@ export function buildFloorEnemyPool(floor: number): string[] {
   const [wLow, wMid, wHigh] = pool.weights;
   const ids: string[] = [];
 
-  function addTier(archetypes: string[], weight: number) {
+  function addTier(archetypes: string[], weight: number, tier: MonsterTier) {
     if (weight <= 0 || archetypes.length === 0) return;
     for (const arch of archetypes) {
-      const archIds = getEnemyIdsByArchetype(arch);
+      const archIds = getIdsByArchetypeAndTier(arch, tier);
       for (const id of archIds) {
         for (let i = 0; i < weight; i++) ids.push(id);
       }
     }
   }
 
-  addTier(pool.low, wLow);
-  addTier(pool.mid, wMid);
-  addTier(pool.high, wHigh);
+  addTier(pool.low, wLow, 'low');
+  addTier(pool.mid, wMid, 'mid');
+  addTier(pool.high, wHigh, 'high');
 
   return ids;
 }

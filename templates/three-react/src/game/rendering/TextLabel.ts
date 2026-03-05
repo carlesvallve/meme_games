@@ -109,8 +109,69 @@ export function createTextLabel(text: string, opts: TextLabelOpts = {}): THREE.S
     opacity,
   });
   const sprite = new THREE.Sprite(mat);
+  const scaledH = height * lines.length;
   const aspect = canvas.width / canvas.height;
-  sprite.scale.set(height * aspect, height, 1);
+  sprite.scale.set(scaledH * aspect, scaledH, 1);
   sprite.renderOrder = renderOrder;
+  // Stash opts for updateTextLabel
+  (sprite as any).__textLabelOpts = { color, outlineColor, outlineWidth, fontSize, height, depthTest, opacity, renderOrder, maxLineChars };
   return sprite;
+}
+
+/** Re-render a text label sprite with new text, reusing the same material/texture. */
+export function updateTextLabel(sprite: THREE.Sprite, text: string): void {
+  const opts = (sprite as any).__textLabelOpts as TextLabelOpts | undefined;
+  if (!opts) return;
+  const {
+    color = '#fff',
+    outlineColor = 'rgba(0,0,0,0.85)',
+    outlineWidth = 5,
+    fontSize = 42,
+    height = 0.5,
+    maxLineChars = 28,
+  } = opts;
+
+  const lines = wrapText(text, maxLineChars);
+  const lineHeight = fontSize * 1.25;
+
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d')!;
+  const font = `bold ${fontSize}px monospace`;
+  ctx.font = font;
+
+  let maxWidth = 0;
+  for (const line of lines) {
+    const w = ctx.measureText(line).width;
+    if (w > maxWidth) maxWidth = w;
+  }
+
+  const pad = Math.ceil(fontSize * 0.4);
+  canvas.width = Math.ceil(maxWidth) + pad * 2;
+  canvas.height = Math.ceil(lineHeight * lines.length) + pad * 2;
+
+  ctx.font = font;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const cx = canvas.width / 2;
+  const startY = pad + lineHeight / 2;
+
+  for (let i = 0; i < lines.length; i++) {
+    const ly = startY + i * lineHeight;
+    ctx.strokeStyle = outlineColor;
+    ctx.lineWidth = outlineWidth;
+    ctx.strokeText(lines[i], cx, ly);
+    ctx.fillStyle = color;
+    ctx.fillText(lines[i], cx, ly);
+  }
+
+  const mat = sprite.material as THREE.SpriteMaterial;
+  if (mat.map) mat.map.dispose();
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.minFilter = THREE.LinearFilter;
+  mat.map = texture;
+  mat.needsUpdate = true;
+  // Scale height by line count so each character stays the same size
+  const scaledH = height * lines.length;
+  const aspect = canvas.width / canvas.height;
+  sprite.scale.set(scaledH * aspect, scaledH, 1);
 }

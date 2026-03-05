@@ -13,7 +13,8 @@ import {
   sampleHeightmap,
   getHeightmapConfig,
 } from '../terrain/TerrainNoise';
-import { createTextLabel } from '../rendering/TextLabel';
+import { createTextLabel, updateTextLabel } from '../rendering/TextLabel';
+import { TextScramble } from '../utils/TextScramble';
 import type { HeightmapStyleConfig } from '../terrain/TerrainNoise';
 import type { NatureGeneratorResult } from '../terrain/NatureGenerator';
 import type { BiomeType } from '../terrain/ColorPalettes';
@@ -336,7 +337,10 @@ export class OverworldMap {
   private tiles: TileData[] = [];
   private tileDefs: OverworldTileDef[] = [];
   private poiMeshes: THREE.Object3D[] = [];
+  private scramblers: TextScramble[] = [];
   private disposed = false;
+  /** Updated externally each frame for proximity-based label toggling. */
+  playerPos: { x: number; z: number } | null = null;
 
   constructor(private baseSeed: number) {}
 
@@ -573,29 +577,55 @@ export class OverworldMap {
         this.group.add(marker);
         this.poiMeshes.push(marker);
 
-        // Floating name label, pushed toward camera
+        // Floating label — single sprite, scrambles between short/full text on proximity
         {
-          const labelText = poi.type === 'dungeon'
-            ? '\u2620'.repeat(Math.min(poi.floorCount ?? 1, 3))
-            : poi.name;
-          const labelColor = poi.type === 'dungeon' ? '#dd9966' : '#ffe8a0';
-          const labelH = poi.type === 'dungeon' ? 0.25 : 0.18;
-          const label = createTextLabel(labelText, {
-            color: labelColor,
-            height: labelH,
-            depthTest: false,
-            renderOrder: 900,
+          const isDungeon = poi.type === 'dungeon';
+          const skullStr = isDungeon && poi.skulls
+            ? '\u2620'.repeat(Math.min(poi.skulls, 3))
+            : '';
+          const labelColor = isDungeon ? '#dd9966' : '#ffe8a0';
+          const labelH = 0.18;
+          const labelY = y + (isDungeon ? 0.3 : 0.35);
+          const labelOffset = 0.3;
+
+          const shortText = isDungeon ? skullStr : poi.name;
+          const fullText = isDungeon && skullStr ? `${skullStr} ${poi.name}` : poi.name;
+
+          const label = createTextLabel(shortText, {
+            color: labelColor, height: labelH, depthTest: false, renderOrder: 900,
           });
-          const labelY = y + (poi.type === 'dungeon' ? 0.3 : 0.35);
-          const labelOffset = 0.3; // world units toward camera
           label.position.set(wx, labelY, wz);
+
+          // Set up scrambler for dungeons
+          let scrambler: TextScramble | null = null;
+          if (isDungeon && skullStr) {
+            scrambler = new TextScramble(shortText, 250);
+            scrambler.onChange = (text) => updateTextLabel(label, text);
+            this.scramblers.push(scrambler);
+          }
+
+          const proximityRadius = 1; // world units
+          let wasNear = false;
           label.onBeforeRender = (_r: any, _s: any, camera: THREE.Camera) => {
+            // Push toward camera
             const dx = camera.position.x - wx;
             const dz = camera.position.z - wz;
             const len = Math.sqrt(dx * dx + dz * dz);
             if (len > 0.01) {
-              label.position.x = wx + (dx / len) * labelOffset;
-              label.position.z = wz + (dz / len) * labelOffset;
+              const ox = (dx / len) * labelOffset;
+              const oz = (dz / len) * labelOffset;
+              label.position.x = wx + ox;
+              label.position.z = wz + oz;
+            }
+            // Scramble between short/full based on player proximity
+            if (scrambler && this.playerPos) {
+              const pdx = this.playerPos.x - wx;
+              const pdz = this.playerPos.z - wz;
+              const near = pdx * pdx + pdz * pdz < proximityRadius * proximityRadius;
+              if (near !== wasNear) {
+                wasNear = near;
+                scrambler.scrambleTo(near ? fullText : shortText);
+              }
             }
           };
           this.group.add(label);
@@ -1150,6 +1180,10 @@ export class OverworldMap {
       });
     }
     this.poiMeshes = [];
+
+    // Dispose text scramblers
+    for (const s of this.scramblers) s.dispose();
+    this.scramblers = [];
 
     // Remove all children from group
     while (this.group.children.length > 0) {

@@ -1,14 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { useGameStore } from '../../store';
-import type { ParticleToggles, ActivePotionDisplay } from '../../store';
-import { EFFECT_META } from '../combat';
-
-const TOGGLE_KEYS: { key: keyof ParticleToggles; label: string }[] = [
-  { key: 'dust', label: 'Dust' },
-  { key: 'lightRain', label: 'Drizzle' },
-  { key: 'rain', label: 'Rain' },
-  { key: 'debris', label: 'Debris' },
-];
+import type { ActivePotionDisplay } from '../../store';
+import { useTextScramble } from './useTextScramble';
+import { useIsMobile } from './settings/shared';
 
 function usePop(value: number): boolean {
   const [pop, setPop] = useState(false);
@@ -296,38 +290,44 @@ function ActiveEffects({ effects }: { effects: ActivePotionDisplay[] }) {
   );
 }
 
-/** Zone announcement overlay — fades in, holds, fades out */
+/** Centered zone announcement — waits for scene fade-in, scrambles in, holds, then scrambles out.
+ *  Only used for heightmap/dungeon (not overworld). When scrambling out, sets zoneName/zoneSubtitle
+ *  in store so ZoneLabel picks up the text at the same time. */
 function ZoneAnnouncement() {
   const announcement = useGameStore((s) => s.zoneAnnouncement);
-  const terrainPreset = useGameStore((s) => s.terrainPreset);
-  const [visible, setVisible] = useState(false);
-  const [opacity, setOpacity] = useState(0);
+  const [title, setTitle] = useState('');
+  const [subtitle, setSubtitle] = useState('');
+
+  const [scrambledTitle, titleFade] = useTextScramble(title, 600);
+  const [scrambledSubtitle, subtitleFade] = useTextScramble(subtitle, 500);
 
   useEffect(() => {
-    if (!announcement) {
-      setVisible(false);
-      setOpacity(0);
-      return;
-    }
-    setVisible(true);
-    // Fade in
-    requestAnimationFrame(() => setOpacity(1));
-    // Hold then fade out
-    const fadeOut = setTimeout(() => setOpacity(0), 2500);
-    // Hide after fade completes
-    const hide = setTimeout(() => {
-      setVisible(false);
-      useGameStore.getState().setZoneAnnouncement(null);
+    if (!announcement) return;
+    // Scramble in the announcement
+    const show = setTimeout(() => {
+      setTitle(announcement.title);
+      setSubtitle(announcement.subtitle ?? '');
+    }, 500);
+    // Scramble out announcement
+    const scrambleOut = setTimeout(() => {
+      setTitle('');
+      setSubtitle('');
+    }, 3000);
+    // Transfer to bottom-left labels after scramble-out
+    const transfer = setTimeout(() => {
+      const store = useGameStore.getState();
+      store.setZoneName(announcement.title);
+      store.setZoneSubtitle(announcement.subtitle ?? '');
+      store.setZoneAnnouncement(null);
     }, 3500);
     return () => {
-      clearTimeout(fadeOut);
-      clearTimeout(hide);
+      clearTimeout(show);
+      clearTimeout(scrambleOut);
+      clearTimeout(transfer);
     };
   }, [announcement]);
 
-  if (!visible || !announcement) return null;
-
-  const isOverworld = terrainPreset === 'overworld';
+  if (!scrambledTitle) return null;
 
   return (
     <div
@@ -336,15 +336,14 @@ function ZoneAnnouncement() {
         top: 0,
         left: 0,
         right: 0,
-        ...(isOverworld ? {} : { bottom: 0, justifyContent: 'center', paddingBottom: '8%' }),
+        bottom: 0,
+        justifyContent: 'center',
+        paddingBottom: '8%',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
         pointerEvents: 'none',
-        opacity,
-        transition: 'opacity 0.8s ease-in-out',
         zIndex: 50,
-        ...(isOverworld ? { paddingTop: '6%' } : {}),
       }}
     >
       <div
@@ -355,11 +354,13 @@ function ZoneAnnouncement() {
           textTransform: 'uppercase',
           color: '#fff',
           textShadow: '0 0 20px rgba(0,0,0,0.9), 0 2px 8px rgba(0,0,0,0.7)',
+          fontFamily: 'monospace, sans-serif',
+          ...titleFade,
         }}
       >
-        {announcement.title}
+        {scrambledTitle}
       </div>
-      {announcement.subtitle && (
+      {scrambledSubtitle && (
         <div
           style={{
             fontSize: 14,
@@ -369,9 +370,66 @@ function ZoneAnnouncement() {
             textShadow: '0 0 10px rgba(0,0,0,0.8)',
             marginTop: 8,
             fontStyle: 'italic',
+            fontFamily: 'monospace, sans-serif',
+            ...subtitleFade,
           }}
         >
-          {announcement.subtitle}
+          {scrambledSubtitle}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Bottom-left zone label — watches zoneName/zoneSubtitle from store.
+ *  While a centered announcement is active, defers syncing so the scramble
+ *  happens visibly when the announcement clears. */
+function ZoneLabel({ isMobile }: { isMobile: boolean }) {
+  const zoneName = useGameStore((s) => s.zoneName);
+  const zoneSubtitle = useGameStore((s) => s.zoneSubtitle);
+  const hasAnnouncement = useGameStore((s) => s.zoneAnnouncement !== null);
+  const [title, setTitle] = useState(zoneName);
+  const [subtitle, setSubtitle] = useState(zoneSubtitle);
+
+  useEffect(() => {
+    // While announcement is playing, don't sync — wait until it clears
+    if (hasAnnouncement) return;
+    setTitle(zoneName);
+    setSubtitle(zoneSubtitle);
+  }, [zoneName, zoneSubtitle, hasAnnouncement]);
+
+  const [scrambledTitle, titleFade] = useTextScramble(title, 500);
+  const [scrambledSubtitle, subtitleFade] = useTextScramble(subtitle, 400);
+
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        bottom: isMobile ? 72 : 16,
+        left: 16,
+        pointerEvents: 'none',
+        zIndex: 40,
+      }}
+    >
+      <div style={{
+        fontSize: 16,
+        fontWeight: 700,
+        color: '#fff',
+        textShadow: '0 1px 6px rgba(0,0,0,0.9)',
+        letterSpacing: 1,
+        ...titleFade,
+      }}>
+        {scrambledTitle}
+      </div>
+      {scrambledSubtitle && (
+        <div style={{
+          fontSize: 11,
+          color: 'rgba(255,255,255,0.5)',
+          textShadow: '0 1px 4px rgba(0,0,0,0.8)',
+          marginTop: 3,
+          ...subtitleFade,
+        }}>
+          {scrambledSubtitle}
         </div>
       )}
     </div>
@@ -388,8 +446,6 @@ export function HUD() {
   const maxHp = useGameStore((s) => s.maxHp);
   const hunger = useGameStore((s) => s.hunger);
   const maxHunger = useGameStore((s) => s.maxHunger);
-  const toggles = useGameStore((s) => s.particleToggles);
-  const toggle = useGameStore((s) => s.toggleParticle);
   const activeCharacterName = useGameStore((s) => s.activeCharacterName);
   const activeCharacterColor = useGameStore((s) => s.activeCharacterColor);
   const activePotionEffects = useGameStore((s) => s.activePotionEffects);
@@ -397,41 +453,12 @@ export function HUD() {
   const zoneName = useGameStore((s) => s.zoneName);
   const terrainPreset = useGameStore((s) => s.terrainPreset);
   const isDungeon = terrainPreset === 'voxelDungeon';
-  const isOverworld = terrainPreset === 'overworld';
-  const worldName = useGameStore((s) => s.overworldState?.worldName);
+  const isMobile = useIsMobile();
 
   return (
     <>
       <ZoneAnnouncement />
-      {isOverworld && worldName && (
-        <div
-          style={{
-            position: 'absolute',
-            bottom: 16,
-            left: 16,
-            pointerEvents: 'none',
-            zIndex: 40,
-          }}
-        >
-          <div style={{
-            fontSize: 16,
-            fontWeight: 700,
-            color: '#fff',
-            textShadow: '0 1px 6px rgba(0,0,0,0.9)',
-            letterSpacing: 1,
-          }}>
-            {worldName}
-          </div>
-          <div style={{
-            fontSize: 11,
-            color: 'rgba(255,255,255,0.5)',
-            textShadow: '0 1px 4px rgba(0,0,0,0.8)',
-            marginTop: 3,
-          }}>
-            WASD to move &middot; E to explore
-          </div>
-        </div>
-      )}
+      <ZoneLabel isMobile={isMobile} />
       <div
         style={{
           position: 'absolute',
@@ -455,40 +482,7 @@ export function HUD() {
             pointerEvents: 'auto',
           }}
         >
-          <div style={{ opacity: 0.7, fontSize: 13 }}>
-            WASD move &middot; Drag orbit &middot; Scroll zoom &middot; ←→ cycle
-          </div>
-          <div style={{ display: 'flex', gap: 6 }}>
-            {TOGGLE_KEYS.map((t) => {
-              const on = toggles[t.key];
-              return (
-                <button
-                  key={t.key}
-                  onClick={() => toggle(t.key)}
-                  style={{
-                    padding: '4px 10px',
-                    fontSize: 11,
-                    fontWeight: 600,
-                    color: on ? '#fff' : 'rgba(255,255,255,0.4)',
-                    background: on
-                      ? 'rgba(255,255,255,0.2)'
-                      : 'rgba(255,255,255,0.04)',
-                    border: on
-                      ? '1px solid rgba(255,255,255,0.4)'
-                      : '1px solid rgba(255,255,255,0.1)',
-                    borderRadius: 5,
-                    cursor: 'pointer',
-                    letterSpacing: 0.5,
-                    transition: 'all 0.15s',
-                    minWidth: 44,
-                    minHeight: 28,
-                  }}
-                >
-                  {t.label}
-                </button>
-              );
-            })}
-          </div>
+          {/* Instructions label removed */}
         </div>
 
         {/* Right-side stats */}

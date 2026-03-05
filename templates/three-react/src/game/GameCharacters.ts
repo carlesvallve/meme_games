@@ -237,6 +237,10 @@ export function createCharacterManager(ctx: GameContext): GameCharacterManager {
         const entranceFacing = ctx.terrain.getEntranceFacing();
         if (entranceFacing) char.setFacing(entranceFacing);
       }
+      // Scale down character on overworld
+      if (ctx.terrain.preset === 'overworld') {
+        char.mesh.scale.setScalar(0.8);
+      }
       ctx.characters.push(char);
       ctx.activeCharacter = char;
 

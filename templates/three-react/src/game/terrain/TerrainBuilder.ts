@@ -50,6 +50,7 @@ export class TerrainBuilder {
 
   getWaterY(): number { return this.water.getWaterY(); }
   createGround(): void { this.water.createGround(); }
+  createHeightmapWater(): void { this.water.createHeightmapWater(); }
   updateWater(dt: number, renderer?: THREE.WebGLRenderer, scene?: THREE.Scene, camera?: THREE.Camera): void {
     this.water.updateWater(dt, renderer, scene, camera);
   }

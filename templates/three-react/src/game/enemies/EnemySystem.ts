@@ -73,8 +73,8 @@ export class EnemySystem {
     );
     this.statusEffects = new EnemyStatusEffects(
       {
-        spawnConfusionIcon: (e) => this.spawner.spawnConfusionIcon(e),
-        cleanupConfusionIcon: (e) => this.spawner.cleanupConfusionIcon(e),
+        spawnStatusIcon: (e, name) => this.spawner.spawnStatusIcon(e, name),
+        cleanupStatusIcon: (e, name) => this.spawner.cleanupStatusIcon(e, name),
       },
       this.vfx,
     );
@@ -255,7 +255,11 @@ export class EnemySystem {
     this.aggroTimers.delete(enemy);
     this.statusEffects.deleteEnemy(enemy);
     this.spawner.cleanupFrenzyEnemy(enemy);
-    this.spawner.cleanupConfusionIcon(enemy);
+    // Clean up all status icons for this enemy
+    const enemyIcons = this.spawner.statusIcons.get(enemy);
+    if (enemyIcons) {
+      for (const [name] of enemyIcons) this.spawner.cleanupStatusIcon(enemy, name);
+    }
   }
 
   // ── Main update loop ──
@@ -482,8 +486,8 @@ export class EnemySystem {
         enemy.hideHpBar();
         const fIcon = this.spawner.frenzyAlertIcons.get(enemy);
         if (fIcon) fIcon.visible = false;
-        const cIcon = this.spawner.confusionIcons.get(enemy);
-        if (cIcon) cIcon.visible = false;
+        const sIcons = this.spawner.statusIcons.get(enemy);
+        if (sIcons) for (const [, s] of sIcons) s.visible = false;
         continue;
       }
       if (roomVis && !enemy.mesh.visible) {

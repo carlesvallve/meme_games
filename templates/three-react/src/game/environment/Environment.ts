@@ -116,6 +116,8 @@ export class Environment implements TerrainLike {
       this.ctx.group.add(owMap.group);
     } else if (preset === 'heightmap') {
       this.terrainBuilder.createHeightmapMesh();
+      // Create water mesh after heightmap data is available (conforms to terrain at edges)
+      this.terrainBuilder.createHeightmapWater();
       // Flatten terrain at POI locations, place POI meshes + register debris
       const poiExclusions = this.placeHeightmapPOIs();
       // Generate nature after POI flattening (so trees/rocks get correct heights and avoid POI areas)
@@ -260,13 +262,15 @@ export class Environment implements TerrainLike {
         ? '\u2620'.repeat(Math.min(poi.skulls, 3))
         : '';
       const labelText = isCleared
-        ? `${poi.name} — Conquered`
+        ? `${skulls ? skulls + ' ' : ''}${poi.name} — Conquered`
         : skulls ? `${skulls} ${poi.name}` : poi.name;
       const label = createTextLabel(labelText, { color: labelColor, height: labelHeight, opacity: 0 });
       const mat = label.material as THREE.SpriteMaterial;
       mat.opacity = 0;
       const spawnTime = performance.now();
-      const fadeDelay = isCleared ? 500 : 3800;  // cleared: quick fade-in; normal: after zone announcement
+      // Quick fade-in if no announcement is active (e.g. returning from dungeon), otherwise wait for it
+      const hasAnnouncement = useGameStore.getState().zoneAnnouncement !== null;
+      const fadeDelay = isCleared || !hasAnnouncement ? 500 : 3800;
       const fadeDuration = 1200; // ms — label fade-in duration
 
       if (poi.type === 'village') {
