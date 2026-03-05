@@ -70,6 +70,14 @@ const PRESET_CONFIGS: Record<TerrainPreset, TerrainPresetConfig> = {
     generateBox() { return { w: 1, d: 1, h: 0.5 }; },
     generatePos() { return null; },
   },
+
+  /** Overworld — no scattered debris (tiles are built by OverworldMap) */
+  overworld: {
+    count: 0,
+    spawnClear: 0,
+    generateBox() { return { w: 1, d: 1, h: 0.5 }; },
+    generatePos() { return null; },
+  },
 };
 
 // ── BoxPlacer ────────────────────────────────────────────────────────

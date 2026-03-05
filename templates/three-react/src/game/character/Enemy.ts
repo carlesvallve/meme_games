@@ -6,7 +6,6 @@ import type { LadderDef } from '../dungeon';
 import type { VoxCharEntry } from './VoxCharacterDB';
 import {
   getFilteredEnemies,
-  getArchetype,
   getMonsterStats,
   randomInRange,
 } from './VoxCharacterDB';
@@ -87,7 +86,7 @@ export class Enemy extends Character {
     this.applyVoxSkin(entry);
 
     // Apply per-monster stats based on archetype, scaled by floor multipliers
-    const stats = getMonsterStats(getArchetype(entry.name));
+    const stats = getMonsterStats(entry.name);
     const floorCfg = getFloorConfig(useGameStore.getState().floor);
     this.hp = this.maxHp = Math.round(
       randomInRange(stats.hp) * floorCfg.hpMult,
@@ -97,8 +96,14 @@ export class Enemy extends Character {
       1,
       Math.floor(randomInRange(stats.damage) * floorCfg.damageMult),
     );
-    this.params.attackCooldown = 1 / randomInRange(stats.atkSpeed);
-    this.params.speed = randomInRange(stats.movSpeed);
+    // Difficulty (0-2): scales hp, damage, speed (only slower, not faster)
+    const diff = useGameStore.getState().enemyParams.difficulty;
+    const diffStatMult = 0.5 + 0.5 * diff; // 0.5× at 0, 1× at 1, 1.5× at 2
+    const diffSpeedMult = Math.min(1, 0.7 + 0.3 * diff); // 0.7× at 0, 1× at 1+
+    this.hp = this.maxHp = Math.max(1, Math.round(this.hp * diffStatMult));
+    this.params.attackDamage = Math.max(1, Math.round(this.params.attackDamage * diffStatMult));
+    this.params.attackCooldown = 1 / (randomInRange(stats.atkSpeed) * diffSpeedMult);
+    this.params.speed = randomInRange(stats.movSpeed) * diffSpeedMult;
     this.baseSpeed = this.params.speed;
     this.critChance = stats.critChance;
     this.armour = stats.armour;

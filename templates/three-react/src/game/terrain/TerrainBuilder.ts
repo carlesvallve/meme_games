@@ -58,7 +58,7 @@ export class TerrainBuilder {
 
   applyPalette(pal: typeof this.ctx.palette, name: string): void { this.heightmap.applyPalette(pal, name); }
   createHeightmapMesh(): void { this.heightmap.createHeightmapMesh(); }
-  generateNatureElements(): void { this.heightmap.generateNatureElements(); }
+  generateNatureElements(extraExclusions?: { x: number; z: number; r: number }[]): void { this.heightmap.generateNatureElements(extraExclusions); }
   createLadderMeshes(): void { this.heightmap.createLadderMeshes(); }
   createSingleLadderMesh(li: number): void { this.heightmap.createSingleLadderMesh(li); }
   remesh(): void {

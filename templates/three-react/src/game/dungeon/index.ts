@@ -34,7 +34,7 @@ export { RoomVisibility } from './RoomVisibility';
 
 // Floor config
 export { getActiveRecipe, getRecipeNames, getRecipe, setActiveRecipe, registerRecipe } from './FloorConfig';
-export { getFloorConfig, getEnemyIdsByArchetype, buildFloorEnemyPool, buildRoomEnemyPool, getThemedFloor } from './FloorConfig';
+export { getFloorConfig, getEnemyIdsByArchetype, buildFloorEnemyPool, buildRoomEnemyPool, getThemedFloor, getHeightmapEnemyPool } from './FloorConfig';
 export type { ProgressionRecipe, FloorZoneConfig, ThemedFloor } from './FloorConfig';
 
 // Level state persistence

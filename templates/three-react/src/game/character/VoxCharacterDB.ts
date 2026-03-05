@@ -445,11 +445,19 @@ const MONSTER_STATS: Record<string, MonsterStats> = {
   bat:     { tier: 'low', hp: [2, 3],  mp: [2, 4], damage: [1, 2], atkSpeed: [0.8, 1.2], movSpeed: [1.7, 2.3], critChance: 0.02, armour: 0 },
   imp:     { tier: 'low', hp: [2, 3],  mp: [2, 4], damage: [1, 2], atkSpeed: [0.9, 1.3], movSpeed: [1.8, 2.4], critChance: 0.05, armour: 0 },
   goblin:  { tier: 'low', hp: [3, 4],  mp: [2, 4], damage: [1, 2], atkSpeed: [0.7, 1.0], movSpeed: [1.6, 2.1], critChance: 0.03, armour: 0 },
-  blob:    { tier: 'low', hp: [3, 5],  mp: [2, 4], damage: [1, 2], atkSpeed: [0.5, 0.7], movSpeed: [1.1, 1.5], critChance: 0.01, armour: 0 },
+  blob:    { tier: 'low', hp: [3, 5],  mp: [2, 4], damage: [1, 2], atkSpeed: [0.5, 0.7], movSpeed: [1.1, 1.5], critChance: 0.01, armour: 0 }, // fallback
+  blob_a:  { tier: 'low', hp: [2, 3],  mp: [2, 4], damage: [1, 1], atkSpeed: [0.5, 0.7], movSpeed: [1.0, 1.3], critChance: 0.01, armour: 0 },
+  blob_b:  { tier: 'low', hp: [3, 4],  mp: [2, 4], damage: [1, 2], atkSpeed: [0.5, 0.7], movSpeed: [1.1, 1.4], critChance: 0.01, armour: 0 },
+  blob_c:  { tier: 'mid', hp: [4, 6],  mp: [3, 6], damage: [2, 3], atkSpeed: [0.5, 0.7], movSpeed: [1.1, 1.5], critChance: 0.02, armour: 0.05 },
+  blob_d:  { tier: 'mid', hp: [5, 8],  mp: [4, 8], damage: [2, 3], atkSpeed: [0.5, 0.7], movSpeed: [1.2, 1.5], critChance: 0.02, armour: 0.10 },
   spider:  { tier: 'low', hp: [2, 4],  mp: [2, 4], damage: [2, 3], atkSpeed: [0.9, 1.2], movSpeed: [1.5, 2.0], critChance: 0.05, armour: 0 },
 
   // ── Mid Tier — standard dungeon threats ──
-  slob:      { tier: 'mid', hp: [7, 10],  mp: [4, 8], damage: [3, 4], atkSpeed: [0.3, 0.5], movSpeed: [1.0, 1.3], critChance: 0.02, armour: 0.25 },
+  slob:      { tier: 'mid', hp: [7, 10],  mp: [4, 8], damage: [3, 4], atkSpeed: [0.3, 0.5], movSpeed: [1.0, 1.3], critChance: 0.02, armour: 0.25 }, // fallback
+  slob_a:    { tier: 'low', hp: [4, 6],   mp: [2, 4], damage: [1, 2], atkSpeed: [0.3, 0.5], movSpeed: [0.9, 1.1], critChance: 0.01, armour: 0.10 },
+  slob_b:    { tier: 'mid', hp: [6, 8],   mp: [3, 6], damage: [2, 3], atkSpeed: [0.3, 0.5], movSpeed: [0.9, 1.2], critChance: 0.02, armour: 0.15 },
+  slob_c:    { tier: 'mid', hp: [8, 11],  mp: [4, 8], damage: [3, 4], atkSpeed: [0.3, 0.5], movSpeed: [1.0, 1.3], critChance: 0.02, armour: 0.25 },
+  slob_d:    { tier: 'high', hp: [10, 14], mp: [6, 10], damage: [4, 5], atkSpeed: [0.3, 0.5], movSpeed: [1.0, 1.3], critChance: 0.03, armour: 0.30 },
   skeleton:  { tier: 'mid', hp: [5, 7],   mp: [4, 8], damage: [2, 3], atkSpeed: [0.6, 0.9], movSpeed: [1.4, 1.8], critChance: 0.05, armour: 0 },
   zombie:    { tier: 'mid', hp: [6, 9],   mp: [4, 8], damage: [2, 3], atkSpeed: [0.4, 0.6], movSpeed: [1.0, 1.3], critChance: 0.02, armour: 0 },
   ghost:     { tier: 'mid', hp: [4, 6],   mp: [4, 8], damage: [2, 4], atkSpeed: [0.6, 0.9], movSpeed: [1.5, 1.9], critChance: 0.05, armour: 0 },
@@ -459,8 +467,18 @@ const MONSTER_STATS: Record<string, MonsterStats> = {
   bugbear:   { tier: 'mid', hp: [7, 10],  mp: [4, 8], damage: [3, 5], atkSpeed: [0.4, 0.6], movSpeed: [1.2, 1.5], critChance: 0.05, armour: 0.05 },
   gargoyle:  { tier: 'mid', hp: [8, 11],  mp: [4, 8], damage: [2, 3], atkSpeed: [0.4, 0.6], movSpeed: [1.1, 1.4], critChance: 0.03, armour: 0.30 },
 
+  // ── Mimics — tiered by variant letter (A=weakest, H=strongest) ──
+  mimic_a: { tier: 'low',  hp: [3, 4],   mp: [2, 4],  damage: [1, 2], atkSpeed: [0.6, 0.9], movSpeed: [1.3, 1.6], critChance: 0.03, armour: 0 },
+  mimic_b: { tier: 'low',  hp: [4, 5],   mp: [2, 4],  damage: [1, 2], atkSpeed: [0.5, 0.8], movSpeed: [1.3, 1.6], critChance: 0.04, armour: 0.05 },
+  mimic_c: { tier: 'mid',  hp: [5, 7],   mp: [4, 8],  damage: [2, 3], atkSpeed: [0.5, 0.8], movSpeed: [1.3, 1.6], critChance: 0.05, armour: 0.10 },
+  mimic_d: { tier: 'mid',  hp: [6, 9],   mp: [4, 8],  damage: [2, 4], atkSpeed: [0.5, 0.8], movSpeed: [1.4, 1.7], critChance: 0.06, armour: 0.10 },
+  mimic_e: { tier: 'high', hp: [7, 10],  mp: [6, 10], damage: [3, 5], atkSpeed: [0.5, 0.8], movSpeed: [1.4, 1.7], critChance: 0.07, armour: 0.12 },
+  mimic_f: { tier: 'high', hp: [8, 11],  mp: [6, 10], damage: [3, 5], atkSpeed: [0.5, 0.8], movSpeed: [1.4, 1.7], critChance: 0.08, armour: 0.15 },
+  mimic_g: { tier: 'high', hp: [9, 12],  mp: [8, 14], damage: [4, 6], atkSpeed: [0.5, 0.8], movSpeed: [1.4, 1.7], critChance: 0.08, armour: 0.15 },
+  mimic_h: { tier: 'high', hp: [10, 14], mp: [8, 14], damage: [4, 6], atkSpeed: [0.5, 0.8], movSpeed: [1.4, 1.7], critChance: 0.10, armour: 0.20 },
+  mimic:   { tier: 'mid',  hp: [5, 7],   mp: [4, 8],  damage: [2, 3], atkSpeed: [0.5, 0.8], movSpeed: [1.3, 1.6], critChance: 0.05, armour: 0.10 }, // fallback
+
   // ── High Tier — elite/boss-class ──
-  mimic:    { tier: 'high', hp: [8, 12],  mp: [8, 14], damage: [4, 6], atkSpeed: [0.5, 0.8], movSpeed: [1.4, 1.7], critChance: 0.08, armour: 0.15 },
   vampire:  { tier: 'high', hp: [10, 14], mp: [8, 14], damage: [4, 5], atkSpeed: [0.7, 1.0], movSpeed: [1.6, 2.0], critChance: 0.12, armour: 0 },
   devil:    { tier: 'high', hp: [12, 16], mp: [8, 14], damage: [4, 6], atkSpeed: [0.5, 0.8], movSpeed: [1.4, 1.7], critChance: 0.10, armour: 0.10 },
   beholder: { tier: 'high', hp: [10, 14], mp: [8, 14], damage: [5, 7], atkSpeed: [0.4, 0.6], movSpeed: [1.0, 1.3], critChance: 0.08, armour: 0 },
@@ -476,8 +494,24 @@ const DEFAULT_MONSTER_STATS: MonsterStats = {
   atkSpeed: [0.6, 0.9], movSpeed: [1.4, 1.7], critChance: 0.05, armour: 0,
 };
 
-export function getMonsterStats(archetype: string): MonsterStats {
-  return MONSTER_STATS[archetype] ?? DEFAULT_MONSTER_STATS;
+/**
+ * Get monster stats. Accepts either a plain archetype ('rat') or a full entry
+ * name ('Mimic A (Wood)') — for multi-variant archetypes like mimics, the
+ * variant letter is extracted and used for variant-specific stats lookup.
+ */
+export function getMonsterStats(nameOrArchetype: string): MonsterStats {
+  // Direct archetype match (fast path for most enemies)
+  if (MONSTER_STATS[nameOrArchetype]) return MONSTER_STATS[nameOrArchetype];
+  // Try extracting variant key: "Mimic A (Wood)" → "mimic_a"
+  const variantMatch = nameOrArchetype.match(/^(\w+)\s+([A-H])\b/i);
+  if (variantMatch) {
+    const variantKey = `${variantMatch[1].toLowerCase()}_${variantMatch[2].toLowerCase()}`;
+    if (MONSTER_STATS[variantKey]) return MONSTER_STATS[variantKey];
+    // Fallback to base archetype
+    const base = variantMatch[1].toLowerCase();
+    if (MONSTER_STATS[base]) return MONSTER_STATS[base];
+  }
+  return DEFAULT_MONSTER_STATS;
 }
 
 // ── Hero Stats ───────────────────────────────────────────────────────

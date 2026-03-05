@@ -5,6 +5,9 @@ import type { ParticleSystem } from '../types';
 import { entityRegistry } from './core/Entity';
 import { Environment } from './environment';
 import type { TerrainPreset } from './terrain';
+import type { OverworldState } from './overworld';
+import { generateWorldName, generateDungeonFloorSubtitle } from './overworld';
+import { getSkyColors } from './rendering';
 import { CollectibleSystem, ChestSystem } from './props';
 import {
   LootSystem,
@@ -22,6 +25,7 @@ import {
   buildFloorEnemyPool,
   getFloorConfig,
   getThemedFloor,
+  getHeightmapEnemyPool,
   setActiveRecipe,
   getActiveRecipe,
 } from './dungeon';
@@ -49,7 +53,7 @@ export interface GameSceneManager {
   changeFloor(direction: 'down' | 'up'): void;
   syncParticles(toggles: ParticleToggles): void;
   serializeLevel(): LevelSnapshot;
-  applyFloorConfig(floor: number, announce?: boolean): void;
+  applyFloorConfig(floor: number, announce?: boolean, targetPreset?: TerrainPreset): void;
 }
 
 export function createSceneManager(
@@ -76,31 +80,49 @@ export function createSceneManager(
     };
   }
 
-  function applyFloorConfig(floor: number, announce = false): void {
+  function applyFloorConfig(floor: number, announce = false, targetPreset?: TerrainPreset): void {
     const recipeName = useGameStore.getState().progressionRecipe;
+    const isStoryRecipe = recipeName.startsWith('Story:');
     if (getActiveRecipe().name !== recipeName) setActiveRecipe(recipeName);
 
     const cfg = getFloorConfig(floor);
     const pool = buildFloorEnemyPool(floor);
     const store = useGameStore.getState();
     store.setEnemyParam('allowedTypes', pool);
+
+    // Heightmap overworld uses a curated early-game pool (low-tier + rare mid)
+    const effectivePresetForPool = targetPreset ?? store.terrainPreset;
+    if (effectivePresetForPool === 'heightmap') {
+      const hmPool = getHeightmapEnemyPool();
+      store.setEnemyParam('allowedTypes', hmPool);
+    }
+
     store.setZoneName(cfg.zoneName);
 
-    // Apply dungeon layout progression from recipe, or restore defaults when disabled
-    if (store.progressiveLayout) {
-      if (cfg.dungeonSize != null) store.setDungeonSize(cfg.dungeonSize);
-      if (cfg.roomSpacing != null) store.setRoomSpacing(cfg.roomSpacing);
-      if (cfg.doorChance != null) store.setDoorChance(cfg.doorChance);
-      if (cfg.heightChance != null) store.setHeightChance(cfg.heightChance);
-      if (cfg.loopChance != null) store.setLoopChance(cfg.loopChance);
-    } else {
-      const d = DEFAULT_SCENE_SETTINGS;
-      store.setDungeonSize(d.dungeonSize);
-      store.setRoomSpacing(d.roomSpacing);
-      store.setRoomSpacingMax(d.roomSpacingMax);
-      store.setDoorChance(d.doorChance);
-      store.setHeightChance(d.heightChance);
-      store.setLoopChance(d.loopChance);
+    // Apply dungeon layout from recipe (only for voxelDungeon preset).
+    // Story recipes always force layout; others respect progressiveLayout toggle.
+    // Skip for heightmap/overworld — they use their own ground size.
+    const effectivePreset = targetPreset ?? store.terrainPreset;
+    const isDungeon = effectivePreset === 'voxelDungeon' || isStoryRecipe;
+    if (isDungeon) {
+      if (store.progressiveLayout || isStoryRecipe) {
+        if (cfg.dungeonSize != null) store.setDungeonSize(cfg.dungeonSize);
+        if (cfg.roomSpacing != null) {
+          store.setRoomSpacing(cfg.roomSpacing);
+          store.setRoomSpacingMax(cfg.roomSpacing + 1);
+        }
+        if (cfg.doorChance != null) store.setDoorChance(cfg.doorChance);
+        if (cfg.heightChance != null) store.setHeightChance(cfg.heightChance);
+        if (cfg.loopChance != null) store.setLoopChance(cfg.loopChance);
+      } else {
+        const d = DEFAULT_SCENE_SETTINGS;
+        store.setDungeonSize(d.dungeonSize);
+        store.setRoomSpacing(d.roomSpacing);
+        store.setRoomSpacingMax(d.roomSpacingMax);
+        store.setDoorChance(d.doorChance);
+        store.setHeightChance(d.heightChance);
+        store.setLoopChance(d.loopChance);
+      }
     }
 
     if (announce) {
@@ -120,13 +142,21 @@ export function createSceneManager(
   }
 
   function regenerateScene(opts: RegenerateOpts = {}): void {
-    applyFloorConfig(useGameStore.getState().floor);
+    // Clear speech bubbles on any transition
+    ctx.speechSystem.dismissAll();
+    const effectivePreset = opts.presetOverride ?? useGameStore.getState().terrainPreset;
+    applyFloorConfig(useGameStore.getState().floor, false, effectivePreset as TerrainPreset);
     ctx.activeCharacter = null;
     ctx.debugLadderIndex = -1;
     ctx.needsFullRegen = false;
     ctx.exitTriggered = false;
     ctx.portalCooldown = 0;
     ctx.pendingSnapshot = opts.snapshot ?? null;
+    if (ctx.dungeonEnterPrompt) {
+      ctx.scene.remove(ctx.dungeonEnterPrompt);
+      ctx.dungeonEnterPrompt = null;
+      ctx.dungeonEnterPromptTarget = null;
+    }
 
     // Dispose old systems
     for (const char of ctx.characters) char.dispose();
@@ -170,8 +200,23 @@ export function createSceneManager(
       opts.presetOverride ?? useGameStore.getState().terrainPreset;
 
     // Reset time of day for exterior maps (dungeons use static lighting)
-    if (terrainPreset !== 'voxelDungeon') {
+    if (terrainPreset !== 'voxelDungeon' && terrainPreset !== 'overworld') {
       useGameStore.getState().setTimeOfDay(DEFAULT_SCENE_SETTINGS.timeOfDay);
+    }
+
+    // Set zone name for non-dungeon presets (dungeons handled by applyFloorConfig)
+    if (terrainPreset === 'overworld') {
+      const owName = useGameStore.getState().overworldState?.worldName || 'Overworld';
+      useGameStore.getState().setZoneName(owName);
+      // Tile announcement handled by GameLoop tile-enter detection
+    } else if (terrainPreset === 'heightmap' || terrainPreset === 'basic') {
+      // Zone name for heightmap tiles is set in GameLoop before regenerateScene
+      // For standalone heightmap (settings panel), use palette name as fallback
+      const curZone = useGameStore.getState().zoneName;
+      const owWorldName = useGameStore.getState().overworldState?.worldName;
+      if (curZone === 'Upper Cellars' || curZone === 'Overworld' || curZone === owWorldName) {
+        useGameStore.getState().setZoneName(palPick.charAt(0).toUpperCase() + palPick.slice(1));
+      }
     }
 
     if (opts.themeOverride) {
@@ -196,6 +241,7 @@ export function createSceneManager(
         palPick,
         retrySeed,
       );
+      ctx.currentDebugDebris = false; // force re-show on new terrain
       ctx.navGrid = ctx.terrain.buildNavGrid(
         pp.stepHeight,
         pp.capsuleRadius,
@@ -223,17 +269,47 @@ export function createSceneManager(
     }
 
     ctx.cam.terrainMesh = ctx.terrain.getTerrainMesh();
-    useGameStore.getState().setPaletteActive(ctx.terrain.getPaletteName());
-    ctx.sceneSky.setPalette(ctx.terrain.getPaletteName());
+
+    // Overworld: store overworld state (camera uses default params, follows player)
+    if (terrainPreset === 'overworld') {
+      // Initialize overworld state with tile defs
+      const owMap = ctx.terrain.getOverworldMap();
+      if (owMap) {
+        const s = useGameStore.getState();
+        const existingState = s.overworldState;
+        const owBaseSeed = retrySeed ?? s.getFloorSeed(s.floor);
+        const owState: OverworldState = {
+          activeTileIndex: null,
+          savedPlayerPos: existingState?.savedPlayerPos ?? null,
+          zoomSpawnNorm: null,
+          zoomSpawnFacing: null,
+          tiles: owMap.getTileDefs(),
+          baseSeed: owBaseSeed,
+          worldName: existingState?.worldName ?? generateWorldName(owBaseSeed),
+          clearedDungeons: existingState?.clearedDungeons ?? [],
+          pendingPoiDungeon: null,
+        };
+        s.setOverworldState(owState);
+      }
+    }
+
+    const newPalette = ctx.terrain.getPaletteName();
+    useGameStore.getState().setPaletteActive(newPalette);
+    ctx.sceneSky.setPalette(newPalette);
+    ctx.baseSkyColors = getSkyColors(newPalette);
     useGameStore.getState().setWalkableCells(ctx.navGrid.getWalkableCellCount());
     ctx.terrain.setGridOpacity(useGameStore.getState().gridOpacity);
+
+    // Overworld: skip collectibles, chests, potions — no combat/loot
+    const isOverworld = terrainPreset === 'overworld';
 
     const spawnExclude =
       opts.spawnAt === 'exit'
         ? ctx.terrain.getExitPosition()
         : ctx.terrain.getEntrancePosition();
-    const gemCount =
-      terrainPreset === 'voxelDungeon'
+    const gemCount = isOverworld
+      ? 0
+      : terrainPreset === 'voxelDungeon'
         ? Math.max(2, Math.ceil(ctx.terrain.getRoomCount() / 2))
         : undefined;
     ctx.collectibles = new CollectibleSystem(
@@ -258,11 +334,13 @@ export function createSceneManager(
       lootSystem: ctx.lootSystem,
     });
     const usePropChestsOnlyRegen = terrainPreset === 'voxelDungeon';
+    const heightmapChestCap = terrainPreset === 'heightmap' ? 3 : undefined;
     ctx.chestSystem = new ChestSystem(
       ctx.scene,
       ctx.terrain,
       ctx.lootSystem,
-      usePropChestsOnlyRegen,
+      isOverworld ? true : usePropChestsOnlyRegen, // skip free-standing chests on overworld
+      heightmapChestCap,
     );
 
     if (usePropChestsOnlyRegen) {
@@ -393,6 +471,27 @@ export function createSceneManager(
       spawnedChar.mesh.visible = false;
     }
 
+    // Overworld / heightmap: restore player position from saved state
+    if ((isOverworld || terrainPreset === 'heightmap') && spawnedChar) {
+      const owSaved = useGameStore.getState().overworldState?.savedPlayerPos;
+      if (owSaved) {
+        const y = ctx.terrain.getTerrainY(owSaved.x, owSaved.z);
+        spawnedChar.mesh.position.set(owSaved.x, y, owSaved.z);
+        spawnedChar.groundY = y;
+        spawnedChar.visualGroundY = y;
+        // Clear saved pos after restoring for heightmap (overworld keeps it)
+        if (terrainPreset === 'heightmap') {
+          const curOw = useGameStore.getState().overworldState;
+          if (curOw) {
+            useGameStore.getState().setOverworldState({
+              ...curOw,
+              savedPlayerPos: null,
+            });
+          }
+        }
+      }
+    }
+
     if (spawnedChar) {
       const p = spawnedChar.mesh.position;
       ctx.cam.setTarget(p.x, p.y, p.z);
@@ -416,7 +515,22 @@ export function createSceneManager(
     ctx.postProcess.fadeTransition(() => {
       const store = useGameStore.getState();
       const currentFloor = store.floor;
+      const owState = store.overworldState;
+      const pending = owState?.pendingPoiDungeon;
 
+      // ── POI dungeon: retreat from floor 1 entrance ──
+      if (direction === 'up' && currentFloor === 1 && pending) {
+        returnToHeightmapFromDungeon(store, owState!, pending, false);
+        return;
+      }
+
+      // ── POI dungeon: completed last floor → conquered ──
+      if (direction === 'down' && pending && currentFloor >= pending.floorCount) {
+        returnToHeightmapFromDungeon(store, owState!, pending, true);
+        return;
+      }
+
+      // ── Normal floor transition ──
       const snapshot = serializeLevel();
       store.saveLevelSnapshot(currentFloor, snapshot);
 
@@ -424,6 +538,14 @@ export function createSceneManager(
         direction === 'down' ? currentFloor + 1 : currentFloor - 1;
       store.setFloor(newFloor);
       applyFloorConfig(newFloor, true);
+
+      // For POI dungeons, show floor-specific subtitle
+      if (pending) {
+        store.setZoneAnnouncement({
+          title: pending.name,
+          subtitle: generateDungeonFloorSubtitle(pending.poiSeed, newFloor, pending.floorCount),
+        });
+      }
 
       const cached = store.getLevelSnapshot(newFloor);
       const seed = store.getFloorSeed(newFloor);
@@ -437,6 +559,63 @@ export function createSceneManager(
         themeOverride: cached?.theme,
       });
     }, 4.0);
+  }
+
+  /** Return from a POI dungeon to the heightmap tile. */
+  function returnToHeightmapFromDungeon(
+    store: ReturnType<typeof useGameStore.getState>,
+    owState: OverworldState,
+    pending: NonNullable<OverworldState['pendingPoiDungeon']>,
+    conquered: boolean,
+  ): void {
+    const tileDef = owState.tiles[pending.tileIndex];
+
+    // Update overworld state
+    const updatedOw: OverworldState = {
+      ...owState,
+      pendingPoiDungeon: null,
+      savedPlayerPos: (() => {
+        // Heightmap ground size = dungeonSize - 4 (2m margin each side)
+        const hmGround = DEFAULT_SCENE_SETTINGS.dungeonSize - 4;
+        const px = pending.returnNorm.nx * hmGround;
+        const pz = pending.returnNorm.nz * hmGround;
+        // Offset ~1 cell toward map center so player doesn't land on the door
+        const cx = hmGround / 2, cz = hmGround / 2;
+        const dx = cx - px, dz = cz - pz;
+        const len = Math.sqrt(dx * dx + dz * dz) || 1;
+        return { x: px + (dx / len) * 1.0, z: pz + (dz / len) * 1.0, y: 0 };
+      })(),
+      ...(conquered
+        ? { clearedDungeons: [...owState.clearedDungeons, pending.poiSeed] }
+        : {}),
+    };
+    store.setOverworldState(updatedOw);
+
+    // Reset to default recipe & floor
+    store.setProgressionRecipe('Classic');
+    store.setFloor(1);
+    store.clearLevelCache();
+
+    // Announce (only on retreat — conquest is shown via the "Conquered" label on the dungeon entrance)
+    const regionName = tileDef.label || 'Unknown Lands';
+    store.setZoneName(regionName);
+    if (!conquered) {
+      store.setZoneAnnouncement({ title: regionName, subtitle: 'You flee the darkness.' });
+    }
+
+    // Restore heightmap settings and terrain preset
+    store.setTerrainPreset('heightmap');
+    store.setPaletteName(tileDef.paletteName);
+    store.setHeightmapStyle(tileDef.heightmapStyle);
+    // Restore default dungeon size (heightmap uses it as ground size)
+    store.setDungeonSize(DEFAULT_SCENE_SETTINGS.dungeonSize);
+    store.setRoomSpacing(DEFAULT_SCENE_SETTINGS.roomSpacing);
+    store.setRoomSpacingMax(DEFAULT_SCENE_SETTINGS.roomSpacingMax);
+
+    regenerateScene({
+      presetOverride: 'heightmap',
+      seed: tileDef.seed,
+    });
   }
 
   function createParticleSystem(key: keyof ParticleToggles): ParticleSystem {

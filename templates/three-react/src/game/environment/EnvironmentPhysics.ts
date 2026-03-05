@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { sampleHeightmap } from '../terrain/TerrainNoise';
 import { getBoxHeightAt } from '../pathfinding';
 import { EnvironmentContext } from './EnvironmentContext';
+import { worldToBoxLocal, boxLocalToWorld } from './CollisionUtils';
 
 /**
  * Handles all movement / collision / height queries that characters call every frame.
@@ -15,6 +16,9 @@ export class EnvironmentPhysics {
 
   /** Floor height ignoring small prop debris (walls only). Used by loot physics. */
   getFloorY(x: number, z: number): number {
+    if (this.ctx.overworldMap) {
+      return this.ctx.overworldMap.getTerrainY(x, z);
+    }
     if (this.ctx.heightmapData) {
       return sampleHeightmap(this.ctx.heightmapData, this.ctx.heightmapRes, this.ctx.heightmapGroundSize, x, z);
     }
@@ -23,6 +27,9 @@ export class EnvironmentPhysics {
 
   /** Like getTerrainY but ignores prop debris (tables, chairs). Used for projectile terrain-follow. */
   getTerrainYNoProps(x: number, z: number): number {
+    if (this.ctx.overworldMap) {
+      return this.ctx.overworldMap.getTerrainY(x, z);
+    }
     if (this.ctx.heightmapData) {
       return sampleHeightmap(this.ctx.heightmapData, this.ctx.heightmapRes, this.ctx.heightmapGroundSize, x, z);
     }
@@ -39,18 +46,34 @@ export class EnvironmentPhysics {
 
   /** Get the ground/debris height at a point, optionally expanded by a radius */
   getTerrainY(x: number, z: number, radius = 0): number {
-    // Heightmap: O(1) bilinear interpolation
+    // Overworld: delegate to OverworldMap
+    if (this.ctx.overworldMap) {
+      return this.ctx.overworldMap.getTerrainY(x, z);
+    }
+
+    // Heightmap: bilinear interpolation + debris boxes
     if (this.ctx.heightmapData) {
+      let maxY: number;
       if (radius <= 0) {
-        return sampleHeightmap(this.ctx.heightmapData, this.ctx.heightmapRes, this.ctx.heightmapGroundSize, x, z);
+        maxY = sampleHeightmap(this.ctx.heightmapData, this.ctx.heightmapRes, this.ctx.heightmapGroundSize, x, z);
+      } else {
+        // With radius: sample center + 4 offsets and take max
+        maxY = sampleHeightmap(this.ctx.heightmapData, this.ctx.heightmapRes, this.ctx.heightmapGroundSize, x, z);
+        const r = radius * 0.7;
+        maxY = Math.max(maxY, sampleHeightmap(this.ctx.heightmapData, this.ctx.heightmapRes, this.ctx.heightmapGroundSize, x + r, z));
+        maxY = Math.max(maxY, sampleHeightmap(this.ctx.heightmapData, this.ctx.heightmapRes, this.ctx.heightmapGroundSize, x - r, z));
+        maxY = Math.max(maxY, sampleHeightmap(this.ctx.heightmapData, this.ctx.heightmapRes, this.ctx.heightmapGroundSize, x, z + r));
+        maxY = Math.max(maxY, sampleHeightmap(this.ctx.heightmapData, this.ctx.heightmapRes, this.ctx.heightmapGroundSize, x, z - r));
       }
-      // With radius: sample center + 4 offsets and take max
-      let maxY = sampleHeightmap(this.ctx.heightmapData, this.ctx.heightmapRes, this.ctx.heightmapGroundSize, x, z);
-      const r = radius * 0.7;
-      maxY = Math.max(maxY, sampleHeightmap(this.ctx.heightmapData, this.ctx.heightmapRes, this.ctx.heightmapGroundSize, x + r, z));
-      maxY = Math.max(maxY, sampleHeightmap(this.ctx.heightmapData, this.ctx.heightmapRes, this.ctx.heightmapGroundSize, x - r, z));
-      maxY = Math.max(maxY, sampleHeightmap(this.ctx.heightmapData, this.ctx.heightmapRes, this.ctx.heightmapGroundSize, x, z + r));
-      maxY = Math.max(maxY, sampleHeightmap(this.ctx.heightmapData, this.ctx.heightmapRes, this.ctx.heightmapGroundSize, x, z - r));
+      // Also check nearby debris boxes (rocks, POIs, etc.) — spatial hash + OBB
+      const nearby = this.ctx.debrisSpatial.query(x, z, radius);
+      for (const box of nearby) {
+        const { lx, lz } = worldToBoxLocal(box, x, z);
+        if (Math.abs(lx) < box.halfW + radius && Math.abs(lz) < box.halfD + radius) {
+          const h = getBoxHeightAt(box, x, z);
+          maxY = Math.max(maxY, h);
+        }
+      }
       return maxY;
     }
 
@@ -75,6 +98,17 @@ export class EnvironmentPhysics {
   /** Surface normal at (x, z) for aligning decals/splats. Heightmap: gradient-based; box terrain: up. */
   getTerrainNormal(x: number, z: number): THREE.Vector3 {
     const up = new THREE.Vector3(0, 1, 0);
+    if (this.ctx.overworldMap) {
+      // Gradient-based normal for overworld tiles
+      const eps = 0.05;
+      const hL = this.ctx.overworldMap.getTerrainY(x - eps, z);
+      const hR = this.ctx.overworldMap.getTerrainY(x + eps, z);
+      const hD = this.ctx.overworldMap.getTerrainY(x, z - eps);
+      const hU = this.ctx.overworldMap.getTerrainY(x, z + eps);
+      const dx = (hR - hL) / (2 * eps);
+      const dz = (hU - hD) / (2 * eps);
+      return new THREE.Vector3(-dx, 1, -dz).normalize();
+    }
     if (this.ctx.heightmapData) {
       const eps = 0.05;
       const hL = this.getTerrainY(x - eps, z);
@@ -124,6 +158,12 @@ export class EnvironmentPhysics {
     const halfBound = this.ctx.groundSize / 2 - radius;
     rx = Math.max(-halfBound, Math.min(halfBound, rx));
     rz = Math.max(-halfBound, Math.min(halfBound, rz));
+
+    // Overworld: simple height sampling + bounds clamping (slopes are gentle)
+    if (this.ctx.overworldMap) {
+      const y = this.ctx.overworldMap.getTerrainY(rx, rz);
+      return { x: rx, z: rz, y };
+    }
 
     // Heightmap terrain: steep slopes act as walls.
     // Gradient = wall normal. Movement into steep uphill slopes gets projected
@@ -207,7 +247,9 @@ export class EnvironmentPhysics {
 
       // Push out of debris (props, doors, etc.)
       const pushed = this.pushOutOfDebris(resultX, resultZ, currentY, stepHeight, radius);
-      return { x: pushed.x, z: pushed.z, y: resultY };
+      // Recalculate Y at pushed position (may have shifted due to debris)
+      const finalY = this.getTerrainY(pushed.x, pushed.z, sampleR);
+      return { x: pushed.x, z: pushed.z, y: finalY };
     }
 
     // Box-based: iterative push-out (static + dynamic debris)
@@ -251,6 +293,7 @@ export class EnvironmentPhysics {
   /** Check if point is fully on top of a box surface (not on an edge) */
   isOnBoxSurface(x: number, z: number): boolean {
     if (this.ctx.heightmapData) return true; // entire heightmap is walkable surface
+    if (this.ctx.overworldMap) return true; // overworld tiles are walkable
     for (const box of this.ctx.debris) {
       if (
         Math.abs(x - box.x) < box.halfW - 0.01 &&
@@ -265,6 +308,7 @@ export class EnvironmentPhysics {
   /** Check if any taller debris box overlaps within `clearance` of (x, z) at surfaceY */
   hasClearance(x: number, z: number, surfaceY: number, clearance: number): boolean {
     if (this.ctx.heightmapData) return true; // no walls on heightmap terrain
+    if (this.ctx.overworldMap) return true; // no walls on overworld tiles
     for (const box of this.ctx.debris) {
       if (box.height <= surfaceY + 0.01) continue;
       if (
@@ -312,20 +356,23 @@ export class EnvironmentPhysics {
     return cellH + oneStep + localT * (stair.totalHeight - oneStep);
   }
 
-  /** Push position out of any debris boxes (static + dynamic) */
+  /** Push position out of any debris boxes (static + dynamic). Supports OBB via rotation field. */
   private pushOutOfDebris(rx: number, rz: number, currentY: number, stepHeight: number, radius: number): { x: number; z: number } {
-    const allDebris = this.ctx.dynamicDebris.length > 0
-      ? [...this.ctx.debris, ...this.ctx.dynamicDebris]
-      : this.ctx.debris;
     for (let pass = 0; pass < 4; pass++) {
+      // Query spatial hash for nearby static debris + append dynamic
+      const nearby = this.ctx.debrisSpatial.query(rx, rz, radius + 2);
+      const allDebris = this.ctx.dynamicDebris.length > 0
+        ? [...nearby, ...this.ctx.dynamicDebris]
+        : nearby;
       for (const box of allDebris) {
         const effectiveH = getBoxHeightAt(box, rx, rz);
         if (effectiveH - currentY <= stepHeight) continue;
 
+        // Transform player pos into box-local space for OBB support
+        const { lx: relX, lz: relZ } = worldToBoxLocal(box, rx, rz);
+
         const expandedHalfW = box.halfW + radius;
         const expandedHalfD = box.halfD + radius;
-        const relX = rx - box.x;
-        const relZ = rz - box.z;
         if (Math.abs(relX) >= expandedHalfW || Math.abs(relZ) >= expandedHalfD) continue;
 
         const insideBox =
@@ -335,27 +382,37 @@ export class EnvironmentPhysics {
         if (insideBox) {
           const overlapX = box.halfW + radius - Math.abs(relX);
           const overlapZ = box.halfD + radius - Math.abs(relZ);
+          // Compute push in local space, then transform back to world
+          let pushLX = 0, pushLZ = 0;
           if (overlapX < overlapZ) {
-            rx += (relX >= 0 ? 1 : -1) * overlapX;
+            pushLX = (relX >= 0 ? 1 : -1) * overlapX;
           } else {
-            rz += (relZ >= 0 ? 1 : -1) * overlapZ;
+            pushLZ = (relZ >= 0 ? 1 : -1) * overlapZ;
           }
+          const { wx: pushWX, wz: pushWZ } = boxLocalToWorld(box.rotation, pushLX, pushLZ);
+          rx += pushWX;
+          rz += pushWZ;
           continue;
         }
 
-        const closestX = Math.max(box.x - box.halfW, Math.min(rx, box.x + box.halfW));
-        const closestZ = Math.max(box.z - box.halfD, Math.min(rz, box.z + box.halfD));
+        // Closest point on box in local space
+        const closestLX = Math.max(-box.halfW, Math.min(relX, box.halfW));
+        const closestLZ = Math.max(-box.halfD, Math.min(relZ, box.halfD));
 
-        const dx = rx - closestX;
-        const dz = rz - closestZ;
-        const distSq = dx * dx + dz * dz;
+        const dlx = relX - closestLX;
+        const dlz = relZ - closestLZ;
+        const distSq = dlx * dlx + dlz * dlz;
 
         if (distSq < radius * radius) {
           if (distSq > 0.0001) {
             const dist = Math.sqrt(distSq);
             const overlap = radius - dist;
-            rx += (dx / dist) * overlap;
-            rz += (dz / dist) * overlap;
+            // Push direction in local space, transform to world
+            const pushLX = (dlx / dist) * overlap;
+            const pushLZ = (dlz / dist) * overlap;
+            const { wx: pushWX, wz: pushWZ } = boxLocalToWorld(box.rotation, pushLX, pushLZ);
+            rx += pushWX;
+            rz += pushWZ;
           } else {
             const awayX = rx - box.x;
             const awayZ = rz - box.z;

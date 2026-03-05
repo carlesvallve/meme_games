@@ -162,7 +162,7 @@ export function createCharacterManager(ctx: GameContext): GameCharacterManager {
 
     // Spawn only the controlled hero
     {
-      let pos: THREE.Vector3;
+      let pos!: THREE.Vector3;
       const _hc = window as any;
       if (ctx.hmrReused && _hc.__hmrCharPos) {
         const cp = _hc.__hmrCharPos;
@@ -177,15 +177,34 @@ export function createCharacterManager(ctx: GameContext): GameCharacterManager {
           pos = ctx.terrain.getRandomPosition();
         }
       } else {
-        const entrancePos = ctx.terrain.getEntrancePosition();
-        if (entrancePos) {
-          const ey = ctx.terrain.getTerrainY(entrancePos.x, entrancePos.z);
-          pos = new THREE.Vector3(entrancePos.x, ey, entrancePos.z);
-        } else {
-          const spawnY = ctx.terrain.getTerrainY(0, 0);
-          pos = ctx.navGrid.isWalkable(0, 0)
-            ? new THREE.Vector3(0, spawnY, 0)
-            : ctx.terrain.getRandomPosition();
+        // Check if zooming in from overworld — map tile-local position to heightmap
+        const owState = useGameStore.getState().overworldState;
+        const zoomNorm = owState?.zoomSpawnNorm;
+        let placed = false;
+        if (zoomNorm && owState?.activeTileIndex !== null) {
+          const hmSize = useGameStore.getState().dungeonSize;
+          const targetX = zoomNorm.nx * hmSize;
+          const targetZ = zoomNorm.nz * hmSize;
+          // Spiral search for nearest walkable cell
+          const walkPos = findNearestWalkable(ctx, targetX, targetZ, hmSize);
+          if (walkPos) {
+            pos = walkPos;
+            placed = true;
+          }
+          // Clear the norm so it doesn't persist (keep facing for use below)
+          useGameStore.getState().setOverworldState({ ...owState, zoomSpawnNorm: null });
+        }
+        if (!placed) {
+          const entrancePos = ctx.terrain.getEntrancePosition();
+          if (entrancePos) {
+            const ey = ctx.terrain.getTerrainY(entrancePos.x, entrancePos.z);
+            pos = new THREE.Vector3(entrancePos.x, ey, entrancePos.z);
+          } else {
+            const spawnY = ctx.terrain.getTerrainY(0, 0);
+            pos = ctx.navGrid.isWalkable(0, 0)
+              ? new THREE.Vector3(0, spawnY, 0)
+              : ctx.terrain.getRandomPosition();
+          }
         }
       }
 
@@ -201,7 +220,13 @@ export function createCharacterManager(ctx: GameContext): GameCharacterManager {
       char.hungerEnabled = true;
       char.regenDelay = 5.0;
       char.regenRate = 0.1;
-      if (ctx.hmrReused && _hc.__hmrCharFacing != null) {
+      // Restore facing from overworld → heightmap transition
+      const owFacing = useGameStore.getState().overworldState?.zoomSpawnFacing;
+      if (owFacing != null) {
+        char.setFacing(owFacing);
+        const ow = useGameStore.getState().overworldState!;
+        useGameStore.getState().setOverworldState({ ...ow, zoomSpawnFacing: null });
+      } else if (ctx.hmrReused && _hc.__hmrCharFacing != null) {
         char.setFacing(_hc.__hmrCharFacing);
         _hc.__hmrCharFacing = undefined;
       } else if (spawnAt === 'exit') {
@@ -241,9 +266,16 @@ export function createCharacterManager(ctx: GameContext): GameCharacterManager {
       );
     }
 
-    // Spawn enemies + projectile system
+    // Spawn enemies + projectile system (skip on overworld — no combat)
+    const isOverworld = ctx.terrain.preset === 'overworld';
     if (ctx.enemySystem) ctx.enemySystem.dispose();
     if (ctx.projectileSystem) ctx.projectileSystem.dispose();
+    if (isOverworld) {
+      ctx.enemySystem = null;
+      ctx.projectileSystem = null;
+      ctx.propDestructionSystem = null;
+      return;
+    }
     ctx.enemySystem = new EnemySystem(
       ctx.scene,
       ctx.terrain,
@@ -275,20 +307,27 @@ export function createCharacterManager(ctx: GameContext): GameCharacterManager {
       ctx.enemySystem.restoreEnemies(ctx.pendingSnapshot.enemies);
     } else {
       const ep = useGameStore.getState().enemyParams;
+      const diff = Math.max(0, ep.difficulty); // 0-2, default 1
       const walkableCells = ctx.navGrid.getWalkableCellCount();
+      // Heightmaps are open-world areas — use much lower density & cap
+      const terrainPreset = useGameStore.getState().terrainPreset;
+      const isHeightmap = terrainPreset === 'heightmap';
+      const baseDensity = isHeightmap ? ep.enemyDensity * 0.25 : ep.enemyDensity;
+      const density = baseDensity * diff;
+      const cap = isHeightmap ? Math.min(ep.maxEnemies, 8) : ep.maxEnemies;
       const maxEnemies =
-        ep.enemyDensity <= 0
+        density <= 0
           ? 0
           : Math.min(
-              ep.maxEnemies,
-              Math.max(1, Math.round(walkableCells * ep.enemyDensity)),
+              cap,
+              Math.max(1, Math.round(walkableCells * density)),
             );
       if (maxEnemies > 0) {
         ctx.enemySystem.spawnEnemies(maxEnemies);
-        ctx.enemySystem.enableWaveSpawning(
-          maxEnemies,
-          useGameStore.getState().enemyParams.spawnInterval,
-        );
+        // Spawn interval: higher difficulty = faster respawns
+        const baseInterval = isHeightmap ? 30 : ep.spawnInterval;
+        const interval = diff > 0 ? baseInterval / diff : 999;
+        ctx.enemySystem.enableWaveSpawning(maxEnemies, interval);
       }
     }
 
@@ -326,4 +365,31 @@ export function createCharacterManager(ctx: GameContext): GameCharacterManager {
     loadActiveInventory,
     updateActiveCharacterUI,
   };
+}
+
+/** Spiral search from (targetX, targetZ) to find the nearest walkable cell. */
+function findNearestWalkable(
+  ctx: GameContext,
+  targetX: number,
+  targetZ: number,
+  maxRadius: number,
+): THREE.Vector3 | null {
+  const step = ctx.navGrid.cellSize ?? 0.5;
+  // Check target first
+  if (ctx.navGrid.isWalkable(targetX, targetZ)) {
+    const y = ctx.terrain.getTerrainY(targetX, targetZ);
+    return new THREE.Vector3(targetX, y, targetZ);
+  }
+  // Expand in rings
+  for (let r = step; r < maxRadius * 0.5; r += step) {
+    for (let angle = 0; angle < Math.PI * 2; angle += step / r) {
+      const x = targetX + Math.cos(angle) * r;
+      const z = targetZ + Math.sin(angle) * r;
+      if (ctx.navGrid.isWalkable(x, z)) {
+        const y = ctx.terrain.getTerrainY(x, z);
+        return new THREE.Vector3(x, y, z);
+      }
+    }
+  }
+  return null;
 }

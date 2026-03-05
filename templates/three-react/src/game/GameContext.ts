@@ -86,6 +86,7 @@ export interface GameContext {
   lastIsExterior: boolean;
   currentGridOpacity: number;
   currentRoomLabels: boolean;
+  currentDebugDebris: boolean;
 
   // Input state cache
   cachedInputState: InputState;
@@ -124,4 +125,10 @@ export interface GameContext {
 
   // Game started (distinguishes initial boot from playing)
   gameStarted: boolean;
+
+  // POI dungeon enter prompt
+  dungeonEnterPrompt: THREE.Sprite | null;
+  dungeonEnterPromptTarget: { x: number; y: number; z: number } | null;
+  /** Last overworld tile index the player stood on (for tile-enter announcements) */
+  lastOverworldTile: number | null;
 }

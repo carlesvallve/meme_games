@@ -229,7 +229,12 @@ export class PostProcessStack {
     this.fadeTarget = 0;
     this.fadeCallback = onBlack;
     this.fadeHolding = false;
+    // Clear speech bubbles immediately when any fade transition begins
+    this._onFadeStart?.();
   }
+
+  /** Optional callback fired at fade start — used to clear speech bubbles etc. */
+  _onFadeStart: (() => void) | null = null;
 
   private _fadeInSpeed = 3.0;
 

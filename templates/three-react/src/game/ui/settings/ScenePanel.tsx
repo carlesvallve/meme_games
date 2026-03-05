@@ -72,6 +72,8 @@ export function ScenePanel() {
   const setUseBiomes = useGameStore((s) => s.setUseBiomes);
   const debugBiomes = useGameStore((s) => s.debugBiomes);
   const setDebugBiomes = useGameStore((s) => s.setDebugBiomes);
+  const debugDebris = useGameStore((s) => s.debugDebris);
+  const setDebugDebris = useGameStore((s) => s.setDebugDebris);
   const propCategories = PROP_CATEGORIES;
   const dungeonVariant = useGameStore((s) => s.dungeonVariant);
   const setDungeonVariant = useGameStore((s) => s.setDungeonVariant);
@@ -153,16 +155,21 @@ export function ScenePanel() {
               )}
             </div>
             <div style={{ display: 'flex', gap: 3 }}>
-              <button
-                onClick={() => { setTerrainPreset('voxelDungeon'); regenerate?.(); }}
-                style={{
-                  ...btnStyle(terrainPreset === 'voxelDungeon'),
-                  flex: 1,
-                  textTransform: 'capitalize',
-                }}
-              >
-                voxelDungeon
-              </button>
+              {(['voxelDungeon', 'overworld'] as TerrainPreset[]).map(
+                (p) => (
+                  <button
+                    key={p}
+                    onClick={() => { setTerrainPreset(p); regenerate?.(); }}
+                    style={{
+                      ...btnStyle(terrainPreset === p),
+                      flex: 1,
+                      textTransform: 'capitalize',
+                    }}
+                  >
+                    {p}
+                  </button>
+                ),
+              )}
             </div>
           </div>
         </div>
@@ -212,6 +219,11 @@ export function ScenePanel() {
                   />
                 </>
               )}
+              <Toggle
+                label='Debug Debris'
+                value={debugDebris}
+                onChange={setDebugDebris}
+              />
             </>
           )}
 

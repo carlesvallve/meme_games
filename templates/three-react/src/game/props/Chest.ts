@@ -103,11 +103,12 @@ export class ChestSystem {
     terrain: Environment,
     lootSystem: LootSystem,
     usePropChestsOnly = false,
+    maxFreeChests?: number,
   ) {
     this.scene = scene;
     this.terrain = terrain;
     this.lootSystem = lootSystem;
-    this.count = usePropChestsOnly ? 0 : 8;
+    this.count = usePropChestsOnly ? 0 : (maxFreeChests ?? 8);
 
     this.bodyGeo = buildVoxelGeometry(
       buildChestBodyModel(),
@@ -184,6 +185,8 @@ export class ChestSystem {
 
     const group = new THREE.Group();
     group.position.set(pos.x, pos.y, pos.z);
+    // Random 8-direction rotation (N/NE/E/SE/S/SW/W/NW)
+    group.rotation.y = Math.floor(Math.random() * 8) * (Math.PI / 4);
 
     // Body mesh
     const bodyMesh = new THREE.Mesh(this.bodyGeo, this.material);

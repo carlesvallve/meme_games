@@ -873,7 +873,8 @@ export type PatchSampler = (x: number, z: number) => number;
 
 export interface NatureGeneratorResult {
   group: THREE.Group;
-  treePositions: { x: number; z: number; radius: number }[];
+  treePositions: { x: number; z: number; halfW: number; halfD: number; height: number; rotY: number; offsetX: number }[];
+  rockPositions: { x: number; z: number; halfW: number; halfD: number; height: number }[];
   patchThreshold: number;
   treePatch: PatchSampler;
   rockPatch: PatchSampler;
@@ -908,7 +909,8 @@ export function generateNature(
     return false;
   };
   group.name = 'nature';
-  const treePositions: { x: number; z: number; radius: number }[] = [];
+  const treePositions: { x: number; z: number; halfW: number; halfD: number; height: number; rotY: number; offsetX: number }[] = [];
+  const rockPositions: { x: number; z: number; halfW: number; halfD: number; height: number }[] = [];
 
   const halfGround = groundSize / 2;
   const hmCellSize = groundSize / resolution;
@@ -946,6 +948,7 @@ export function generateNature(
   }
 
   const treeGeos: THREE.BufferGeometry[] = [];
+  const treeTypes: string[] = [];
   for (let v = 0; v < TREE_VARIANTS; v++) {
     const ttype = preset.treeTypes[v % preset.treeTypes.length];
     const leafColor = variantLeafColors[v];
@@ -972,6 +975,7 @@ export function generateNature(
         break;
     }
     treeGeos.push(geo);
+    treeTypes.push(ttype);
   }
 
   const rockGeos: THREE.BufferGeometry[] = [];
@@ -1008,6 +1012,49 @@ export function generateNature(
       );
     }
   }
+
+  // Compute collision bounding box per tree geo — type-specific trunk sizing
+  // Trunk dimensions are hardcoded per type since merged geo includes leaves
+  const TRUNK_HALF = V * 0.6; // default thin trunk half-width
+  const treeBBoxes: { hw: number; hd: number; maxY: number; offsetX: number }[] = treeGeos.map((g, i) => {
+    g.computeBoundingBox();
+    const bb = g.boundingBox!;
+    const ttype = treeTypes[i];
+    switch (ttype) {
+      case 'palm': {
+        // Palm: thin trunk that leans in +X. Offset collider to follow trunk midpoint.
+        // Trunk lean: cx += V*0.3 per segment, ~7 segments avg → total lean ~0.126
+        // Midpoint offset is half the total lean
+        const avgLean = V * 0.3 * 6 * 0.5; // approximate midpoint of trunk lean
+        return { hw: TRUNK_HALF, hd: TRUNK_HALF, maxY: bb.max.y, offsetX: avgLean };
+      }
+      case 'cactus':
+        // Cactus: asymmetric (arms on X axis), use full bbox scaled down
+        return {
+          hw: Math.max(Math.abs(bb.min.x), Math.abs(bb.max.x)) * 0.7,
+          hd: Math.max(Math.abs(bb.min.z), Math.abs(bb.max.z)) * 0.7,
+          maxY: bb.max.y,
+          offsetX: 0,
+        };
+      default: {
+        // Other trees: trunk-width footprint (~35% of full bbox)
+        const trunkFrac = 0.35;
+        return {
+          hw: Math.max(Math.abs(bb.min.x), Math.abs(bb.max.x)) * trunkFrac,
+          hd: Math.max(Math.abs(bb.min.z), Math.abs(bb.max.z)) * trunkFrac,
+          maxY: bb.max.y,
+          offsetX: 0,
+        };
+      }
+    }
+  });
+
+  // Compute bounding box per rock geo for collision sizing
+  const rockBBoxes: { hw: number; hd: number; maxY: number }[] = rockGeos.map((g) => {
+    g.computeBoundingBox();
+    const bb = g.boundingBox!;
+    return { hw: Math.max(Math.abs(bb.min.x), Math.abs(bb.max.x)), hd: Math.max(Math.abs(bb.min.z), Math.abs(bb.max.z)), maxY: bb.max.y };
+  });
 
   // Create batches with generous limits
   const treeBatches: InstancedBatch[] = treeGeos.map((g) =>
@@ -1091,7 +1138,8 @@ export function generateNature(
             tiltX,
             tiltZ,
           );
-          treePositions.push({ x: jx, z: jz, radius: 0.12 * scale });
+          const tbb = treeBBoxes[batchIdx];
+          treePositions.push({ x: jx, z: jz, halfW: tbb.hw * scale, halfD: tbb.hd * scale, height: tbb.maxY * scale, rotY, offsetX: tbb.offsetX * scale });
         }
       }
 
@@ -1131,6 +1179,8 @@ export function generateNature(
               tiltZ,
             );
           }
+          const rbb = rockBBoxes[batchIdx];
+          rockPositions.push({ x: jx, z: jz, halfW: rbb.hw * scale, halfD: rbb.hd * scale, height: rbb.maxY * scale });
         }
       }
 
@@ -1189,7 +1239,8 @@ export function generateNature(
             tiltX,
             tiltZ,
           );
-          treePositions.push({ x: jx, z: jz, radius: 0.12 * scale });
+          const tbb = treeBBoxes[batchIdx];
+          treePositions.push({ x: jx, z: jz, halfW: tbb.hw * scale, halfD: tbb.hd * scale, height: tbb.maxY * scale, rotY, offsetX: tbb.offsetX * scale });
         }
       }
 
@@ -1247,6 +1298,7 @@ export function generateNature(
   return {
     group,
     treePositions,
+    rockPositions,
     patchThreshold: PATCH_THRESHOLD,
     treePatch,
     rockPatch,

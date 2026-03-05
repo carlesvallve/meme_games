@@ -803,15 +803,19 @@ export class ProjectileSystem {
     // Stick raycast: only architecture + props that are visible (no invisible colliders). Terrain (ground) causes arrows to stick immediately in front of the player; ground hits are already handled by getGroundY/slope above.
     // Destroyable props are excluded — they're handled by proximity detection instead.
     const destroyableMeshes = options?.destroyableMeshes;
-    const stickColliders = archAndProps.filter(o => {
-      if (!o.parent) return false; // detached from scene
-      if (isCollisionOnly(o)) return false;
-      if (isNoProjectileStick(o)) return false;
-      if (!isVisibleForStick(o)) return false;
-      if (destroyableMeshes?.has(o)) return false;
-      if (excludeObjects.length && isExcludedFromRaycast(o, excludeObjects)) return false;
-      return true;
-    });
+    const stickColliders = [
+      ...archAndProps.filter(o => {
+        if (!o.parent) return false; // detached from scene
+        if (isCollisionOnly(o)) return false;
+        if (isNoProjectileStick(o)) return false;
+        if (!isVisibleForStick(o)) return false;
+        if (destroyableMeshes?.has(o)) return false;
+        if (excludeObjects.length && isExcludedFromRaycast(o, excludeObjects)) return false;
+        return true;
+      }),
+      // Include terrain colliders (trees, rocks, POIs) for arrow sticking
+      ...terrainColliders,
+    ];
     const raycaster = new THREE.Raycaster();
     const rayOrigin = new THREE.Vector3();
     const rayDir = new THREE.Vector3();
