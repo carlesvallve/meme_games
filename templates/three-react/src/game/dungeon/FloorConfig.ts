@@ -99,6 +99,31 @@ export function buildFloorEnemyPool(floor: number): string[] {
   return ids;
 }
 
+// ── Heightmap Overworld Pool ────────────────────────────────────────
+
+/** Curated early-game pool for heightmap tiles: mostly low-tier with rare mid-tier. */
+const HEIGHTMAP_POOL = {
+  low:     ['rat', 'bat', 'spider', 'blob', 'goblin'],
+  mid:     ['wolf', 'skeleton'],
+  weights: [8, 2] as [number, number],
+};
+
+export function getHeightmapEnemyPool(): string[] {
+  const ids: string[] = [];
+  const [wLow, wMid] = HEIGHTMAP_POOL.weights;
+  for (const arch of HEIGHTMAP_POOL.low) {
+    for (const id of getEnemyIdsByArchetype(arch)) {
+      for (let i = 0; i < wLow; i++) ids.push(id);
+    }
+  }
+  for (const arch of HEIGHTMAP_POOL.mid) {
+    for (const id of getEnemyIdsByArchetype(arch)) {
+      for (let i = 0; i < wMid; i++) ids.push(id);
+    }
+  }
+  return ids;
+}
+
 // ── Room-Monster Affinity ───────────────────────────────────────────
 
 /**

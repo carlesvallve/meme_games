@@ -74,12 +74,12 @@ export const palettes: Record<string, TerrainPalette> = {
 
   // Obsidian — dark volcanic ground, black rock, lava-tinted water
   obsidian: {
-    flat: 0x1a2018,
-    gentleSlope: 0x252a22,
-    steepSlope: 0x181515,
-    cliff: 0x282525,
-    sand: 0x403830,
-    wetSand: 0x282020,
+    flat: 0x3d4838,
+    gentleSlope: 0x485242,
+    steepSlope: 0x3a3838,
+    cliff: 0x4a4848,
+    sand: 0x605850,
+    wetSand: 0x484040,
     waterShallow: 0xd04820,
     waterDeep: 0x901a08,
   },

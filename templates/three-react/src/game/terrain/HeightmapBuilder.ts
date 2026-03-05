@@ -32,6 +32,7 @@ import { generateNature, type NatureGeneratorResult } from './NatureGenerator';
 import { paletteBiome } from './ColorPalettes';
 import { useGameStore } from '../../store';
 import { EnvironmentContext } from '../environment/EnvironmentContext';
+import { OW_GRID } from '../overworld/OverworldTiles';
 import { HALF } from './TerrainBuilder';
 import type { WaterSystem } from './WaterSystem';
 
@@ -230,8 +231,19 @@ export class HeightmapBuilder {
     this.ctx.heightmapMaxHeight = config.maxHeight;
     this.ctx.heightmapPosterize = config.posterize || 4;
 
+    // Stitch edges with neighbor tiles (if coming from overworld)
+    this.stitchWithNeighbors(heights, res, groundSize, resolutionScale);
+
     // Debug: render heightmap as grayscale canvas overlay
     this.debugHeightmapCanvas(heights, verts, config.maxHeight);
+
+    // ── Compute data-driven water level from heightmap ──
+    // Use same percentile approach as mini overworld tiles so water matches
+    if (this.ctx.heightmapStyle !== 'caves') {
+      const sorted = Float32Array.from(heights).sort();
+      const pct = this.ctx.heightmapStyle === 'islands' ? 0.25 : 0.15;
+      this.ctx.computedWaterY = sorted[Math.floor(sorted.length * pct)];
+    }
 
     // ── Build mesh geometry ──
     const positions = new Float32Array(verts * verts * 3);
@@ -676,13 +688,11 @@ export class HeightmapBuilder {
     // Create ladder meshes at detected cliff edges
     this.createLadderMeshes();
 
-    // Generate nature (trees, rocks, grass, flowers)
-    if (useGameStore.getState().natureEnabled) {
-      this.generateNatureElements();
-    }
+    // Nature is generated separately after POI terrain flattening
+    // (called from Environment.ts after placeHeightmapPOIs)
   }
 
-  generateNatureElements(): void {
+  generateNatureElements(extraExclusions?: { x: number; z: number; r: number }[]): void {
     if (!this.ctx.heightmapData) return;
     // Dispose previous nature
     if (this.ctx.natureResult) {
@@ -707,6 +717,7 @@ export class HeightmapBuilder {
       exclusions.push({ x: ld.highWorldX ?? ld.bottomX, z: ld.highWorldZ ?? ld.bottomZ, r: 1.5 });
       exclusions.push({ x: ld.lowWorldX, z: ld.lowWorldZ, r: 1.5 });
     }
+    if (extraExclusions) exclusions.push(...extraExclusions);
 
     const biome = paletteBiome[this.ctx.paletteName] ?? 'temperate';
     const result = generateNature(
@@ -727,14 +738,30 @@ export class HeightmapBuilder {
       this.tintTerrainByPatches(result);
     }
 
-    // Register tree trunks as small debris so characters walk around them
+    // Register tree trunks — movement collision + invisible proxy for projectile raycasts
+    // (InstancedMesh can't raycast, so proxy boxes let arrows stick to tree trunks)
     for (const t of result.treePositions) {
       const h = sampleHeightmap(this.ctx.heightmapData, this.ctx.heightmapRes, this.ctx.heightmapGroundSize, t.x, t.z);
-      this.ctx.debris.push({
-        x: t.x, z: t.z,
-        halfW: t.radius, halfD: t.radius,
-        height: h + 0.3,
-      });
+      const cos = Math.cos(t.rotY);
+      const sin = Math.sin(t.rotY);
+      const ox = t.offsetX * cos;
+      const oz = -t.offsetX * sin;
+      this.ctx.addCollider({
+        x: t.x + ox, z: t.z + oz,
+        halfW: t.halfW, halfD: t.halfD,
+        height: h + t.height,
+        rotation: t.rotY,
+      }); // auto-creates proxy mesh for projectile raycasts
+    }
+
+    // Register rocks — movement collision only (too small for projectile cover)
+    for (const r of result.rockPositions) {
+      const h = sampleHeightmap(this.ctx.heightmapData, this.ctx.heightmapRes, this.ctx.heightmapGroundSize, r.x, r.z);
+      this.ctx.addCollider({
+        x: r.x, z: r.z,
+        halfW: r.halfW, halfD: r.halfD,
+        height: h + r.height,
+      }, { projectile: false });
     }
   }
 
@@ -1006,6 +1033,102 @@ export class HeightmapBuilder {
     }
 
     colorAttr.needsUpdate = true;
+  }
+
+  /**
+   * Stitch this heightmap's border vertices with neighboring overworld tiles.
+   * Generates neighbor heightmaps at the same resolution, averages shared edges,
+   * then blends a few rows inward for a smooth transition.
+   */
+  private stitchWithNeighbors(
+    heights: Float32Array,
+    res: number,
+    groundSize: number,
+    resolutionScale: number,
+  ): void {
+    const owState = useGameStore.getState().overworldState;
+    if (!owState || owState.activeTileIndex === null) return;
+
+    const activeIdx = owState.activeTileIndex;
+    const activeDef = owState.tiles[activeIdx];
+    const row = activeDef.row;
+    const col = activeDef.col;
+    const verts = res + 1;
+    const REF_GROUND = 46;
+    const BLEND_ROWS = 3; // rows to blend inward from edge
+
+    // Neighbor directions: [dRow, dCol, edgeName]
+    const neighbors: [number, number, 'top' | 'bottom' | 'left' | 'right'][] = [
+      [-1, 0, 'top'],
+      [1, 0, 'bottom'],
+      [0, -1, 'left'],
+      [0, 1, 'right'],
+    ];
+
+    for (const [dr, dc, edge] of neighbors) {
+      const nr = row + dr;
+      const nc = col + dc;
+      if (nr < 0 || nr >= OW_GRID || nc < 0 || nc >= OW_GRID) continue;
+
+      const nIdx = nr * OW_GRID + nc;
+      const nDef = owState.tiles[nIdx];
+
+      // Generate neighbor's heightmap at LOW resolution — we only need edge values
+      const nConfig = { ...getHeightmapConfig(nDef.heightmapStyle) };
+      nConfig.maxHeight *= groundSize / REF_GROUND;
+      const nResult = generateHeightmap(nConfig, groundSize, nDef.seed, 1);
+      // Resample neighbor edge to match our resolution if needed
+      const nRes = nConfig.resolution;
+      const nVerts = nRes + 1;
+      const nHeights = nResult.heights;
+
+      // Helper: sample neighbor edge with linear interpolation from low-res grid
+      const sampleNeighborEdge = (i: number): number => {
+        // Map our vertex index (0..res) to neighbor's vertex space (0..nRes)
+        const nPos = (i / res) * nRes;
+        const nI = Math.min(Math.floor(nPos), nRes - 1);
+        const frac = nPos - nI;
+
+        let idxA: number, idxB: number;
+        switch (edge) {
+          case 'top':    idxA = nRes * nVerts + nI; idxB = nRes * nVerts + nI + 1; break;
+          case 'bottom': idxA = 0 * nVerts + nI;    idxB = 0 * nVerts + nI + 1; break;
+          case 'left':   idxA = nI * nVerts + nRes;  idxB = (nI + 1) * nVerts + nRes; break;
+          case 'right':  idxA = nI * nVerts + 0;     idxB = (nI + 1) * nVerts + 0; break;
+        }
+        return nHeights[idxA] * (1 - frac) + nHeights[idxB] * frac;
+      };
+
+      // Average the shared edge and blend inward
+      for (let i = 0; i < verts; i++) {
+        let myEdgeIdx: number;
+
+        switch (edge) {
+          case 'top':    myEdgeIdx = 0 * verts + i; break;
+          case 'bottom': myEdgeIdx = res * verts + i; break;
+          case 'left':   myEdgeIdx = i * verts + 0; break;
+          case 'right':  myEdgeIdx = i * verts + res; break;
+        }
+
+        const avg = (heights[myEdgeIdx] + sampleNeighborEdge(i)) * 0.5;
+
+        // Set edge vertex to average
+        heights[myEdgeIdx] = avg;
+
+        // Blend a few rows inward so the transition isn't abrupt
+        for (let b = 1; b <= BLEND_ROWS; b++) {
+          const t = b / (BLEND_ROWS + 1); // 0 at edge, approaching 1 inward
+          let blendIdx: number;
+          switch (edge) {
+            case 'top':    blendIdx = b * verts + i; break;
+            case 'bottom': blendIdx = (res - b) * verts + i; break;
+            case 'left':   blendIdx = i * verts + b; break;
+            case 'right':  blendIdx = i * verts + (res - b); break;
+          }
+          heights[blendIdx] = avg + (heights[blendIdx] - avg) * t;
+        }
+      }
+    }
   }
 
   /** Generate a 32x32 heightmap thumbnail data URL and store it in the Zustand store. */

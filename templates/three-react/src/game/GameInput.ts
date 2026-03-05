@@ -186,7 +186,7 @@ export function createInputManager(
         applyCharacterStats(ctx, ctx.activeCharacter);
       }
       e.preventDefault();
-    } else if (e.code === 'KeyM') {
+    } else if (e.code === 'Digit1') {
       if (ctx.activeCharacter) {
         const archer = VOX_HEROES.find((entry) => entry.id === 'archer');
         if (archer) {

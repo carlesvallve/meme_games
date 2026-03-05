@@ -26,6 +26,8 @@ import { createCharacterManager } from './GameCharacters';
 import { createInputManager } from './GameInput';
 import { createCallbacks } from './GameCallbacks';
 import { createGameLoop } from './GameLoop';
+import { generateWorldName } from './overworld';
+import type { OverworldState } from './overworld';
 // ── HMR terrain cache ─────────────────────────────────────────────
 interface TerrainCache {
   terrain: Environment;
@@ -119,6 +121,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   let terrain: Environment;
   let navGrid: ReturnType<Environment['buildNavGrid']>;
   let hmrReused = false;
+  let initSeed = 0;
 
   const hmrCacheEnabled = useGameStore.getState().hmrCacheEnabled;
   const cached = hmrCacheEnabled ? getTerrainCache() : null;
@@ -141,7 +144,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       cached.terrain.dispose();
       setTerrainCache(null);
     }
-    const initSeed = useGameStore.getState().getFloorSeed(useGameStore.getState().floor);
+    initSeed = useGameStore.getState().getFloorSeed(useGameStore.getState().floor);
     terrain = new Environment(scene, initPreset, initStyle, initPalette, initSeed);
     const { characterParams: initParams } = useGameStore.getState();
     navGrid = terrain.buildNavGrid(
@@ -158,6 +161,27 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   useGameStore.getState().setPaletteActive(terrain.getPaletteName());
   sceneSky.setPalette(terrain.getPaletteName());
   terrain.setGridOpacity(useGameStore.getState().gridOpacity);
+
+  // Initialize overworld state on app start (so world name is ready before char selection)
+  // Use initSeed (the actual seed passed to Environment) not dungeonBaseSeed (they differ via floorSeed hash)
+  if (initPreset === 'overworld' && !hmrReused) {
+    const owMap = terrain.getOverworldMap();
+    if (owMap) {
+      const owState: OverworldState = {
+        activeTileIndex: null,
+        savedPlayerPos: null,
+        zoomSpawnNorm: null,
+        zoomSpawnFacing: null,
+        tiles: owMap.getTileDefs(),
+        baseSeed: initSeed,
+        worldName: generateWorldName(initSeed),
+        clearedDungeons: [],
+        pendingPoiDungeon: null,
+      };
+      useGameStore.getState().setOverworldState(owState);
+      useGameStore.getState().setZoneName(owState.worldName);
+    }
+  }
   const initSpawn = terrain.getEntrancePosition();
   const initGemCount =
     initPreset === 'voxelDungeon'
@@ -174,7 +198,8 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   (window as any).__potionEffectSystem = potionSystem;
   lootSystem.setPotionSystem(potionSystem);
   const usePropChestsOnly = initPreset === 'voxelDungeon';
-  let chestSystem = new ChestSystem(scene, terrain, lootSystem, usePropChestsOnly);
+  const initChestCap = initPreset === 'heightmap' ? 3 : undefined;
+  let chestSystem = new ChestSystem(scene, terrain, lootSystem, usePropChestsOnly, initChestCap);
   let goreSystem = new GoreSystem(
     scene,
     (x, z) => terrain.getTerrainNormal(x, z),
@@ -196,6 +221,8 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   // Speech bubbles
   const speechSystem = new SpeechBubbleSystem();
   speechSystem.setCamera(cam.camera);
+  // Wire fade transitions to auto-clear speech bubbles
+  postProcess._onFadeStart = () => speechSystem.dismissAll();
 
   // Click marker
   const markerGeo = new THREE.RingGeometry(0.04, 0.12, 16);
@@ -225,6 +252,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     lastIsExterior: initialIsExterior,
     currentGridOpacity: useGameStore.getState().gridOpacity,
     currentRoomLabels: useGameStore.getState().roomLabels,
+    currentDebugDebris: false,
     cachedInputState: input.update(),
     inventories: new Map(),
     clickMarker, markerMat, markerLife: 0,
@@ -238,6 +266,9 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     rafId: 0, lastTime: 0,
     pendingSnapshot: null,
     gameStarted: false,
+    dungeonEnterPrompt: null,
+    dungeonEnterPromptTarget: null,
+    lastOverworldTile: null,
   };
 
   // Hide terrain until a character is selected (avoid showing dungeon under menu/select screen)
@@ -279,6 +310,10 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       scene.remove(clickMarker);
       markerGeo.dispose();
       markerMat.dispose();
+      if (ctx.dungeonEnterPrompt) {
+        scene.remove(ctx.dungeonEnterPrompt);
+        ctx.dungeonEnterPrompt = null;
+      }
       for (const sys of Object.values(ctx.particleSystems)) {
         if (sys) sys.dispose();
       }

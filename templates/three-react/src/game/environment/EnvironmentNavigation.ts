@@ -33,10 +33,21 @@ export class EnvironmentNavigation {
 
   /** Build a NavGrid from current terrain for A* pathfinding */
   buildNavGrid(stepHeight: number, capsuleRadius: number, cellSize = 0.5, slopeHeight?: number): NavGrid {
+    // Overworld: delegate to OverworldMap's own NavGrid builder
+    if (this.ctx.overworldMap) {
+      const grid = this.ctx.overworldMap.buildNavGrid(stepHeight, cellSize);
+      this.ctx.navGrid = grid;
+      return grid;
+    }
+
     const navGroundSize = this.ctx.effectiveGroundSize || this.ctx.groundSize;
     const grid = new NavGrid(navGroundSize, navGroundSize, cellSize);
     if (this.ctx.heightmapData) {
       grid.buildFromHeightmap(this.ctx.heightmapData, this.ctx.heightmapRes, this.ctx.heightmapGroundSize, stepHeight, slopeHeight);
+      // Block nav cells that overlap tall debris (trees, POIs)
+      if (this.ctx.debris.length > 0) {
+        grid.applyDebrisBlocking(this.ctx.debris);
+      }
     } else if (this.ctx.walkMask) {
       // Dungeon with walkMask: the mask IS the truth. Build a flat grid (no debris),
       // then let walkMask define exactly which cells are open/blocked.
@@ -362,6 +373,21 @@ export class EnvironmentNavigation {
 
   getRandomPosition(margin = 3, clearance = 0.6, excludePos?: { x: number; z: number }, excludeRadius = 0): THREE.Vector3 {
     const half = this.ctx.groundSize / 2 - margin;
+
+    // Overworld: pick from NavGrid spawn region
+    if (this.ctx.overworldMap && this.ctx.navGrid) {
+      for (let attempt = 0; attempt < 50; attempt++) {
+        const cell = this.ctx.navGrid.getRandomSpawnCell();
+        if (!cell) break;
+        if (excludePos && excludeRadius > 0) {
+          const edx = cell.x - excludePos.x, edz = cell.z - excludePos.z;
+          if (edx * edx + edz * edz < excludeRadius * excludeRadius) continue;
+        }
+        const y = this.ctx.overworldMap.getTerrainY(cell.x, cell.z);
+        return new THREE.Vector3(cell.x, y, cell.z);
+      }
+      return new THREE.Vector3(0, this.ctx.overworldMap.getTerrainY(0, 0), 0);
+    }
 
     // Heightmap: sample random point, verify it's in the spawn region
     if (this.ctx.heightmapData) {

@@ -75,6 +75,18 @@ export function EnemyPanel() {
         </div>
       </Section>
 
+      <Section label='Difficulty' accent={accent}>
+        <Slider
+          label='Difficulty'
+          value={ep.difficulty}
+          min={0}
+          max={2}
+          step={0.1}
+          accent={accent}
+          onChange={(v) => set('difficulty', v)}
+        />
+      </Section>
+
       <Section label='Spawn' accent={accent}>
         <Slider
           label='Enemy Density'

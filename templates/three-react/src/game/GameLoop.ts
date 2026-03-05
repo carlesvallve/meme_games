@@ -1,5 +1,9 @@
 import * as THREE from 'three';
-import { useGameStore } from '../store';
+import { useGameStore, DEFAULT_CAMERA_PARAMS } from '../store';
+import { getTileAtWorldPos, tileCenterWorld, OW_TILE_SIZE, OW_TOTAL_SIZE, generateDungeonFloorSubtitle } from './overworld';
+import type { POIDef } from './overworld';
+import { buildStoryRecipe } from './recipes/story';
+import { createTextLabel } from './rendering/TextLabel';
 import {
   applyLightPreset,
   updateReveal,
@@ -109,7 +113,21 @@ export function createGameLoop(
         ctx.needsFullRegen = false;
         ctx.postProcess.fadeTransition(
           () => {
-            sceneManager.regenerateScene({ character: selected });
+            // Reset to overworld on new game (clears dungeon state if died inside one)
+            const store = useGameStore.getState();
+            const owState = store.overworldState;
+            if (owState?.pendingPoiDungeon) {
+              store.setOverworldState({ ...owState, pendingPoiDungeon: null });
+            }
+            store.setTerrainPreset('overworld');
+            store.setProgressionRecipe('Classic');
+            store.setFloor(1);
+            store.clearLevelCache();
+            sceneManager.regenerateScene({
+              character: selected,
+              presetOverride: 'overworld',
+              seed: owState?.baseSeed,
+            });
           },
           9999,
           3.0,
@@ -117,11 +135,222 @@ export function createGameLoop(
       } else {
         ctx.terrain.getGroup().visible = true;
         characters.spawnCharacters(selected);
+        // Show world announcement on first start
+        if (!ctx.gameStarted) {
+          ctx.gameStarted = true;
+          // Show current tile announcement (tile detection will fire on next frame)
+          ctx.lastOverworldTile = null;
+        }
       }
     }
 
     if ((phase === 'playing' || phase === 'player_dead') && ctx.activeCharacter) {
       const playerChar = ctx.activeCharacter;
+
+      // ── Overworld zoom in/out ──
+      const isOverworld = ctx.terrain.preset === 'overworld';
+      const owState = useGameStore.getState().overworldState;
+
+      // Track which overworld tile the player is standing on → show announcement on change
+      if (isOverworld && playerChar.isAlive && owState) {
+        const pos = playerChar.getPosition();
+        const standingTile = getTileAtWorldPos(pos.x, pos.z);
+        if (standingTile !== null && standingTile !== ctx.lastOverworldTile) {
+          ctx.lastOverworldTile = standingTile;
+          const tileDef = owState.tiles[standingTile];
+          const regionName = tileDef.label || 'Unknown Lands';
+          const styleName = tileDef.heightmapStyle.charAt(0).toUpperCase() + tileDef.heightmapStyle.slice(1);
+          const palName = tileDef.paletteName.charAt(0).toUpperCase() + tileDef.paletteName.slice(1);
+          useGameStore.getState().setZoneAnnouncement({ title: regionName, subtitle: `${palName} ${styleName}` });
+        }
+      }
+
+      // E or M on overworld → zoom into tile
+      if (isOverworld && (ctx.cachedInputState.interact || ctx.cachedInputState.mapKey) && playerChar.isAlive) {
+        const pos = playerChar.getPosition();
+        const tileIdx = getTileAtWorldPos(pos.x, pos.z);
+        if (tileIdx !== null && owState) {
+          const tileDef = owState.tiles[tileIdx];
+          // Compute normalized position within tile (-0.5..0.5)
+          const { cx, cz } = tileCenterWorld(tileDef.row, tileDef.col);
+          const nx = (pos.x - cx) / OW_TILE_SIZE;
+          const nz = (pos.z - cz) / OW_TILE_SIZE;
+          // Save player position, active tile, and normalized spawn in one update
+          const curOw = useGameStore.getState().overworldState!;
+          useGameStore.getState().setOverworldState({
+            ...curOw,
+            savedPlayerPos: { x: pos.x, z: pos.z, y: pos.y },
+            activeTileIndex: tileIdx,
+            zoomSpawnNorm: { nx, nz },
+            zoomSpawnFacing: playerChar.getFacing(),
+          });
+          // Fade → load full heightmap with tile's seed/palette
+          ctx.postProcess.fadeTransition(() => {
+            // Restore default camera params
+            const store = useGameStore.getState();
+            store.setCameraParam('distance', DEFAULT_CAMERA_PARAMS.distance);
+            store.setCameraParam('pitchMin', DEFAULT_CAMERA_PARAMS.pitchMin);
+            store.setCameraParam('pitchMax', DEFAULT_CAMERA_PARAMS.pitchMax);
+            store.setCameraParam('minDistance', DEFAULT_CAMERA_PARAMS.minDistance);
+            store.setCameraParam('maxDistance', DEFAULT_CAMERA_PARAMS.maxDistance);
+            store.setPaletteName(tileDef.paletteName);
+            store.setHeightmapStyle(tileDef.heightmapStyle);
+            // Show region name with biome subtitle
+            const regionName = tileDef.label || 'Unknown Lands';
+            store.setZoneName(regionName);
+            const styleName = tileDef.heightmapStyle.charAt(0).toUpperCase() + tileDef.heightmapStyle.slice(1);
+            const palName = tileDef.paletteName.charAt(0).toUpperCase() + tileDef.paletteName.slice(1);
+            store.setZoneAnnouncement({ title: regionName, subtitle: `${palName} ${styleName}` });
+            sceneManager.regenerateScene({
+              presetOverride: 'heightmap',
+              seed: tileDef.seed,
+            });
+          }, 4.0);
+          return;
+        }
+      }
+
+      // M on heightmap → return to overworld (not from inside a dungeon)
+      if (
+        ctx.terrain.preset === 'heightmap' &&
+        ctx.cachedInputState.mapKey &&
+        playerChar.isAlive &&
+        owState != null &&
+        owState.activeTileIndex !== null
+      ) {
+        // Save tile center as overworld position (heightmap coords don't map to overworld)
+        const tileIdx = owState.activeTileIndex!;
+        const tileRow = Math.floor(tileIdx / 3);
+        const tileCol = tileIdx % 3;
+        const { cx, cz } = tileCenterWorld(tileRow, tileCol);
+        const curOw = useGameStore.getState().overworldState!;
+        useGameStore.getState().setOverworldState({
+          ...curOw,
+          savedPlayerPos: { x: cx, y: 0, z: cz },
+        });
+        ctx.postProcess.fadeTransition(() => {
+          const store = useGameStore.getState();
+          store.setTerrainPreset('overworld');
+          store.setOverworldActiveTile(null);
+          const worldName = owState.worldName || 'Overworld';
+          store.setZoneName(worldName);
+          // Reset tile tracking so tile announcement fires on next frame
+          ctx.lastOverworldTile = null;
+          sceneManager.regenerateScene({
+            presetOverride: 'overworld',
+            seed: owState.baseSeed,
+          });
+        }, 4.0);
+        return;
+      }
+
+      // ── Heightmap dungeon entrance proximity + ENTER prompt ──
+      if (
+        ctx.terrain.preset === 'heightmap' &&
+        owState != null &&
+        owState.activeTileIndex !== null &&
+        phase === 'playing' &&
+        playerChar.isAlive &&
+        !ctx.exitTriggered
+      ) {
+        const activeTile = owState.activeTileIndex;
+        const tileDef = owState.tiles[activeTile];
+        const groundSize = ctx.terrain.getGroundSize();
+        const pPos = playerChar.getPosition();
+        const enterRadius = 1.2;
+
+        // Find nearest un-cleared dungeon POI in range
+        let nearestPoi: POIDef | null = null;
+        let nearestDist = Infinity;
+        let nearestWx = 0, nearestWz = 0;
+        for (const poi of tileDef.pois) {
+          if (poi.type !== 'dungeon') continue;
+          if (owState.clearedDungeons.includes(poi.poiSeed)) continue;
+          const wx = poi.nx * groundSize;
+          const wz = poi.nz * groundSize;
+          const dx = pPos.x - wx;
+          const dz = pPos.z - wz;
+          const dist = Math.sqrt(dx * dx + dz * dz);
+          if (dist < enterRadius && dist < nearestDist) {
+            nearestPoi = poi;
+            nearestDist = dist;
+            nearestWx = wx;
+            nearestWz = wz;
+          }
+        }
+
+        if (nearestPoi) {
+          // Show/update ENTER prompt
+          if (!ctx.dungeonEnterPrompt) {
+            ctx.dungeonEnterPrompt = createTextLabel('[ E ]', {
+              color: '#ffdd66',
+              fontSize: 36,
+              height: 0.3,
+              depthTest: false,
+              renderOrder: 950,
+            });
+            ctx.scene.add(ctx.dungeonEnterPrompt);
+          }
+          const promptY = ctx.terrain.getFloorY(nearestWx, nearestWz) + 1.6;
+          ctx.dungeonEnterPrompt.position.set(nearestWx, promptY, nearestWz);
+          // Pulse opacity
+          const pulse = 0.6 + 0.4 * Math.sin(performance.now() * 0.005);
+          (ctx.dungeonEnterPrompt.material as THREE.SpriteMaterial).opacity = pulse;
+          ctx.dungeonEnterPrompt.visible = true;
+          ctx.dungeonEnterPromptTarget = { x: nearestWx, y: promptY, z: nearestWz };
+
+          // E key → enter dungeon
+          if (ctx.cachedInputState.interact) {
+            ctx.exitTriggered = true;
+            // Hide prompt
+            ctx.dungeonEnterPrompt.visible = false;
+            // Store pending dungeon info
+            const curOw = useGameStore.getState().overworldState!;
+            const skulls = nearestPoi.skulls ?? 1;
+            const floorCount = nearestPoi.floorCount ?? 1;
+            useGameStore.getState().setOverworldState({
+              ...curOw,
+              pendingPoiDungeon: {
+                poiSeed: nearestPoi.poiSeed,
+                name: nearestPoi.name,
+                skulls,
+                floorCount,
+                returnNorm: { nx: nearestPoi.nx, nz: nearestPoi.nz },
+                tileIndex: activeTile,
+              },
+            });
+            // Build & register story recipe, then enter dungeon
+            const recipeName = buildStoryRecipe(nearestPoi.poiSeed, floorCount, nearestPoi.name, skulls);
+            const store = useGameStore.getState();
+            store.setTerrainPreset('voxelDungeon');
+            store.setProgressionRecipe(recipeName);
+            store.setFloor(1);
+            // Pre-apply floor config so store has correct dungeon layout
+            sceneManager.applyFloorConfig(1, false, 'voxelDungeon');
+            store.setZoneName(nearestPoi.name);
+            store.setZoneAnnouncement({
+              title: nearestPoi.name,
+              subtitle: generateDungeonFloorSubtitle(nearestPoi.poiSeed, 1, floorCount),
+            });
+            ctx.postProcess.fadeTransition(() => {
+              ctx.exitTriggered = false;
+              sceneManager.regenerateScene({
+                presetOverride: 'voxelDungeon',
+                seed: nearestPoi!.poiSeed,
+              });
+            }, 4.0);
+          }
+        } else {
+          // Out of range — hide prompt
+          if (ctx.dungeonEnterPrompt) {
+            ctx.dungeonEnterPrompt.visible = false;
+            ctx.dungeonEnterPromptTarget = null;
+          }
+        }
+      } else if (ctx.dungeonEnterPrompt) {
+        ctx.dungeonEnterPrompt.visible = false;
+        ctx.dungeonEnterPromptTarget = null;
+      }
 
       // Seppuku
       if (ctx.cachedInputState.seppuku && phase === 'playing' && playerChar.isAlive) {
@@ -641,10 +870,7 @@ export function createGameLoop(
           },
           {
             getGroundY: (x: number, z: number) => ctx.terrain.getTerrainYNoProps(x, z),
-            terrainColliders: [
-              ctx.terrain.getBoxGroup(),
-              ...(ctx.terrain.getTerrainMesh() ? [ctx.terrain.getTerrainMesh()!] : []),
-            ],
+            terrainColliders: ctx.terrain.getProjectileColliders(),
             excludeObjects: ctx.terrain.getOpenDoorObjects(),
             onPropHit: ctx.propDestructionSystem
               ? (entity, pos) => ctx.propDestructionSystem!.handleProjectileHit(entity)
@@ -674,7 +900,7 @@ export function createGameLoop(
 
       // Sync light preset + day cycle
       const preset = useGameStore.getState().lightPreset;
-      const isExterior = ctx.terrain.preset === 'heightmap';
+      const isExterior = ctx.terrain.preset === 'heightmap' || ctx.terrain.preset === 'overworld';
       ctx.currentLightPreset = preset;
       ctx.lastIsExterior = isExterior;
 
@@ -690,9 +916,12 @@ export function createGameLoop(
           ctx.sunDebugHelper = null;
         }
       } else {
-        // Advance day cycle if enabled
+        // Advance day cycle if enabled (overworld uses fixed daytime)
         let timeOfDay = store.timeOfDay;
-        if (store.dayCycleEnabled) {
+        if (isOverworld) {
+          timeOfDay = 10;
+          useGameStore.setState({ timeOfDay });
+        } else if (store.dayCycleEnabled) {
           const isNight = timeOfDay >= 18 || timeOfDay < 6;
           const speedMul = (store.fastNights && isNight) ? 2.0 : 1.0;
           timeOfDay = (timeOfDay + dt * store.dayCycleSpeed * speedMul) % 24;
@@ -736,6 +965,13 @@ export function createGameLoop(
 
       setDebugProjectileStick(useGameStore.getState().debugProjectileStick);
 
+      // Sync debris debug visualization
+      const debugDebris = useGameStore.getState().debugDebris;
+      if (debugDebris !== ctx.currentDebugDebris) {
+        ctx.currentDebugDebris = debugDebris;
+        ctx.terrain.showDebrisDebug(debugDebris);
+      }
+
       // Sync room labels
       const roomLabels = useGameStore.getState().roomLabels;
       if (roomLabels !== ctx.currentRoomLabels) {
@@ -744,7 +980,26 @@ export function createGameLoop(
       }
 
       // Camera follow
-      if (ctx.debugLadderIndex >= 0) {
+      if (isOverworld) {
+        // Follow character on XZ, fixed Y, clamped so map edges stay in viewport
+        const charPos = ctx.activeCharacter.getPosition();
+        const cam = ctx.cam.camera;
+        const halfMap = OW_TOTAL_SIZE / 2;
+
+        // Compute visible half-extents at ground plane from camera frustum
+        const dist = ctx.cam.getDistance();
+        const pitch = -ctx.cam.getAngleX(); // angleX is negative (looking down)
+        const vFov = (cam.fov * Math.PI) / 180;
+        const visibleH = 2 * dist * Math.sin(pitch) * Math.tan(vFov / 2);
+        const visibleW = visibleH * cam.aspect;
+        // Margin: how far camera center can move before map edge enters viewport
+        const marginX = Math.max(0, halfMap - visibleW / 2);
+        const marginZ = Math.max(0, halfMap - visibleH / 2);
+
+        const cx = Math.max(-marginX, Math.min(marginX, charPos.x));
+        const cz = Math.max(-marginZ, Math.min(marginZ, charPos.z));
+        ctx.cam.setTarget(cx, -0.1, cz);
+      } else if (ctx.debugLadderIndex >= 0) {
         const ladders = ctx.terrain.getLadderDefs();
         const l = ladders[ctx.debugLadderIndex];
         if (l) {
@@ -912,9 +1167,11 @@ export function createGameLoop(
       }
 
       const entrancePortalPos = ctx.terrain.getEntrancePortalPosition();
+      const canRetreat = useGameStore.getState().floor > 1 ||
+        !!useGameStore.getState().overworldState?.pendingPoiDungeon;
       if (
         entrancePortalPos && !ctx.exitTriggered && ctx.portalCooldown <= 0 &&
-        ctx.activeCharacter && useGameStore.getState().floor > 1
+        ctx.activeCharacter && canRetreat
       ) {
         const edx = activePos.x - entrancePortalPos.x;
         const edz = activePos.z - entrancePortalPos.z;

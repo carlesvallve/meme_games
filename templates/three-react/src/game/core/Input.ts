@@ -8,6 +8,10 @@ export interface InputState {
   pause: boolean;
   cameraSnap: boolean;
   seppuku: boolean;
+  /** M key — return to overworld map */
+  mapKey: boolean;
+  /** E key — interact (dungeon enter, etc.) */
+  interact: boolean;
 }
 
 export class Input {
@@ -20,11 +24,14 @@ export class Input {
   private pauseQueued = false;
   private cameraSnapQueued = false;
   private seppukuQueued = false;
+  private mapKeyQueued = false;
+  private interactQueued = false;
   private state: InputState = {
     forward: false, backward: false,
     left: false, right: false,
     action: false, cancel: false, pause: false,
-    cameraSnap: false, seppuku: false,
+    cameraSnap: false, seppuku: false, mapKey: false,
+    interact: false,
   };
 
   private touchStartX = 0;
@@ -53,6 +60,12 @@ export class Input {
       }
       if (e.code === 'Digit0') {
         this.seppukuQueued = true;
+      }
+      if (e.code === 'KeyM') {
+        this.mapKeyQueued = true;
+      }
+      if (e.code === 'KeyE') {
+        this.interactQueued = true;
       }
     };
     this.onKeyUp = (e: KeyboardEvent) => {
@@ -106,10 +119,14 @@ export class Input {
     this.state.pause = this.pauseQueued;
     this.state.cameraSnap = this.cameraSnapQueued;
     this.state.seppuku = this.seppukuQueued;
+    this.state.mapKey = this.mapKeyQueued;
+    this.state.interact = this.interactQueued;
     this.actionQueued = false;
     this.pauseQueued = false;
     this.cameraSnapQueued = false;
     this.seppukuQueued = false;
+    this.mapKeyQueued = false;
+    this.interactQueued = false;
     return { ...this.state };
   }
 

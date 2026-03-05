@@ -28,9 +28,11 @@ export class WaterSystem {
     this.ctx = ctx;
   }
 
-  /** Water plane Y. Lower for caves so only low areas flood. */
+  /** Water plane Y. Computed from heightmap data if available, otherwise default. */
   getWaterY(): number {
-    return this.ctx.preset === 'heightmap' && this.ctx.heightmapStyle === 'caves' ? -0.5 : -0.05;
+    // If heightmap computed a data-driven water level, use it
+    if (this.ctx.computedWaterY !== null) return this.ctx.computedWaterY;
+    return this.ctx.preset === 'heightmap' && this.ctx.heightmapStyle === 'caves' ? -0.5 : 0;
   }
 
   createGround(): void {

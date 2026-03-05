@@ -82,6 +82,27 @@ export class NavGrid {
     this.cells = [];
   }
 
+  /** Initialize all cells with default values (blocked, height=0).
+   *  Use this when populating cells manually instead of calling build(). */
+  initCells(): void {
+    const { width, height, cellSize, originX, originZ } = this;
+    const totalCells = width * height;
+    this.cells = new Array(totalCells);
+    for (let gz = 0; gz < height; gz++) {
+      for (let gx = 0; gx < width; gx++) {
+        const idx = gz * width + gx;
+        this.cells[idx] = {
+          gx, gz,
+          worldX: originX + (gx + 0.5) * cellSize,
+          worldZ: originZ + (gz + 0.5) * cellSize,
+          surfaceHeight: 0,
+          blocked: true,
+          passable: 0,
+        };
+      }
+    }
+  }
+
   build(boxes: ReadonlyArray<AABBBox>, stepHeight: number, capsuleRadius: number): void {
     this.stepHeight = stepHeight;
     this.navLinks.clear();
@@ -626,6 +647,72 @@ export class NavGrid {
           }
 
           mask |= 1 << dir;
+        }
+        cell.passable = mask;
+      }
+    }
+  }
+
+  /** Block nav cells that overlap with tall debris boxes (height > stepHeight above surface). */
+  applyDebrisBlocking(debris: ReadonlyArray<{ x: number; z: number; halfW: number; halfD: number; height: number; rotation?: number }>): void {
+    const { width, height, cellSize, originX, originZ } = this;
+    const stepH = this.stepHeight;
+    for (const box of debris) {
+      // Compute AABB that encloses the possibly-rotated box (for broad-phase cell scan)
+      let scanHW = box.halfW, scanHD = box.halfD;
+      if (box.rotation) {
+        const cos = Math.cos(box.rotation);
+        const sin = Math.sin(box.rotation);
+        scanHW = Math.abs(box.halfW * cos) + Math.abs(box.halfD * sin);
+        scanHD = Math.abs(box.halfW * sin) + Math.abs(box.halfD * cos);
+      }
+      const minGX = Math.max(0, Math.floor((box.x - scanHW - originX) / cellSize - 0.5));
+      const maxGX = Math.min(width - 1, Math.ceil((box.x + scanHW - originX) / cellSize + 0.5));
+      const minGZ = Math.max(0, Math.floor((box.z - scanHD - originZ) / cellSize - 0.5));
+      const maxGZ = Math.min(height - 1, Math.ceil((box.z + scanHD - originZ) / cellSize + 0.5));
+
+      // Precompute inverse rotation for OBB test
+      const hasRot = !!box.rotation;
+      const cosInv = hasRot ? Math.cos(-box.rotation!) : 1;
+      const sinInv = hasRot ? Math.sin(-box.rotation!) : 0;
+
+      for (let gz = minGZ; gz <= maxGZ; gz++) {
+        for (let gx = minGX; gx <= maxGX; gx++) {
+          const cell = this.cells[gz * width + gx];
+          if (cell.blocked) continue;
+          // Transform cell center into box-local space
+          let dx = cell.worldX - box.x;
+          let dz = cell.worldZ - box.z;
+          if (hasRot) {
+            const lx = dx * cosInv + dz * sinInv;
+            const lz = -dx * sinInv + dz * cosInv;
+            dx = lx; dz = lz;
+          }
+          if (Math.abs(dx) < box.halfW + cellSize * 0.3 &&
+              Math.abs(dz) < box.halfD + cellSize * 0.3) {
+            if (box.height - cell.surfaceHeight > stepH) {
+              cell.blocked = true;
+              cell.passable = 0;
+            }
+          }
+        }
+      }
+    }
+
+    // Recompute passability for neighbors of newly blocked cells
+    for (let gz = 0; gz < height; gz++) {
+      for (let gx = 0; gx < width; gx++) {
+        const cell = this.cells[gz * width + gx];
+        if (cell.blocked) continue;
+        let mask = cell.passable;
+        for (let dir = 0; dir < 8; dir++) {
+          if (!(mask & (1 << dir))) continue;
+          const ngx = gx + DIR_DGX[dir];
+          const ngz = gz + DIR_DGZ[dir];
+          if (ngx < 0 || ngx >= width || ngz < 0 || ngz >= height) continue;
+          if (this.cells[ngz * width + ngx].blocked) {
+            mask &= ~(1 << dir);
+          }
         }
         cell.passable = mask;
       }

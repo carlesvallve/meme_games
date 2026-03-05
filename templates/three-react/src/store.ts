@@ -3,6 +3,7 @@ import type { CharacterType, SpeechBubbleData } from './types';
 import { Layer } from './game/core/Entity';
 import type { TerrainPreset } from './game/terrain';
 import type { HeightmapStyle } from './game/terrain';
+import type { OverworldState } from './game/overworld';
 import { DEFAULT_CHARACTER_PARAMS } from './game/character';
 import type {
   MovementParams,
@@ -51,6 +52,8 @@ export interface EnemyParams {
   chaseRange: number;
   /** Damage the player deals to enemies (attacker-side). */
   playerDamage: number;
+  /** Difficulty multiplier (0 = trivial, 1 = normal, 2 = hard). Scales density, spawn rate, and enemy speed. */
+  difficulty: number;
   /** Enemy density: ratio of enemies per walkable nav cell (e.g. 0.02 = 1 enemy per 50 cells). */
   enemyDensity: number;
   /** Hard cap on total enemies (prevents performance issues on large maps). */
@@ -86,9 +89,10 @@ export const DEFAULT_ENEMY_PARAMS: EnemyParams = {
   },
   chaseRange: 12,
   playerDamage: 2,
+  difficulty: 1.0,
   enemyDensity: 0.02,
   maxEnemies: 32,
-  spawnInterval: 0,
+  spawnInterval: 20,
   allowedTypes: [],
   regenDelay: 5.0,
   regenRate: 0.1,
@@ -233,6 +237,7 @@ export const DEFAULT_SCENE_SETTINGS = {
   natureEnabled: true,
   useBiomes: true,
   debugBiomes: false,
+  debugDebris: false,
   debugProjectileStick: false,
   forceStairs: false,
   timeOfDay: 10,
@@ -273,6 +278,7 @@ interface SavedSettings {
   natureEnabled?: boolean;
   useBiomes?: boolean;
   debugBiomes?: boolean;
+  debugDebris?: boolean;
   debugProjectileStick?: boolean;
   forceStairs?: boolean;
   timeOfDay?: number;
@@ -289,6 +295,7 @@ interface SavedSettings {
   characterPushEnabled?: boolean;
   particleToggles?: ParticleToggles;
   enemyParams?: EnemyParams;
+  enemiesEnabled?: boolean;
   /** @deprecated Renamed to characterParams; kept for migration. */
   playerParams?: MovementParams;
 }
@@ -328,6 +335,7 @@ function saveSettings(): void {
     natureEnabled: s.natureEnabled,
     useBiomes: s.useBiomes,
     debugBiomes: s.debugBiomes,
+    debugDebris: s.debugDebris,
     debugProjectileStick: s.debugProjectileStick,
     forceStairs: s.forceStairs,
     timeOfDay: s.timeOfDay,
@@ -344,6 +352,7 @@ function saveSettings(): void {
     characterPushEnabled: s.characterPushEnabled,
     particleToggles: s.particleToggles,
     enemyParams: s.enemyParams,
+    enemiesEnabled: s.enemiesEnabled,
   };
   try {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(data));
@@ -412,6 +421,8 @@ interface GameStore {
   setUseBiomes: (on: boolean) => void;
   debugBiomes: boolean;
   setDebugBiomes: (on: boolean) => void;
+  debugDebris: boolean;
+  setDebugDebris: (on: boolean) => void;
   debugProjectileStick: boolean;
   setDebugProjectileStick: (on: boolean) => void;
   forceStairs: boolean;
@@ -544,6 +555,12 @@ interface GameStore {
   activeCharacterColor: string | null;
   setActiveCharacter: (name: string | null, color: string | null) => void;
 
+  /** Overworld map state (null when not on overworld) */
+  overworldState: OverworldState | null;
+  setOverworldState: (state: OverworldState | null) => void;
+  setOverworldActiveTile: (index: number | null) => void;
+  setOverworldPlayerPos: (pos: { x: number; z: number; y: number } | null) => void;
+
   heightmapThumb: string | null;
   setHeightmapThumb: (url: string | null) => void;
   walkableCells: number;
@@ -633,6 +650,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
   setUseBiomes: (useBiomes) => set({ useBiomes }),
   debugBiomes: saved.debugBiomes ?? DEFAULT_SCENE_SETTINGS.debugBiomes,
   setDebugBiomes: (debugBiomes) => set({ debugBiomes }),
+  debugDebris: saved.debugDebris ?? DEFAULT_SCENE_SETTINGS.debugDebris,
+  setDebugDebris: (debugDebris) => set({ debugDebris }),
   debugProjectileStick:
     saved.debugProjectileStick ?? DEFAULT_SCENE_SETTINGS.debugProjectileStick,
   setDebugProjectileStick: (debugProjectileStick) =>
@@ -697,7 +716,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       },
     })),
 
-  enemiesEnabled: true,
+  enemiesEnabled: saved.enemiesEnabled ?? true,
   setEnemiesEnabled: (enemiesEnabled) => set({ enemiesEnabled }),
 
   characterPushEnabled: saved.characterPushEnabled ?? true,
@@ -815,6 +834,21 @@ export const useGameStore = create<GameStore>((set, get) => ({
   activeCharacterColor: null,
   setActiveCharacter: (activeCharacterName, activeCharacterColor) =>
     set({ activeCharacterName, activeCharacterColor }),
+
+  overworldState: null,
+  setOverworldState: (overworldState) => set({ overworldState }),
+  setOverworldActiveTile: (index) =>
+    set((s) => ({
+      overworldState: s.overworldState
+        ? { ...s.overworldState, activeTileIndex: index }
+        : null,
+    })),
+  setOverworldPlayerPos: (pos) =>
+    set((s) => ({
+      overworldState: s.overworldState
+        ? { ...s.overworldState, savedPlayerPos: pos }
+        : null,
+    })),
 
   heightmapThumb: null,
   setHeightmapThumb: (heightmapThumb) => set({ heightmapThumb }),

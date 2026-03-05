@@ -299,6 +299,7 @@ function ActiveEffects({ effects }: { effects: ActivePotionDisplay[] }) {
 /** Zone announcement overlay — fades in, holds, fades out */
 function ZoneAnnouncement() {
   const announcement = useGameStore((s) => s.zoneAnnouncement);
+  const terrainPreset = useGameStore((s) => s.terrainPreset);
   const [visible, setVisible] = useState(false);
   const [opacity, setOpacity] = useState(0);
 
@@ -326,6 +327,8 @@ function ZoneAnnouncement() {
 
   if (!visible || !announcement) return null;
 
+  const isOverworld = terrainPreset === 'overworld';
+
   return (
     <div
       style={{
@@ -333,15 +336,15 @@ function ZoneAnnouncement() {
         top: 0,
         left: 0,
         right: 0,
-        bottom: 0,
+        ...(isOverworld ? {} : { bottom: 0, justifyContent: 'center', paddingBottom: '8%' }),
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
-        justifyContent: 'center',
         pointerEvents: 'none',
         opacity,
         transition: 'opacity 0.8s ease-in-out',
         zIndex: 50,
+        ...(isOverworld ? { paddingTop: '6%' } : {}),
       }}
     >
       <div
@@ -392,10 +395,43 @@ export function HUD() {
   const activePotionEffects = useGameStore((s) => s.activePotionEffects);
   const floor = useGameStore((s) => s.floor);
   const zoneName = useGameStore((s) => s.zoneName);
+  const terrainPreset = useGameStore((s) => s.terrainPreset);
+  const isDungeon = terrainPreset === 'voxelDungeon';
+  const isOverworld = terrainPreset === 'overworld';
+  const worldName = useGameStore((s) => s.overworldState?.worldName);
 
   return (
     <>
       <ZoneAnnouncement />
+      {isOverworld && worldName && (
+        <div
+          style={{
+            position: 'absolute',
+            bottom: 16,
+            left: 16,
+            pointerEvents: 'none',
+            zIndex: 40,
+          }}
+        >
+          <div style={{
+            fontSize: 16,
+            fontWeight: 700,
+            color: '#fff',
+            textShadow: '0 1px 6px rgba(0,0,0,0.9)',
+            letterSpacing: 1,
+          }}>
+            {worldName}
+          </div>
+          <div style={{
+            fontSize: 11,
+            color: 'rgba(255,255,255,0.5)',
+            textShadow: '0 1px 4px rgba(0,0,0,0.8)',
+            marginTop: 3,
+          }}>
+            WASD to move &middot; E to explore
+          </div>
+        </div>
+      )}
       <div
         style={{
           position: 'absolute',
@@ -484,20 +520,22 @@ export function HUD() {
             >
               {zoneName}
             </span>
-            <span
-              style={{
-                fontSize: 13,
-                fontWeight: 700,
-                letterSpacing: 1,
-                color: '#aaccff',
-                background: 'rgba(100,150,255,0.15)',
-                border: '1px solid rgba(100,150,255,0.3)',
-                borderRadius: 4,
-                padding: '1px 6px',
-              }}
-            >
-              F{floor}
-            </span>
+            {isDungeon && (
+              <span
+                style={{
+                  fontSize: 13,
+                  fontWeight: 700,
+                  letterSpacing: 1,
+                  color: '#aaccff',
+                  background: 'rgba(100,150,255,0.15)',
+                  border: '1px solid rgba(100,150,255,0.3)',
+                  borderRadius: 4,
+                  padding: '1px 6px',
+                }}
+              >
+                F{floor}
+              </span>
+            )}
           </div>
           {activeCharacterName && (
             <div
