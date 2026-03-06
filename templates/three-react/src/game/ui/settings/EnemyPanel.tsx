@@ -246,11 +246,6 @@ export function EnemyPanel() {
           value={ep.melee.showSlashEffect}
           onChange={(v) => setMelee('showSlashEffect', v)}
         />
-        <Toggle
-          label='Exhaustion'
-          value={ep.melee.exhaustionEnabled}
-          onChange={(v) => setMelee('exhaustionEnabled', v)}
-        />
       </Section>
 
       <Section label='Ranged' accent={accent}>
@@ -260,22 +255,15 @@ export function EnemyPanel() {
           onChange={(v) => setRanged('enabled', v)}
         />
         {ep.ranged.enabled && (
-          <>
-            <Slider
-              label='Knockback'
-              value={ep.ranged.knockback}
-              min={0}
-              max={15}
-              step={0.5}
-              accent={accent}
-              onChange={(v) => setRanged('knockback', v)}
-            />
-            <Toggle
-              label='Exhaustion'
-              value={ep.ranged.exhaustionEnabled}
-              onChange={(v) => setRanged('exhaustionEnabled', v)}
-            />
-          </>
+          <Slider
+            label='Knockback'
+            value={ep.ranged.knockback}
+            min={0}
+            max={15}
+            step={0.5}
+            accent={accent}
+            onChange={(v) => setRanged('knockback', v)}
+          />
         )}
       </Section>
 

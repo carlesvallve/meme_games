@@ -25,9 +25,6 @@ interface FallingItem {
   bounceCount: number;
 }
 
-/** Shift arc origin behind character so it covers targets slightly inside/behind the mesh. */
-const ARC_ORIGIN_OFFSET = 0.15;
-
 function isInAttackArc(
   ax: number, ay: number, az: number, facing: number,
   tx: number, ty: number, tz: number,
@@ -35,14 +32,12 @@ function isInAttackArc(
 ): boolean {
   const fwdX = -Math.sin(facing);
   const fwdZ = -Math.cos(facing);
-  const ox = ax - fwdX * ARC_ORIGIN_OFFSET;
-  const oz = az - fwdZ * ARC_ORIGIN_OFFSET;
-  const dx = tx - ox;
+  const dx = tx - ax;
   const dy = ty - ay;
-  const dz = tz - oz;
+  const dz = tz - az;
   if (Math.abs(dy) > MELEE_Y_TOLERANCE) return false;
   const dist2D = Math.sqrt(dx * dx + dz * dz);
-  if (dist2D > reach + ARC_ORIGIN_OFFSET) return false;
+  if (dist2D > reach) return false;
   if (dist2D < 0.001) return true;
   const dot = fwdX * (dx / dist2D) + fwdZ * (dz / dist2D);
   return dot >= Math.cos(halfAngle);

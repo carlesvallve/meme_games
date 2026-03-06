@@ -14,8 +14,8 @@ export interface MeleeParams {
   knockback: number;
   /** Show slash arc VFX on attacks. */
   showSlashEffect: boolean;
-  /** Whether combo exhaustion is enabled. */
-  exhaustionEnabled: boolean;
+  /** Enable hit-stop (brief freeze on impact). */
+  hitstopEnabled: boolean;
 }
 
 export interface RangedParams {
@@ -23,8 +23,6 @@ export interface RangedParams {
   autoTarget: boolean;
   /** Knockback impulse speed inflicted on hit. */
   knockback: number;
-  /** Whether combo exhaustion is enabled. */
-  exhaustionEnabled: boolean;
 }
 
 export interface MovementParams {
@@ -98,14 +96,14 @@ export const DEFAULT_CHARACTER_PARAMS: MovementParams = {
   actionHoldTime: 0.12,
   lungeDistance: 0.3,
   lungeDuration: 0.15,
-  exhaustDuration: 1.0,
+  exhaustDuration: 0.25,
   footIKEnabled: false,
   // loot / VFX
   magnetRadius: 0.7,
   magnetSpeed: 16,
   // combat modes
-  melee: { autoTarget: true, knockback: 5, showSlashEffect: true, exhaustionEnabled: false },
-  ranged: { autoTarget: true, knockback: 2.5, exhaustionEnabled: false },
+  melee: { autoTarget: true, knockback: 5, showSlashEffect: true, hitstopEnabled: true },
+  ranged: { autoTarget: true, knockback: 2.5 },
 };
 
 // ── Physics ─────────────────────────────────────────────────────────────
@@ -153,6 +151,13 @@ const LUNGE_BY_ARCHETYPE: Partial<Record<string, [number, number]>> = {
   amazon:     [0.40, 0.14],  // thrust — more forward
   rogue:      [0.30, 0.15],  // short — default
   monk:       [0.30, 0.15],  // short — default
+  // Ranged — no lunge
+  archer:      [0, 0.15],
+  mage:        [0, 0.15],
+  priestess:   [0, 0.15],
+  alchemist:   [0, 0.15],
+  necromancer: [0, 0.15],
+  bard:        [0, 0.15],
 };
 
 const DEFAULT_LUNGE: [number, number] = [0.30, 0.15];
@@ -160,6 +165,23 @@ const DEFAULT_LUNGE: [number, number] = [0.30, 0.15];
 /** Get lunge [distance, duration] for a character archetype. */
 export function getLungeConfig(archetype: string): [number, number] {
   return LUNGE_BY_ARCHETYPE[archetype] ?? DEFAULT_LUNGE;
+}
+
+/** Per-archetype exhaustion duration (seconds of recovery after a 3-hit combo). */
+const EXHAUST_BY_ARCHETYPE: Partial<Record<string, number>> = {
+  knight:     0.55,
+  barbarian:  0.45,
+  adventurer: 0.35,
+  amazon:     0.30,
+  rogue:      0.18,
+  monk:       0.15,
+};
+
+const DEFAULT_EXHAUST = 0.35;
+
+/** Get exhaustion duration for a character archetype. */
+export function getExhaustDuration(archetype: string): number {
+  return EXHAUST_BY_ARCHETYPE[archetype] ?? DEFAULT_EXHAUST;
 }
 
 /** Default hop frequency (hops per second while walking) */

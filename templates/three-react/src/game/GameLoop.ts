@@ -429,12 +429,6 @@ export function createGameLoop(
       // DEBUG: log once per second
       // DEBUG edge travel
       if (ctx.terrain.preset === 'heightmap' && Math.random() < 0.02) {
-        const _p = playerChar.getPosition();
-        const _gs = ctx.terrain.getGroundSize();
-        const _hb = _gs / 2 - 0.3;
-        console.log('[EdgeTravel] pos:', _p.x.toFixed(1), _p.z.toFixed(1),
-          'ground:', _gs, 'halfBound:', _hb.toFixed(1),
-          'owState:', !!owState, 'activeTile:', owState?.activeTileIndex);
       }
       if (
         ctx.terrain.preset === 'heightmap' &&
@@ -635,8 +629,10 @@ export function createGameLoop(
         useGameStore.getState().setActivePotionEffects(ctx.potionSystem.getActiveEffects());
       }
 
-      // Player action on Space
-      if (phase === 'playing' && ctx.cachedInputState.action) {
+      // Player action on Space or E
+      const isAttack = ctx.cachedInputState.attack;
+      const isInteract = ctx.cachedInputState.interact;
+      if (phase === 'playing' && (isAttack || isInteract)) {
         const potionInteractRadius = playerChar.params.attackReach * 1.5;
         const pPos = playerChar.getPosition();
         const pFaceDirX = -Math.sin(playerChar.facing);
@@ -687,7 +683,7 @@ export function createGameLoop(
               });
               audioSystem.sfx('thud');
               kickedAPotion = true;
-              playerChar.startAttack(false);
+              if (isAttack) playerChar.startAttack();
             }
           }
           if (!kickedAPotion && propSys) {
@@ -723,7 +719,7 @@ export function createGameLoop(
               });
               audioSystem.sfx('thud');
               kickedAPotion = true;
-              playerChar.startAttack(false);
+              if (isAttack) playerChar.startAttack();
               break;
             }
           }
@@ -753,13 +749,13 @@ export function createGameLoop(
               kp.stopped = false;
               audioSystem.sfx('thud');
               kickedAPotion = true;
-              playerChar.startAttack(false);
+              if (isAttack) playerChar.startAttack();
               break;
             }
           }
         }
 
-        if (!lootMagnetActivated && !propMagnetActivated && !kickedAPotion) {
+        if (isAttack && !lootMagnetActivated && !propMagnetActivated && !kickedAPotion) {
           const heroId = playerChar.voxEntry?.id ?? '';
           const projConfig = getProjectileConfig(heroId);
           if (projConfig && ctx.projectileSystem) {
@@ -769,7 +765,7 @@ export function createGameLoop(
             const faceDirX = -Math.sin(facing);
             const faceDirZ = -Math.cos(facing);
             const rangedP = useGameStore.getState().characterParams.ranged;
-            if (playerChar.startAttack(rangedP.exhaustionEnabled)) {
+            if (playerChar.startAttack()) {
               const spawnX = pos.x + faceDirX * muzzle.forward;
               const spawnY = playerChar.groundY + muzzle.up;
               const spawnZ = pos.z + faceDirZ * muzzle.forward;
@@ -790,9 +786,13 @@ export function createGameLoop(
             const meleeP = useGameStore.getState().characterParams;
             if (ctx.enemySystem && meleeP.melee.autoTarget) {
               const pos = playerChar.getPosition();
+              const propTargets = ctx.propDestructionSystem
+                ? ctx.propDestructionSystem.getPropColliders()
+                : undefined;
               const aimTarget = findMeleeAimTarget(
                 pos.x, pos.z, playerChar.facing,
                 ctx.enemySystem.getVisibleEnemies(),
+                propTargets,
               );
               if (aimTarget !== null) {
                 playerChar.facing = aimTarget;
@@ -802,9 +802,58 @@ export function createGameLoop(
                     : aimTarget;
               }
             }
-            playerChar.startAttack(
-              useGameStore.getState().characterParams.melee.exhaustionEnabled,
-            );
+            const attackStarted = playerChar.startAttack();
+
+            // Cap lunge to not overshoot the nearest target in facing direction
+            if (attackStarted) {
+              const pos = playerChar.getPosition();
+              const facing = playerChar.facing;
+              const fwdX = -Math.sin(facing);
+              const fwdZ = -Math.cos(facing);
+              const stopDist = 0.3;
+              const maxLungeCheck = playerChar.params.attackReach + playerChar.params.lungeDistance;
+              let nearestTargetX: number | undefined;
+              let nearestTargetZ: number | undefined;
+              let nearestDot = Infinity;
+
+              // Check enemies
+              for (const enemy of (ctx.enemySystem?.getVisibleEnemies() ?? [])) {
+                if (!enemy.isAlive) continue;
+                const dx = enemy.mesh.position.x - pos.x;
+                const dz = enemy.mesh.position.z - pos.z;
+                const dot = dx * fwdX + dz * fwdZ;
+                if (dot > 0 && dot < maxLungeCheck && dot < nearestDot) {
+                  // Check lateral distance (within attack arc)
+                  const lateral = Math.abs(dx * fwdZ - dz * fwdX);
+                  if (lateral < 0.5) {
+                    nearestDot = dot;
+                    nearestTargetX = enemy.mesh.position.x;
+                    nearestTargetZ = enemy.mesh.position.z;
+                  }
+                }
+              }
+
+              // Check destroyable props
+              if (ctx.propDestructionSystem) {
+                for (const col of ctx.propDestructionSystem.getPropColliders()) {
+                  const dx = col.x - pos.x;
+                  const dz = col.z - pos.z;
+                  const dot = dx * fwdX + dz * fwdZ;
+                  if (dot > 0 && dot < maxLungeCheck && dot < nearestDot) {
+                    const lateral = Math.abs(dx * fwdZ - dz * fwdX);
+                    if (lateral < 0.5) {
+                      nearestDot = dot;
+                      nearestTargetX = col.x;
+                      nearestTargetZ = col.z;
+                    }
+                  }
+                }
+              }
+
+              if (nearestTargetX !== undefined && nearestTargetZ !== undefined) {
+                playerChar.capLungeToTarget(nearestTargetX, nearestTargetZ, stopDist);
+              }
+            }
           }
         }
       }

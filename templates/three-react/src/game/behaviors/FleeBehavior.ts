@@ -12,6 +12,8 @@ const WAYPOINT_REACH = 0.3;
 const FLEE_SPEED_MULT = 1.3;
 /** Safe distance (world units) — once reached, switch to hiding. */
 const SAFE_DISTANCE = 6;
+/** Max consecutive pathfind failures before giving up fleeing. */
+const MAX_PATH_FAILURES = 3;
 
 export class FleeBehavior extends Behavior {
   private movementParams: MovementParams;
@@ -27,6 +29,7 @@ export class FleeBehavior extends Behavior {
   private lastProgressX = 0;
   private lastProgressZ = 0;
   private isOnLadder = false;
+  private pathFailures = 0;
 
   constructor(ctx: BehaviorContext, movementParams: MovementParams) {
     super(ctx);
@@ -39,6 +42,7 @@ export class FleeBehavior extends Behavior {
     this.waypoints = [];
     this.waypointIndex = 0;
     this.repathTimer = 0;
+    this.pathFailures = 0;
   }
 
   getState(): FleeState {
@@ -94,21 +98,19 @@ export class FleeBehavior extends Behavior {
       this.repathAway(agent);
     }
 
+    // Too many path failures — give up fleeing, switch to chase
+    if (this.pathFailures >= MAX_PATH_FAILURES) {
+      this.state = 'fleeing';
+      agent.updateIdle(dt);
+      return 'done';
+    }
+
     // Follow waypoints
     if (this.waypointIndex < this.waypoints.length) {
       this.followPath(agent, dt);
     } else {
-      // No path — move directly away from threat
-      if (distFromThreat > 0.1) {
-        const nx = dx / distFromThreat;
-        const nz = dz / distFromThreat;
-        const mp = this.movementParams;
-        const speed = mp.speed * FLEE_SPEED_MULT;
-        agent.move(nx, nz, speed, mp.stepHeight, mp.capsuleRadius, dt, mp.slopeHeight);
-        agent.applyHop(mp.hopHeight);
-      } else {
-        agent.updateIdle(dt);
-      }
+      // No path — idle until repath finds one (don't walk into walls)
+      agent.updateIdle(dt);
     }
 
     return 'running';
@@ -146,12 +148,14 @@ export class FleeBehavior extends Behavior {
         this.waypointMeta = result.meta.slice(1);
         this.waypointIndex = 0;
         this.resetStuck(agent);
+        this.pathFailures = 0;
         return;
       }
     }
-    // All failed — clear path, direct movement will take over
+    // All angles failed
     this.waypoints = [];
     this.waypointIndex = 0;
+    this.pathFailures++;
   }
 
   private followPath(agent: BehaviorAgent, dt: number): void {
@@ -191,6 +195,7 @@ export class FleeBehavior extends Behavior {
         this.waypoints = [];
         this.waypointIndex = 0;
         this.repathTimer = 0;
+        this.pathFailures++;
         return;
       }
     }

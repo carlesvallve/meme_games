@@ -39,7 +39,12 @@ export class CharacterCombat {
   private lungeElapsed = 0;
   /** Buffered combo attack — fires when current hold finishes. */
   private comboBuffered = false;
+  /** Exhaust triggers after 3rd attack animation finishes, not immediately. */
+  private pendingExhaust = false;
   stunTimer = 0;
+
+  /** Combo damage multipliers per hit (1-indexed by attackCount). */
+  private static readonly COMBO_MULTIPLIERS = [1.0, 1.25, 1.5];
 
   // ── Regeneration ──────────────────────────────────────────────────
   /** Seconds after last damage before regen activates. */
@@ -73,10 +78,27 @@ export class CharacterCombat {
   // Lunge: push character forward during attack
   private lungeDist = 0;
   private lungeDir = { x: 0, z: 0 };
+  /** Max allowed lunge distance — capped by nearby targets to prevent passing through */
+  private lungeMaxDist = Infinity;
 
   /** Restore hunger by the given amount (clamped to maxHunger). */
   restoreHunger(amount: number): void {
     this.hunger = Math.min(this.maxHunger, this.hunger + amount);
+  }
+
+  /** Current combo damage multiplier based on attack count. */
+  get comboDamageMultiplier(): number {
+    const idx = Math.max(0, this.attackCount - 1);
+    return CharacterCombat.COMBO_MULTIPLIERS[Math.min(idx, CharacterCombat.COMBO_MULTIPLIERS.length - 1)];
+  }
+
+  /** Cap lunge so the character stops short of a target (call after startAttack). */
+  capLungeToTarget(ownerX: number, ownerZ: number, targetX: number, targetZ: number, stopDist: number): void {
+    const dx = targetX - ownerX;
+    const dz = targetZ - ownerZ;
+    const dist = Math.sqrt(dx * dx + dz * dz);
+    const maxLunge = Math.max(0, dist - stopDist);
+    this.lungeMaxDist = Math.min(this.lungeMaxDist, maxLunge);
   }
 
   consumeJustTookDamage(): boolean {
@@ -129,7 +151,7 @@ export class CharacterCombat {
     return true;
   }
 
-  startAttack(owner: CombatOwner, exhaustionEnabled = false): boolean {
+  startAttack(owner: CombatOwner): boolean {
     if (
       !this.isAlive ||
       this.exhaustTimer > 0 ||
@@ -143,12 +165,12 @@ export class CharacterCombat {
       return false;
     }
 
-    this.executeAttack(owner, false, exhaustionEnabled);
+    this.executeAttack(owner, false);
     return true;
   }
 
   /** Actually start an attack (called directly or from combo buffer). */
-  private executeAttack(owner: CombatOwner, isCombo = false, exhaustionEnabled = false): void {
+  private executeAttack(owner: CombatOwner, isCombo = false): void {
     // Reset combo if animation already returned to idle/walk (skip for buffered combos)
     if (!isCombo && owner.getVoxAnimState() !== 'action') {
       this.attackCount = 0;
@@ -161,8 +183,8 @@ export class CharacterCombat {
     this.lungeElapsed = 0;
     this.attackCount++;
 
-    if (exhaustionEnabled && this.attackCount >= 7) {
-      this.exhaustTimer = owner.params.exhaustDuration;
+    if (this.attackCount >= 3) {
+      this.pendingExhaust = true;
       this.attackCount = 0;
     }
 
@@ -177,6 +199,7 @@ export class CharacterCombat {
     this.lungeDir.x = -Math.sin(facing);
     this.lungeDir.z = -Math.cos(facing);
     this.lungeDist = 0;
+    this.lungeMaxDist = Infinity;
 
     owner.playActionAnim();
   }
@@ -274,6 +297,11 @@ export class CharacterCombat {
           owner.mesh.scale.x = Math.abs(owner.mesh.scale.x);
           this.comboFlipped = false;
           this.lungeDist = 0;
+          // Apply exhaust after 3rd combo attack finishes
+          if (this.pendingExhaust) {
+            this.pendingExhaust = false;
+            this.exhaustTimer = owner.params.exhaustDuration;
+          }
         }
       } else {
         // Lunge forward during attack
@@ -290,6 +318,8 @@ export class CharacterCombat {
           const target = owner.params.lungeDistance * 0.9;
           this.lungeDist = owner.params.lungeDistance + (target - owner.params.lungeDistance) * (lt * lt);
         }
+        // Cap lunge to avoid passing through targets
+        if (this.lungeDist > this.lungeMaxDist) this.lungeDist = this.lungeMaxDist;
         const lungeDelta = this.lungeDist - prevLunge;
         if (Math.abs(lungeDelta) > 0.0001) {
           const oldX = owner.mesh.position.x;
