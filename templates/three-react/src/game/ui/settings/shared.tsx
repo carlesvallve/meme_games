@@ -147,6 +147,34 @@ export function Toggle({ label, value, onChange }: { label: string; value: boole
   );
 }
 
+/* ── Single-Select Dropdown ── */
+
+export function Select({ label, value, options, accent = '#6af', onChange }: {
+  label: string;
+  value: string;
+  options: string[];
+  accent?: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <div style={rowStyle}>
+      <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>{label}</span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        style={{
+          ...selectStyle,
+          ['--thumb-color' as any]: accent,
+        }}
+      >
+        {options.map((opt) => (
+          <option key={opt} value={opt}>{opt}</option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 /* ── Multi-Select Dropdown ── */
 
 export function MultiSelect({ label, options, selected, allLabel = 'All', accent = '#6af', direction = 'down', onChange }: {

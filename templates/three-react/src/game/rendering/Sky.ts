@@ -160,7 +160,7 @@ export class ProceduralSky {
       depthWrite: false,
     });
 
-    const geo = new THREE.SphereGeometry(500, 32, 16);
+    const geo = new THREE.SphereGeometry(150, 32, 16);
     this.mesh = new THREE.Mesh(geo, this.material);
     this.mesh.name = 'proceduralSky';
     this.mesh.frustumCulled = false;
