@@ -10,12 +10,11 @@ import type { LootSystem } from '../combat/Loot';
 import { audioSystem } from '../../utils/AudioSystem';
 import { getArchetype, getSlashStyle } from '../character';
 import { findPath } from '../pathfinding';
+import { useGameStore } from '../../store';
 
 // ── Attack arc helper ────────────────────────────────────────────────
 
 const MELEE_Y_TOLERANCE = 1.0;
-/** Shift arc origin behind character so it covers targets slightly inside/behind the mesh. */
-const ARC_ORIGIN_OFFSET = 0.15;
 
 export function isInAttackArc(
   attackerX: number,
@@ -30,17 +29,15 @@ export function isInAttackArc(
 ): boolean {
   const fwdX = -Math.sin(attackerFacing);
   const fwdZ = -Math.cos(attackerFacing);
-  const ox = attackerX - fwdX * ARC_ORIGIN_OFFSET;
-  const oz = attackerZ - fwdZ * ARC_ORIGIN_OFFSET;
 
-  const dx = targetX - ox;
+  const dx = targetX - attackerX;
   const dy = targetY - attackerY;
-  const dz = targetZ - oz;
+  const dz = targetZ - attackerZ;
 
   if (Math.abs(dy) > MELEE_Y_TOLERANCE) return false;
 
   const dist2D = Math.sqrt(dx * dx + dz * dz);
-  if (dist2D > reach + ARC_ORIGIN_OFFSET) return false;
+  if (dist2D > reach) return false;
   if (dist2D < 0.001) return true;
 
   const dot = fwdX * (dx / dist2D) + fwdZ * (dz / dist2D);
@@ -230,7 +227,7 @@ export class EnemyCombat {
     playerChar.facing = Math.atan2(-hitDirX, -hitDirZ);
     playerChar.mesh.rotation.y = playerChar.facing;
 
-    playerChar.startAttack(false);
+    playerChar.startAttack();
     audioSystem.sfx('slash');
     if (showSlashEffect) {
       const critSlashStyle = playerChar.voxEntry
@@ -247,7 +244,7 @@ export class EnemyCombat {
       this.vfx.pushFloatingLabel(ex, ey + 0.3, ez, 'CLANK!', '#ccddff', 'md');
       const callbacks = this.getImpactCallbacks();
       if (callbacks) {
-        callbacks.onHitstop(0.08);
+        if (useGameStore.getState().characterParams.melee.hitstopEnabled) callbacks.onHitstop(0.08);
         callbacks.onCameraShake(0.15, 0.12, -hitDirX, -hitDirZ);
       }
     } else {
@@ -283,7 +280,7 @@ export class EnemyCombat {
         const callbacks = this.getImpactCallbacks();
         if (callbacks) {
           const isKill = !target.isAlive;
-          callbacks.onHitstop(isKill ? 0.12 : 0.08);
+          if (useGameStore.getState().characterParams.melee.hitstopEnabled) callbacks.onHitstop(isKill ? 0.12 : 0.08);
           callbacks.onCameraShake(
             isKill ? 0.25 : 0.15,
             isKill ? 0.25 : 0.15,

@@ -141,9 +141,9 @@ export function PlayerPanel() {
           onChange={(v) => setMeleeParam('showSlashEffect', v)}
         />
         <Toggle
-          label='Exhaustion'
-          value={characterParams.melee.exhaustionEnabled}
-          onChange={(v) => setMeleeParam('exhaustionEnabled', v)}
+          label='Hitstop'
+          value={characterParams.melee.hitstopEnabled}
+          onChange={(v) => setMeleeParam('hitstopEnabled', v)}
         />
       </Section>
 
@@ -160,11 +160,6 @@ export function PlayerPanel() {
           max={15}
           step={0.5}
           onChange={(v) => setRangedParam('knockback', v)}
-        />
-        <Toggle
-          label='Exhaustion'
-          value={characterParams.ranged.exhaustionEnabled}
-          onChange={(v) => setRangedParam('exhaustionEnabled', v)}
         />
         <Toggle
           label='Debug'

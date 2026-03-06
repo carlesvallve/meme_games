@@ -9,7 +9,7 @@ import {
   randomInRange,
   getCharacterAnimScale,
 } from './VoxCharacterDB';
-import { getActionHoldTime, getLungeConfig } from './CharacterSettings';
+import { getActionHoldTime, getLungeConfig, getExhaustDuration } from './CharacterSettings';
 import { Entity, Layer } from '../core/Entity';
 import type { Environment } from '../environment';
 import type { NavGrid } from '../pathfinding';
@@ -144,6 +144,9 @@ get isAttacking(): boolean {
   }
   set attackCount(v: number) {
     this.combat.attackCount = v;
+  }
+  get comboDamageMultiplier(): number {
+    return this.combat.comboDamageMultiplier;
   }
   get exhaustTimer(): number {
     return this.combat.exhaustTimer;
@@ -450,6 +453,7 @@ get isAttacking(): boolean {
 
     // Per-character action hold time and lunge
     this.params.actionHoldTime = getActionHoldTime(archetype);
+    this.params.exhaustDuration = getExhaustDuration(archetype);
     const [lungeDist, lungeDur] = getLungeConfig(archetype);
     this.params.lungeDistance = lungeDist;
     this.params.lungeDuration = lungeDur;
@@ -786,8 +790,16 @@ get isAttacking(): boolean {
     );
   }
 
-  startAttack(exhaustionEnabled = false): boolean {
-    return this.combat.startAttack(this.combatOwner, exhaustionEnabled);
+  startAttack(): boolean {
+    return this.combat.startAttack(this.combatOwner);
+  }
+
+  /** Cap lunge distance so it stops short of a target (call right after startAttack). */
+  capLungeToTarget(targetX: number, targetZ: number, stopDist: number): void {
+    this.combat.capLungeToTarget(
+      this.mesh.position.x, this.mesh.position.z,
+      targetX, targetZ, stopDist,
+    );
   }
 
   isInAttackHitWindow(): boolean {

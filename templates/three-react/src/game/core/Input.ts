@@ -3,7 +3,7 @@ export interface InputState {
   backward: boolean;
   left: boolean;
   right: boolean;
-  action: boolean;
+  attack: boolean;
   cancel: boolean;
   pause: boolean;
   cameraSnap: boolean;
@@ -20,7 +20,7 @@ export class Input {
    * Queued attack flag — set on keydown/tap, only cleared by update().
    * Survives across frames (including hitstop) until the game actually reads it.
    */
-  private actionQueued = false;
+  private attackQueued = false;
   private pauseQueued = false;
   private cameraSnapQueued = false;
   private seppukuQueued = false;
@@ -29,7 +29,7 @@ export class Input {
   private state: InputState = {
     forward: false, backward: false,
     left: false, right: false,
-    action: false, cancel: false, pause: false,
+    attack: false, cancel: false, pause: false,
     cameraSnap: false, seppuku: false, mapKey: false,
     interact: false,
   };
@@ -47,8 +47,8 @@ export class Input {
   constructor() {
     this.onKeyDown = (e: KeyboardEvent) => {
       this.keys[e.code] = true;
-      if (e.code === 'Space' || e.code === 'KeyF') {
-        this.actionQueued = true;
+      if (e.code === 'Space') {
+        this.attackQueued = true;
         e.preventDefault();
       }
       if (e.code === 'KeyP' || e.code === 'Escape') {
@@ -114,14 +114,14 @@ export class Input {
     this.state.backward = !!(this.keys['KeyS'] || this.keys['ArrowDown']);
     this.state.left = !!(this.keys['KeyA'] || this.keys['ArrowLeft']);
     this.state.right = !!(this.keys['KeyD'] || this.keys['ArrowRight']);
-    this.state.action = this.actionQueued;
+    this.state.attack = this.attackQueued;
     this.state.cancel = !!this.keys['Escape'];
     this.state.pause = this.pauseQueued;
     this.state.cameraSnap = this.cameraSnapQueued;
     this.state.seppuku = this.seppukuQueued;
     this.state.mapKey = this.mapKeyQueued;
     this.state.interact = this.interactQueued;
-    this.actionQueued = false;
+    this.attackQueued = false;
     this.pauseQueued = false;
     this.cameraSnapQueued = false;
     this.seppukuQueued = false;

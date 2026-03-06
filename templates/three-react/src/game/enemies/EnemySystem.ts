@@ -246,7 +246,11 @@ export class EnemySystem {
   // ── Player damage helper ──
 
   private getPlayerDamage(playerChar: Character): number {
-    return playerChar.params.attackDamage;
+    return Math.round(playerChar.params.attackDamage * playerChar.comboDamageMultiplier);
+  }
+
+  private get hitstopEnabled(): boolean {
+    return useGameStore.getState().characterParams.melee.hitstopEnabled;
   }
 
   // ── Cleanup helper for enemy death (used by combat + update loop) ──
@@ -342,7 +346,7 @@ export class EnemySystem {
               playerChar.mesh.position.x -= hitDirX * 0.15;
               playerChar.mesh.position.z -= hitDirZ * 0.15;
               if (this.impactCallbacks) {
-                this.impactCallbacks.onHitstop(0.08);
+                if (this.hitstopEnabled) this.impactCallbacks.onHitstop(0.08);
                 this.impactCallbacks.onCameraShake(
                   0.15,
                   0.12,
@@ -390,7 +394,7 @@ export class EnemySystem {
 
                 if (this.impactCallbacks) {
                   const isKill = !enemy.isAlive;
-                  this.impactCallbacks.onHitstop(isKill ? 0.1 : 0.06);
+                  if (this.hitstopEnabled) this.impactCallbacks.onHitstop(isKill ? 0.1 : 0.06);
                   this.impactCallbacks.onCameraShake(
                     isKill ? 0.2 : 0.12,
                     isKill ? 0.2 : 0.12,
@@ -425,7 +429,7 @@ export class EnemySystem {
           if (propHit) {
             playerChar.markAttackHitApplied();
             if (this.impactCallbacks) {
-              this.impactCallbacks.onHitstop(0.04);
+              if (this.hitstopEnabled) this.impactCallbacks.onHitstop(0.04);
               this.impactCallbacks.onCameraShake(0.1, 0.1, 0, 0);
             }
             if (this.potionSystem?.isShadow) {
@@ -760,7 +764,7 @@ export class EnemySystem {
               );
             }
             if (this.impactCallbacks) {
-              this.impactCallbacks.onHitstop(0.08);
+              if (this.hitstopEnabled) this.impactCallbacks.onHitstop(0.08);
               this.impactCallbacks.onCameraShake(
                 0.18,
                 0.15,

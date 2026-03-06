@@ -15,6 +15,7 @@ export function findMeleeAimTarget(
     isAlive: boolean;
     mesh: { position: THREE.Vector3 };
   }>,
+  props?: ReadonlyArray<{ x: number; z: number }>,
 ): number | null {
   const maxRange = 1.8;
   const maxAngle = Math.PI * 0.6;
@@ -37,6 +38,22 @@ export function findMeleeAimTarget(
     if (angleDiff < bestAngleDiff) {
       bestAngleDiff = angleDiff;
       bestFacing = Math.atan2(-dx, -dz);
+    }
+  }
+
+  if (props) {
+    for (const prop of props) {
+      const dx = prop.x - px;
+      const dz = prop.z - pz;
+      const dist = Math.sqrt(dx * dx + dz * dz);
+      if (dist > maxRange || dist < 0.01) continue;
+
+      const dot = fwdX * (dx / dist) + fwdZ * (dz / dist);
+      const angleDiff = Math.acos(Math.min(1, Math.max(-1, dot)));
+      if (angleDiff < bestAngleDiff) {
+        bestAngleDiff = angleDiff;
+        bestFacing = Math.atan2(-dx, -dz);
+      }
     }
   }
 
