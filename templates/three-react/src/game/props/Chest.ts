@@ -5,6 +5,8 @@ import { Entity, Layer, entityRegistry } from '../core/Entity';
 import { buildVoxelGeometry } from '../../utils/voxelMesh';
 import type { VoxelModel } from '../../types';
 import type { SavedChest } from '../dungeon';
+import { getChestTier } from '../dungeon';
+import type { ChestTier } from '../dungeon';
 
 interface ChestObj {
   group: THREE.Group;
@@ -15,6 +17,12 @@ interface ChestObj {
   fadeTimer: number; // starts after lid fully open
   removed: boolean;
   baseY: number;
+  /** If true, opening this chest spawns a mimic enemy instead of loot */
+  isMimic: boolean;
+  /** Mimic variant letter (a–h) for enemy selection */
+  mimicVariant?: string;
+  /** Chest variant ID (e.g. 'chest_d') — determines loot tier and mimic variant */
+  variantId?: string;
   /** Prop chest (voxel dungeon): mesh + parent for removal, or openGeo for swap-to-open */
   propRef?: {
     mesh: THREE.Mesh;
@@ -82,6 +90,10 @@ function buildChestLidModel(): VoxelModel {
 }
 
 const VOXEL_SCALE = 0.06;
+const MIMIC_CHANCE = 0.1;
+const MIMIC_VARIANTS = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+
+export type MimicSpawnCallback = (position: THREE.Vector3, variant?: string) => void;
 
 export class ChestSystem {
   private chests: ChestObj[] = [];
@@ -97,6 +109,7 @@ export class ChestSystem {
   private readonly fadeDelay = 0.8; // seconds after lid opens before fade starts
   private readonly fadeDuration = 0.3; // seconds to fade out
   private material: THREE.MeshStandardMaterial;
+  private onMimicSpawn: MimicSpawnCallback | null = null;
 
   constructor(
     scene: THREE.Scene,
@@ -131,12 +144,17 @@ export class ChestSystem {
     }
   }
 
+  setMimicSpawnCallback(cb: MimicSpawnCallback): void {
+    this.onMimicSpawn = cb;
+  }
+
   /** Register a chest placed by DungeonPropSystem (voxel dungeon). Closed mesh → swap to openGeo on interact, spawn loot. */
   registerPropChest(
     position: THREE.Vector3,
     mesh: THREE.Mesh,
     entity: Entity,
     openGeo?: THREE.BufferGeometry,
+    variantId?: string,
   ): void {
     if (!openGeo)
       console.warn(
@@ -150,6 +168,9 @@ export class ChestSystem {
     group.add(lidPivot);
     const parent = mesh.parent;
     if (!parent) return;
+    const isMimic = Math.random() < MIMIC_CHANCE;
+    // Derive mimic variant from chest variant (chest_d → 'd') instead of random
+    const variantLetter = variantId ? variantId.replace('chest_', '') : undefined;
     this.chests.push({
       group,
       entity,
@@ -159,6 +180,9 @@ export class ChestSystem {
       fadeTimer: 0,
       removed: false,
       baseY: position.y,
+      isMimic,
+      mimicVariant: isMimic ? (variantLetter ?? MIMIC_VARIANTS[Math.floor(Math.random() * MIMIC_VARIANTS.length)]) : undefined,
+      variantId,
       propRef: { mesh, parent, openGeo },
     });
   }
@@ -220,6 +244,7 @@ export class ChestSystem {
       fadeTimer: 0,
       removed: false,
       baseY: pos.y,
+      isMimic: false, // free chests are never mimics (only dungeon prop chests)
     });
   }
 
@@ -290,24 +315,47 @@ export class ChestSystem {
         chest.openTimer = 0;
         opened++;
 
-        // Spawn loot at chest position
-        const lootPos = chest.propRef
-          ? chest.propRef.mesh.position.clone()
-          : chest.group.position;
-        this.lootSystem.spawnLoot(lootPos);
+        if (chest.isMimic && this.onMimicSpawn) {
+          // Mimic chest: remove chest + collider first, then spawn enemy at that position
+          const mimicPos = chest.propRef
+            ? chest.propRef.mesh.position.clone()
+            : chest.group.position.clone();
 
-        // Prop chest (voxel dungeon): swap to open geometry immediately
-        if (chest.propRef) {
-          const { mesh, openGeo } = chest.propRef;
-          if (openGeo) {
+          // Remove chest and its collider/nav-block BEFORE spawning so terrain Y is correct
+          chest.removed = true;
+          chest.entity.destroy();
+          if (chest.propRef) {
+            const { mesh, parent } = chest.propRef;
+            this.terrain.unblockPropAt(mesh.position.x, mesh.position.z);
+            parent.remove(mesh);
             if (mesh.geometry) mesh.geometry.dispose();
-            mesh.geometry = openGeo;
           } else {
-            // Fallback: darken the chest to indicate it's opened
-            const mat = mesh.material as THREE.MeshStandardMaterial;
-            mat.emissive.setHex(0x000000);
-            mat.emissiveIntensity = 0;
-            mat.color.multiplyScalar(0.5);
+            this.scene.remove(chest.group);
+          }
+
+          // Now spawn mimic at the cleared position
+          this.onMimicSpawn(mimicPos, chest.mimicVariant);
+        } else {
+          // Normal chest: spawn loot with tier based on chest variant
+          const lootPos = chest.propRef
+            ? chest.propRef.mesh.position.clone()
+            : chest.group.position;
+          const tier: ChestTier = chest.variantId ? getChestTier(chest.variantId) : 'common';
+          this.lootSystem.spawnLoot(lootPos, tier);
+
+          // Prop chest (voxel dungeon): swap to open geometry immediately
+          if (chest.propRef) {
+            const { mesh, openGeo } = chest.propRef;
+            if (openGeo) {
+              if (mesh.geometry) mesh.geometry.dispose();
+              mesh.geometry = openGeo;
+            } else {
+              // Fallback: darken the chest to indicate it's opened
+              const mat = mesh.material as THREE.MeshStandardMaterial;
+              mat.emissive.setHex(0x000000);
+              mat.emissiveIntensity = 0;
+              mat.color.multiplyScalar(0.5);
+            }
           }
         }
       }

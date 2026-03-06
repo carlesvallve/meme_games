@@ -600,6 +600,7 @@ export class Environment implements TerrainLike {
             mesh: THREE.Mesh;
             entity: Entity;
             openGeo?: THREE.BufferGeometry;
+            variantId: string;
           }[],
         ) => void)
       | null,

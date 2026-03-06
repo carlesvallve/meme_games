@@ -475,6 +475,11 @@ export class EnemySystem {
       const isChasing = enemy.isCurrentlyChasing();
       const isFleeing = enemy.isCurrentlyFleeing();
       const isFrenzyEnemy = this.spawner.frenzyEnemies.has(enemy);
+
+      // Remove frenzy status when enemy starts fleeing (low HP)
+      if (isFleeing && isFrenzyEnemy) {
+        this.spawner.cleanupFrenzyEnemy(enemy);
+      }
       if (
         roomVis &&
         !roomVis.isPositionActive(ex, ez) &&

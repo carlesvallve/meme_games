@@ -7,6 +7,7 @@ import { Entity, Layer } from '../core/Entity';
 import type { DungeonPropEntry, PropPlacement } from './VoxDungeonDB';
 import { getRandomProp, getRandomPropStyled, extractPropStyle, getPropsWhere, getRandomTile } from './VoxDungeonDB';
 import { loadTileEntry } from './VoxDungeonLoader';
+import { useGameStore } from '../../store';
 import { SeededRandom } from '../../utils/SeededRandom';
 import { POTION_HUES } from '../combat/PotionEffectSystem';
 import type { PotionEffectSystem } from '../combat/PotionEffectSystem';
@@ -738,11 +739,12 @@ export class DungeonPropSystem {
       const tables: TableSlot[] = [];
 
       // ── Pass 1: place furniture and large items ──
+      const currentFloor = useGameStore.getState().floor;
       for (const { category, count } of largeItems) {
         for (let i = 0; i < count; i++) {
           const entry = roomStyle
             ? getRandomPropStyled(category, roomStyle, () => rng.next())
-            : getRandomProp(category, () => rng.next());
+            : getRandomProp(category, () => rng.next(), currentFloor);
           if (!entry) continue;
 
           // ── Wall-mounted props (banners, wall torches) ──
@@ -1266,7 +1268,8 @@ export class DungeonPropSystem {
       if (rng.next() > 0.15) continue;
 
       const category = corridorFloorProps[Math.floor(rng.next() * corridorFloorProps.length)];
-      const entry = getRandomProp(category, () => rng.next());
+      const corridorFloor = useGameStore.getState().floor;
+      const entry = getRandomProp(category, () => rng.next(), corridorFloor);
       if (!entry) continue;
 
       const isCorridorChest = entry.category === 'chest';
@@ -1448,13 +1451,13 @@ export class DungeonPropSystem {
   }
 
   /** Interactive chest props (category 'chest') for registration with ChestSystem in voxel dungeon */
-  getInteractiveChests(): { position: THREE.Vector3; mesh: THREE.Mesh; entity: Entity; openGeo?: THREE.BufferGeometry }[] {
-    const out: { position: THREE.Vector3; mesh: THREE.Mesh; entity: Entity; openGeo?: THREE.BufferGeometry }[] = [];
+  getInteractiveChests(): { position: THREE.Vector3; mesh: THREE.Mesh; entity: Entity; openGeo?: THREE.BufferGeometry; variantId: string }[] {
+    const out: { position: THREE.Vector3; mesh: THREE.Mesh; entity: Entity; openGeo?: THREE.BufferGeometry; variantId: string }[] = [];
     const worldPos = new THREE.Vector3();
     for (const p of this.props) {
       if (p.entry.category !== 'chest') continue;
       p.mesh.getWorldPosition(worldPos);
-      out.push({ position: worldPos.clone(), mesh: p.mesh, entity: p.entity, openGeo: p.openGeo });
+      out.push({ position: worldPos.clone(), mesh: p.mesh, entity: p.entity, openGeo: p.openGeo, variantId: p.entry.id });
     }
     return out;
   }

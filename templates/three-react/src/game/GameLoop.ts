@@ -1315,6 +1315,16 @@ export function createGameLoop(
           `+${loot.coins} Gold`, '#ffd700',
         );
       }
+      if (loot.gems > 0) {
+        const s = useGameStore.getState();
+        s.setCollectibles(s.collectibles + loot.gems);
+        s.setScore(s.score + loot.gems * 5);
+        audioSystem.sfx('pickup');
+        ctx.enemySystem?.spawnPickupLabel(
+          activePos.x, activePos.y, activePos.z,
+          `+${loot.gems} Gem`, '#44ffcc', 'md',
+        );
+      }
       if (loot.potions > 0) {
         for (const colorIndex of loot.potionColorIndices) {
           const result = ctx.potionSystem.drink(colorIndex);

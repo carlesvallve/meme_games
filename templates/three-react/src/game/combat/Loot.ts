@@ -22,7 +22,7 @@ interface LootItem {
   delay: number; // stagger before ejection starts
   gracePeriod: number;
   collected: boolean;
-  type: 'coin' | 'potion' | 'food';
+  type: 'coin' | 'potion' | 'food' | 'gem';
   value: number;
   /** Color index 0-7 for potions (maps to PotionEffectSystem) */
   colorIndex: number;
@@ -139,6 +139,9 @@ export class LootSystem {
 
   private readonly coinGeo: THREE.BufferGeometry;
   private readonly coinMat: THREE.MeshStandardMaterial;
+  /** Gem (octahedron) geometry + materials (random color per spawn) */
+  private readonly gemGeo: THREE.BufferGeometry;
+  private readonly gemColors = [0x44ffaa, 0xff44aa, 0x44aaff, 0xffaa44, 0xaa44ff];
   /** Food (meat chunk) geometry + material */
   private readonly foodGeo: THREE.BufferGeometry;
   private readonly foodMat: THREE.MeshStandardMaterial;
@@ -165,12 +168,13 @@ export class LootSystem {
     this.terrain = terrain;
 
     this.coinGeo = new THREE.OctahedronGeometry(0.05, 0);
+    this.gemGeo = new THREE.OctahedronGeometry(0.06, 0);
     this.foodGeo = new THREE.SphereGeometry(0.06, 6, 4);
     this.foodMat = new THREE.MeshStandardMaterial({
-      color: 0xff4444,
-      emissive: 0xff2222,
-      emissiveIntensity: 0.6,
-      roughness: 0.4,
+      color: 0x8B4513,
+      emissive: 0x5C2E0A,
+      emissiveIntensity: 0.4,
+      roughness: 0.6,
       metalness: 0.1,
     });
     this.potionGeoFallback = new THREE.SphereGeometry(0.05, 6, 4);
@@ -256,67 +260,121 @@ export class LootSystem {
     return this.potionGeoFallback;
   }
 
-  spawnLoot(position: THREE.Vector3): void {
-    const count = 2 + Math.floor(Math.random() * 3); // 2-4 items
-    let potionSpawned = false;
+  spawnLoot(position: THREE.Vector3, tier: 'common' | 'rare' | 'epic' = 'common'): void {
+    // Tier-based loot parameters — all item types roll within the same pool
+    const tierConfig = {
+      common: { minCount: 2, maxCount: 3, maxPotions: 1, coinMin: 1, coinMax: 2,
+                weights: { coin: 0.55, potion: 0.15, food: 0.20, gem: 0.10 } },
+      rare:   { minCount: 3, maxCount: 4, maxPotions: 2, coinMin: 2, coinMax: 4,
+                weights: { coin: 0.55, potion: 0.15, food: 0.20, gem: 0.10 } },
+      epic:   { minCount: 4, maxCount: 5, maxPotions: 2, coinMin: 3, coinMax: 6,
+                weights: { coin: 0.55, potion: 0.15, food: 0.20, gem: 0.10 } },
+    };
+    const cfg = tierConfig[tier];
+    const count = cfg.minCount + Math.floor(Math.random() * (cfg.maxCount - cfg.minCount + 1));
+    let potionsSpawned = 0;
 
     for (let i = 0; i < count; i++) {
-      const isCoin = potionSpawned || Math.random() < 0.8; // max 1 potion per drop, 20% chance
-      const type: 'coin' | 'potion' = isCoin ? 'coin' : 'potion';
-      if (!isCoin) potionSpawned = true;
-
-      const colorIndex = Math.floor(Math.random() * POTION_HUES.length);
-      const geo = isCoin ? this.coinGeo : this.getPotionGeo(colorIndex);
-      const mat = isCoin
-        ? this.coinMat
-        : this.potionGeosReady
-          ? this.potionMat
-          : this.potionMatFallback;
-
-      const mesh = new THREE.Mesh(geo, mat);
-      mesh.position.copy(position);
-      mesh.position.y += 0.15; // start above chest
-      mesh.castShadow = true;
-      mesh.visible = false; // hidden until delay expires
-      this.scene.add(mesh);
-
-      const entity = new Entity(mesh, {
-        layer: Layer.Collectible,
-        radius: 0.04,
-      });
-
-      // Random ejection angle
-      const angle = Math.random() * Math.PI * 2;
-      const hSpeed = 1.8 + Math.random() * 1.4;
-      const vel = new THREE.Vector3(
-        Math.cos(angle) * hSpeed,
-        3.0 + Math.random() * 1.5,
-        Math.sin(angle) * hSpeed,
-      );
-
-      const item: LootItem = {
-        mesh,
-        entity,
-        vel,
-        grounded: false,
-        bounceCount: 0,
-        age: 0,
-        delay: i * 0.04 + Math.random() * 0.03, // stagger each item
-        gracePeriod: 1.2 + Math.random() * 0.6,
-        collected: false,
-        type,
-        value: isCoin ? 1 : 3,
-        colorIndex,
-        hungerValue: 0,
-      };
-
-      // Add floating label for potions
-      if (!isCoin) {
-        this.addPotionLabel(item);
+      // Weighted roll for item type
+      let type: LootItem['type'];
+      const roll = Math.random();
+      const { coin: wCoin, potion: wPotion, gem: wGem } = cfg.weights;
+      if (roll < wCoin) {
+        type = 'coin';
+      } else if (roll < wCoin + wPotion && potionsSpawned < cfg.maxPotions) {
+        type = 'potion';
+        potionsSpawned++;
+      } else if (roll < wCoin + wPotion + wGem) {
+        type = 'gem';
+      } else if (cfg.weights.food > 0) {
+        type = 'food';
+      } else {
+        type = 'coin'; // fallback
       }
 
-      this.items.push(item);
+      this.spawnLootItem(position, type, i, cfg.coinMin, cfg.coinMax);
     }
+  }
+
+  /** Spawn a single loot item of the given type at position. */
+  private spawnLootItem(
+    position: THREE.Vector3,
+    type: LootItem['type'],
+    index: number,
+    coinMin = 1,
+    coinMax = 2,
+  ): void {
+    let geo: THREE.BufferGeometry;
+    let mat: THREE.Material;
+    const colorIndex = Math.floor(Math.random() * POTION_HUES.length);
+
+    switch (type) {
+      case 'coin':
+        geo = this.coinGeo;
+        mat = this.coinMat;
+        break;
+      case 'potion':
+        geo = this.getPotionGeo(colorIndex);
+        mat = this.potionGeosReady ? this.potionMat : this.potionMatFallback;
+        break;
+      case 'gem': {
+        geo = this.gemGeo;
+        const gemColor = this.gemColors[Math.floor(Math.random() * this.gemColors.length)];
+        mat = new THREE.MeshStandardMaterial({
+          color: gemColor, emissive: gemColor, emissiveIntensity: 0.5,
+          roughness: 0.2, metalness: 0.8,
+        });
+        break;
+      }
+      case 'food':
+        geo = this.foodGeo;
+        mat = this.foodMat;
+        break;
+    }
+
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.copy(position);
+    mesh.position.y += 0.15;
+    mesh.castShadow = true;
+    mesh.visible = false;
+    this.scene.add(mesh);
+
+    const entity = new Entity(mesh, { layer: Layer.Collectible, radius: 0.04 });
+
+    const angle = Math.random() * Math.PI * 2;
+    const hSpeed = 1.8 + Math.random() * 1.4;
+    const vel = new THREE.Vector3(
+      Math.cos(angle) * hSpeed,
+      3.0 + Math.random() * 1.5,
+      Math.sin(angle) * hSpeed,
+    );
+
+    let value = 0;
+    let hungerValue = 0;
+    switch (type) {
+      case 'coin': value = coinMin + Math.floor(Math.random() * (coinMax - coinMin + 1)); break;
+      case 'potion': value = 3; break;
+      case 'gem': value = 1; break;
+      case 'food': hungerValue = 15; break;
+    }
+
+    const item: LootItem = {
+      mesh, entity, vel,
+      grounded: false,
+      bounceCount: 0,
+      age: 0,
+      delay: index * 0.04 + Math.random() * 0.03,
+      gracePeriod: 1.2 + Math.random() * 0.6,
+      collected: false,
+      type, value, colorIndex, hungerValue,
+    };
+
+    // Labels
+    if (type === 'potion') this.addPotionLabel(item);
+    else if (type === 'gem') { const l = createPotionLabel('GEM', '#44ffcc'); mesh.add(l); item.label = l; }
+    else if (type === 'food') { const l = createPotionLabel('FOOD', '#ff8844'); mesh.add(l); item.label = l; }
+
+    this.items.push(item);
   }
 
   /** Spawn a food item (meat chunk) at the given position. */
@@ -362,6 +420,7 @@ export class LootSystem {
     this.items.push(item);
   }
 
+
   /** Add a floating label to a potion item */
   private addPotionLabel(item: LootItem): void {
     const ps = this.potionSystem;
@@ -394,11 +453,13 @@ export class LootSystem {
     playerPos: THREE.Vector3,
   ): {
     coins: number;
+    gems: number;
     potions: number;
     potionColorIndices: number[];
     foodHunger: number;
   } {
     let coins = 0;
+    let gems = 0;
     let potions = 0;
     let foodHunger = 0;
     const potionColorIndices: number[] = [];
@@ -566,7 +627,9 @@ export class LootSystem {
           for (const sp of item.sparkles) sp.visible = false;
         }
         if (item.type === 'coin') {
-          coins++;
+          coins += item.value;
+        } else if (item.type === 'gem') {
+          gems += item.value;
         } else if (item.type === 'food') {
           foodHunger += item.hungerValue;
         } else {
@@ -598,7 +661,7 @@ export class LootSystem {
       }
     }
 
-    return { coins, potions, potionColorIndices, foodHunger };
+    return { coins, gems, potions, potionColorIndices, foodHunger };
   }
 
   /** Find nearest potion within radius of a position.
@@ -710,20 +773,29 @@ export class LootSystem {
     for (const s of saved) {
       const isFood = s.type === 'food';
       const isCoin = s.type === 'coin';
+      const isGem = s.type === 'gem';
       const colorIndex =
         s.colorIndex ?? Math.floor(Math.random() * POTION_HUES.length);
-      const geo = isFood
-        ? this.foodGeo
-        : isCoin
-          ? this.coinGeo
-          : this.getPotionGeo(colorIndex);
-      const mat = isFood
-        ? this.foodMat
-        : isCoin
-          ? this.coinMat
-          : this.potionGeosReady
-            ? this.potionMat
-            : this.potionMatFallback;
+
+      let geo: THREE.BufferGeometry;
+      let mat: THREE.Material;
+      if (isGem) {
+        geo = this.gemGeo;
+        const gemColor = this.gemColors[Math.floor(Math.random() * this.gemColors.length)];
+        mat = new THREE.MeshStandardMaterial({
+          color: gemColor, emissive: gemColor, emissiveIntensity: 0.5,
+          roughness: 0.2, metalness: 0.8,
+        });
+      } else if (isFood) {
+        geo = this.foodGeo;
+        mat = this.foodMat;
+      } else if (isCoin) {
+        geo = this.coinGeo;
+        mat = this.coinMat;
+      } else {
+        geo = this.getPotionGeo(colorIndex);
+        mat = this.potionGeosReady ? this.potionMat : this.potionMatFallback;
+      }
 
       const mesh = new THREE.Mesh(geo, mat);
       const terrainY = this.terrain.getFloorY(s.x, s.z);
@@ -755,6 +827,10 @@ export class LootSystem {
       if (s.type === 'potion') {
         this.spawnSparkles(item);
         this.addPotionLabel(item);
+      } else if (isGem) {
+        const label = createPotionLabel('GEM', '#44ffcc');
+        mesh.add(label);
+        item.label = label;
       } else if (isFood) {
         const label = createPotionLabel('FOOD', '#ff8844');
         mesh.add(label);
@@ -803,6 +879,7 @@ export class LootSystem {
     }
     this.items.length = 0;
     this.coinGeo.dispose();
+    this.gemGeo.dispose();
     this.potionGeoFallback.dispose();
     if (this.potionBaseGeo) this.potionBaseGeo.dispose();
     if (this.bottleBaseGeo) this.bottleBaseGeo.dispose();

@@ -211,8 +211,8 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   });
   if (usePropChestsOnly) {
     terrain.setPropChestRegistrar((list) =>
-      list.forEach(({ position, mesh, entity, openGeo }) =>
-        chestSystem.registerPropChest(position, mesh, entity, openGeo),
+      list.forEach(({ position, mesh, entity, openGeo, variantId }) =>
+        chestSystem.registerPropChest(position, mesh, entity, openGeo, variantId),
       ),
     );
     if (hmrReused) terrain.reregisterPropChests();

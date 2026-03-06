@@ -495,11 +495,45 @@ export function getPropsForCategory(category: string): DungeonPropEntry[] {
   return PROP_BY_CATEGORY.get(category) || [];
 }
 
-/** Get a random prop from a category */
-export function getRandomProp(category: string, rand?: () => number): DungeonPropEntry | null {
+/** Chest tier derived from variant letter: a–c = common, d–f = rare, g–h = epic */
+export type ChestTier = 'common' | 'rare' | 'epic';
+
+export function getChestTier(id: string): ChestTier {
+  const letter = id.replace('chest_', '');
+  if (letter >= 'a' && letter <= 'c') return 'common';
+  if (letter >= 'd' && letter <= 'f') return 'rare';
+  return 'epic';
+}
+
+/** Floor-weighted tier probabilities */
+function getChestTierWeights(floor: number): { common: number; rare: number; epic: number } {
+  if (floor <= 3) return { common: 0.70, rare: 0.25, epic: 0.05 };
+  if (floor <= 6) return { common: 0.40, rare: 0.45, epic: 0.15 };
+  return { common: 0.20, rare: 0.40, epic: 0.40 };
+}
+
+/** Pick a random chest using floor-weighted tier selection */
+function pickWeightedChest(props: DungeonPropEntry[], floor: number, r: () => number): DungeonPropEntry {
+  const weights = getChestTierWeights(floor);
+  const roll = r();
+  let targetTier: ChestTier;
+  if (roll < weights.common) targetTier = 'common';
+  else if (roll < weights.common + weights.rare) targetTier = 'rare';
+  else targetTier = 'epic';
+
+  const tierProps = props.filter(p => getChestTier(p.id) === targetTier);
+  const pool = tierProps.length > 0 ? tierProps : props;
+  return pool[Math.floor(r() * pool.length)];
+}
+
+/** Get a random prop from a category. For 'chest' category, pass floor for weighted tier selection. */
+export function getRandomProp(category: string, rand?: () => number, floor?: number): DungeonPropEntry | null {
   const props = getPropsForCategory(category);
   if (props.length === 0) return null;
   const r = rand ?? Math.random;
+  if (category === 'chest' && floor != null) {
+    return pickWeightedChest(props, floor, r);
+  }
   return props[Math.floor(r() * props.length)];
 }
 
