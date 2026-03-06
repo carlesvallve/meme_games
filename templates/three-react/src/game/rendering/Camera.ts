@@ -45,7 +45,7 @@ export class Camera {
   private minDistance = 5;
   private maxDistance = 25;
   private pitchMin = -80 * (Math.PI / 180);
-  private pitchMax = -10 * (Math.PI / 180);
+  private pitchMax = 0;
   private rotationSpeed = 0.005;
   private zoomSpeed = 0.01;
 

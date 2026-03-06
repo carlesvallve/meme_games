@@ -264,50 +264,25 @@ export class Environment implements TerrainLike {
       const labelText = isCleared
         ? `${skulls ? skulls + ' ' : ''}${poi.name} — Conquered`
         : skulls ? `${skulls} ${poi.name}` : poi.name;
-      const label = createTextLabel(labelText, { color: labelColor, height: labelHeight, opacity: 0 });
+      const camOffset = poi.type === 'village' ? 1.1 : 0.5;
+      const label = createTextLabel(labelText, { color: labelColor, height: labelHeight, opacity: 0, cameraOffset: camOffset });
       const mat = label.material as THREE.SpriteMaterial;
       mat.opacity = 0;
       const spawnTime = performance.now();
       // Quick fade-in if no announcement is active (e.g. returning from dungeon), otherwise wait for it
       const hasAnnouncement = useGameStore.getState().zoneAnnouncement !== null;
-      const fadeDelay = isCleared || !hasAnnouncement ? 500 : 3800;
-      const fadeDuration = 1200; // ms — label fade-in duration
+      const fadeDelay = isCleared || !hasAnnouncement ? 0 : 3800;
+      const fadeDuration = isCleared || !hasAnnouncement ? 600 : 1200;
 
-      if (poi.type === 'village') {
-        const baseY = y + 1.25;
-        const gateDist = 1.1;
-        label.position.set(wx, baseY, wz);
-        label.onBeforeRender = (_r, _s, camera) => {
-          // Offset toward camera
-          const dx = camera.position.x - wx;
-          const dz = camera.position.z - wz;
-          const len = Math.sqrt(dx * dx + dz * dz);
-          if (len > 0.01) {
-            label.position.x = wx + (dx / len) * gateDist;
-            label.position.z = wz + (dz / len) * gateDist;
-          }
-          // Delayed fade-in
-          const elapsed = performance.now() - spawnTime;
-          mat.opacity = Math.min(1, Math.max(0, (elapsed - fadeDelay) / fadeDuration));
-        };
-      } else {
-        const baseY = y + 1.25;
-        const dungeonOffset = 0.5;
-        label.position.set(wx, baseY, wz);
-        label.onBeforeRender = (_r, _s, camera) => {
-          // Offset toward camera
-          const dx = camera.position.x - wx;
-          const dz = camera.position.z - wz;
-          const len = Math.sqrt(dx * dx + dz * dz);
-          if (len > 0.01) {
-            label.position.x = wx + (dx / len) * dungeonOffset;
-            label.position.z = wz + (dz / len) * dungeonOffset;
-          }
-          // Delayed fade-in
-          const elapsed = performance.now() - spawnTime;
-          mat.opacity = Math.min(1, Math.max(0, (elapsed - fadeDelay) / fadeDuration));
-        };
-      }
+      const baseY = y + 1.25;
+      label.position.set(wx, baseY, wz);
+      // Chain fade-in after the auto camera-offset onBeforeRender
+      const autoRender = label.onBeforeRender;
+      label.onBeforeRender = (r, s, camera, geometry, material, group) => {
+        autoRender(r, s, camera, geometry, material, group);
+        const elapsed = performance.now() - spawnTime;
+        mat.opacity = Math.min(1, Math.max(0, (elapsed - fadeDelay) / fadeDuration));
+      };
       this.ctx.group.add(label);
 
       // Register collision debris for POIs — OBB (oriented bounding box)
