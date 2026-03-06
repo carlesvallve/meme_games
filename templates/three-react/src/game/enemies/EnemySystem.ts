@@ -6,7 +6,7 @@ import type { LadderDef } from '../dungeon';
 import { Character } from '../character';
 import { Enemy } from '../character';
 import { audioSystem } from '../../utils/AudioSystem';
-import { isRangedHeroId, VOX_ENEMIES } from '../character';
+import { isRangedHeroId, VOX_ENEMIES, getArchetype, getSlashStyle } from '../character';
 import type { GoreSystem } from '../combat/GoreSystem';
 import type { PropDestructionSystem } from '../combat/PropDestructionSystem';
 import { useGameStore } from '../../store';
@@ -288,7 +288,12 @@ export class EnemySystem {
       if (playerChar.attackJustStarted) {
         playerChar.attackJustStarted = false;
         audioSystem.sfx('slash');
-        if (showSlashEffect) this.vfx.pushSlashArc(playerChar.mesh);
+        if (showSlashEffect) {
+          const slashStyle = playerChar.voxEntry
+            ? getSlashStyle(getArchetype(playerChar.voxEntry.name))
+            : 'horizontal';
+          this.vfx.pushSlashArc(playerChar.mesh, slashStyle);
+        }
       }
 
       if (playerChar.canApplyAttackHit()) {
@@ -611,7 +616,12 @@ export class EnemySystem {
             enemy.mesh.position.x,
             enemy.mesh.position.z,
           );
-          if (showSlashEffect) this.vfx.pushSlashArc(enemy.mesh);
+          if (showSlashEffect) {
+            const enemySlashStyle = enemy.voxEntry
+              ? getSlashStyle(getArchetype(enemy.voxEntry.name))
+              : 'short';
+            this.vfx.pushSlashArc(enemy.mesh, enemySlashStyle);
+          }
         }
       }
       if (

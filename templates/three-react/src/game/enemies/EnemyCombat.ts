@@ -8,6 +8,7 @@ import type { GoreSystem } from '../combat/GoreSystem';
 import type { PotionEffectSystem } from '../combat/PotionEffectSystem';
 import type { LootSystem } from '../combat/Loot';
 import { audioSystem } from '../../utils/AudioSystem';
+import { getArchetype, getSlashStyle } from '../character';
 import { findPath } from '../pathfinding';
 
 // ── Attack arc helper ────────────────────────────────────────────────
@@ -226,7 +227,12 @@ export class EnemyCombat {
 
     playerChar.startAttack(false);
     audioSystem.sfx('slash');
-    if (showSlashEffect) this.vfx.pushSlashArc(playerChar.mesh);
+    if (showSlashEffect) {
+      const critSlashStyle = playerChar.voxEntry
+        ? getSlashStyle(getArchetype(playerChar.voxEntry.name))
+        : 'horizontal';
+      this.vfx.pushSlashArc(playerChar.mesh, critSlashStyle);
+    }
 
     // Armour deflect check
     if (target.armour > 0 && Math.random() < target.armour) {

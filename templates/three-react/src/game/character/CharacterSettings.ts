@@ -158,6 +158,7 @@ const RANGED_CONFIG: Record<string, ProjectileConfig> = {
   priestess:   { kind: 'fireball', color: 0xffee44, speed: 10, damage: 2, lifetime: 1.0, cooldown: 0.45 },
   alchemist:   { kind: 'fireball', color: 0x44ff88, speed: 10, damage: 2, lifetime: 1.0, cooldown: 0.45 },
   necromancer: { kind: 'fireball', color: 0xaa44ff, speed: 10, damage: 2, lifetime: 1.0, cooldown: 0.45 },
+  bard:        { kind: 'fireball', color: 0xff88dd, speed: 10, damage: 2, lifetime: 1.0, cooldown: 0.45 },
 };
 
 /** Half a voxel in world units (height step); used to nudge muzzle up. */
@@ -170,6 +171,7 @@ const MUZZLE_OFFSETS: Record<string, MuzzleOffset> = {
   priestess:   { forward: 0.28, up: 0.2 + HALF_VOXEL },
   alchemist:   { forward: 0.28, up: 0.2 + HALF_VOXEL },
   necromancer: { forward: 0.28, up: 0.2 + HALF_VOXEL },
+  bard:        { forward: 0.28, up: 0.2 + HALF_VOXEL },
 };
 
 const DEFAULT_MUZZLE: MuzzleOffset = { forward: 0.3, up: 0.2 + HALF_VOXEL };

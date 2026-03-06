@@ -2,67 +2,104 @@ import * as THREE from 'three';
 import type { Character } from '../character';
 import type { GoreSystem } from '../combat/GoreSystem';
 
-// ── Slash arc visual ─────────────────────────────────────────────────
+// ── Slash trail particles ────────────────────────────────────────────
 
-export interface SlashArc {
-  mesh: THREE.Mesh;
-  parent: THREE.Object3D;
+export type SlashStyle = 'horizontal' | 'vertical' | 'thrust' | 'short';
+
+export interface SlashTrail {
+  points: THREE.Points;
+  velocities: Float32Array;
   age: number;
   lifetime: number;
-  totalIndices: number;
-  segments: number;
 }
 
-export function createSlashArc(parent: THREE.Object3D): SlashArc {
-  const arcAngle = Math.PI * 0.7;
-  const innerR = 0.1;
-  const outerR = 0.5;
-  const segments = 14;
-  const vertCount = (segments + 1) * 2;
-  const positions = new Float32Array(vertCount * 3);
+const TRAIL_CONFIG: Record<SlashStyle, { count: number; lifetime: number; size: number; offset: number }> = {
+  horizontal: { count: 8,  lifetime: 0.2, size: 0.1, offset: 0.25 },
+  vertical:   { count: 8,  lifetime: 0.2,  size: 0.1,  offset: 0.25 },
+  thrust:     { count: 10, lifetime: 0.4,  size: 0.1, offset: 0.5 },
+  short:      { count: 7,  lifetime: 0.2, size: 0.1, offset: 0.35 },
+};
 
-  for (let i = 0; i <= segments; i++) {
-    const a = -arcAngle / 2 + (arcAngle * i) / segments;
-    const oi = i * 3;
-    positions[oi]     = Math.sin(a) * outerR;
-    positions[oi + 1] = 0;
-    positions[oi + 2] = -Math.cos(a) * outerR;
-    const ii = (segments + 1 + i) * 3;
-    positions[ii]     = Math.sin(a) * innerR;
-    positions[ii + 1] = 0;
-    positions[ii + 2] = -Math.cos(a) * innerR;
+export function createSlashTrail(
+  scene: THREE.Scene, x: number, y: number, z: number,
+  facing: number, style: SlashStyle, flipped: boolean,
+): SlashTrail {
+  const cfg = TRAIL_CONFIG[style];
+  const positions = new Float32Array(cfg.count * 3);
+  const velocities = new Float32Array(cfg.count * 3);
+
+  // Direction vectors relative to character facing
+  const fwdX = -Math.sin(facing);
+  const fwdZ = -Math.cos(facing);
+  const rightX = -fwdZ;
+  const rightZ = fwdX;
+  const flipSign = flipped ? 1 : -1;
+
+  const wpX = x + fwdX * cfg.offset;
+  const wpY = y + 0.22;
+  const wpZ = z + fwdZ * cfg.offset;
+
+  for (let i = 0; i < cfg.count; i++) {
+    const speed = 2.0 + Math.random() * 2.5;
+    let vx: number, vy: number, vz: number;
+
+    if (style === 'horizontal') {
+      // Particles spread along a vertical line, offset to the slash origin side
+      const t = i / (cfg.count - 1);
+      const spread = (t - 0.5) * 0.3; // vertical spread
+      const sideOffset = 0.18 * flipSign; // start on the side the slash comes from
+      positions[i * 3]     = wpX + rightX * sideOffset + (Math.random() - 0.5) * 0.04;
+      positions[i * 3 + 1] = wpY + spread;
+      positions[i * 3 + 2] = wpZ + rightZ * sideOffset + (Math.random() - 0.5) * 0.04;
+      // All move in the same sideways direction
+      vx = rightX * -flipSign * speed;
+      vy = (Math.random() - 0.5) * 0.3;
+      vz = rightZ * -flipSign * speed;
+    } else if (style === 'vertical') {
+      // Particles spread laterally, offset upward, all move downward
+      const t = i / (cfg.count - 1);
+      const spread = (t - 0.5) * 0.3; // lateral spread
+      const downOffset = -0.15; // start below
+      positions[i * 3]     = wpX + rightX * spread + (Math.random() - 0.5) * 0.04;
+      positions[i * 3 + 1] = wpY + downOffset;
+      positions[i * 3 + 2] = wpZ + rightZ * spread + (Math.random() - 0.5) * 0.04;
+      // Move up + slightly forward (diagonal)
+      vx = -fwdX * speed * 0.35;
+      vy = speed;
+      vz = -fwdZ * speed * 0.35;
+    } else {
+      // Thrust/short: all start at weapon tip, drift backward
+      positions[i * 3]     = wpX + (Math.random() - 0.5) * 0.04;
+      positions[i * 3 + 1] = wpY + (Math.random() - 0.5) * 0.04;
+      positions[i * 3 + 2] = wpZ + (Math.random() - 0.5) * 0.04;
+      const backX = Math.sin(facing);
+      const backZ = Math.cos(facing);
+      const spread = (Math.random() - 0.5) * 0.8;
+      vx = (backX + spread * backZ) * speed;
+      vy = (Math.random() - 0.3) * 0.5;
+      vz = (backZ - spread * backX) * speed;
+    }
+
+    velocities[i * 3]     = vx;
+    velocities[i * 3 + 1] = vy;
+    velocities[i * 3 + 2] = vz;
   }
 
-  const indices: number[] = [];
-  for (let i = 0; i < segments; i++) {
-    const o0 = i;
-    const o1 = i + 1;
-    const i0 = segments + 1 + i;
-    const i1 = segments + 1 + i + 1;
-    indices.push(o0, o1, i1);
-    indices.push(o0, i1, i0);
-  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
 
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  geo.setIndex(indices);
-  geo.setDrawRange(0, 0);
-
-  const mat = new THREE.MeshBasicMaterial({
+  const material = new THREE.PointsMaterial({
     color: 0xffffff,
+    size: cfg.size,
     transparent: true,
-    opacity: 0.35,
-    side: THREE.DoubleSide,
-    depthWrite: false,
+    opacity: 0.6,
     blending: THREE.AdditiveBlending,
+    depthWrite: false,
   });
 
-  const mesh = new THREE.Mesh(geo, mat);
-  mesh.position.set(0, 0.25, 0);
-  mesh.rotation.y = 0;
-
-  parent.add(mesh);
-  return { mesh, parent, age: 0, lifetime: 0.18, totalIndices: indices.length, segments };
+  const points = new THREE.Points(geometry, material);
+  scene.add(points);
+  return { points, velocities, age: 0, lifetime: cfg.lifetime };
 }
 
 // ── Damage number ────────────────────────────────────────────────────
@@ -234,7 +271,7 @@ export function randomDeflectLabel(): string {
 
 export class EnemyVFX {
   private damageNumbers: DamageNumber[] = [];
-  private slashArcs: SlashArc[] = [];
+  private slashTrails: SlashTrail[] = [];
   private hitSparks: HitSparks[] = [];
 
   private readonly scene: THREE.Scene;
@@ -254,8 +291,11 @@ export class EnemyVFX {
 
   // ── Push methods (used internally by EnemySystem/EnemyCombat) ──
 
-  pushSlashArc(parent: THREE.Object3D): void {
-    this.slashArcs.push(createSlashArc(parent));
+  pushSlashArc(parent: THREE.Object3D, style: SlashStyle = 'horizontal'): void {
+    const pos = new THREE.Vector3();
+    parent.getWorldPosition(pos);
+    const flipped = parent.scale.x < 0;
+    this.slashTrails.push(createSlashTrail(this.scene, pos.x, pos.y, pos.z, parent.rotation.y, style, flipped));
   }
 
   pushDamageNumber(x: number, y: number, z: number, amount: number, dirX = 0, dirZ = 0, isCrit = false): void {
@@ -305,35 +345,31 @@ export class EnemyVFX {
   // ── Update loops ──
 
   update(dt: number): void {
-    this.updateSlashArcs(dt);
+    this.updateSlashTrails(dt);
     this.updateHitSparks(dt);
     this.updateDamageNumbers(dt);
   }
 
-  private updateSlashArcs(dt: number): void {
-    for (let i = this.slashArcs.length - 1; i >= 0; i--) {
-      const arc = this.slashArcs[i];
-      arc.age += dt;
-      if (arc.age >= arc.lifetime) {
-        arc.parent.remove(arc.mesh);
-        arc.mesh.geometry.dispose();
-        (arc.mesh.material as THREE.Material).dispose();
-        this.slashArcs.splice(i, 1);
+  private updateSlashTrails(dt: number): void {
+    for (let i = this.slashTrails.length - 1; i >= 0; i--) {
+      const trail = this.slashTrails[i];
+      trail.age += dt;
+      if (trail.age >= trail.lifetime) {
+        this.scene.remove(trail.points);
+        trail.points.geometry.dispose();
+        (trail.points.material as THREE.PointsMaterial).dispose();
+        this.slashTrails.splice(i, 1);
         continue;
       }
-
-      const t = arc.age / arc.lifetime;
-      const sweepT = Math.min(t / 0.6, 1);
-      const eased = 1 - (1 - sweepT) * (1 - sweepT);
-      const revealedSegments = Math.ceil(eased * arc.segments);
-      const indexCount = revealedSegments * 6;
-      arc.mesh.geometry.setDrawRange(0, Math.min(indexCount, arc.totalIndices));
-
-      const scale = 1 + t * 0.2;
-      arc.mesh.scale.set(scale, scale, scale);
-
-      const opacity = 0.35 * (1 - t * t);
-      (arc.mesh.material as THREE.MeshBasicMaterial).opacity = opacity;
+      const positions = trail.points.geometry.attributes.position as THREE.BufferAttribute;
+      const count = positions.count;
+      for (let j = 0; j < count; j++) {
+        positions.setX(j, positions.getX(j) + trail.velocities[j * 3] * dt);
+        positions.setY(j, positions.getY(j) + trail.velocities[j * 3 + 1] * dt);
+        positions.setZ(j, positions.getZ(j) + trail.velocities[j * 3 + 2] * dt);
+      }
+      positions.needsUpdate = true;
+      (trail.points.material as THREE.PointsMaterial).opacity = 0.6 * (1 - trail.age / trail.lifetime);
     }
   }
 
@@ -405,12 +441,12 @@ export class EnemyVFX {
     }
     this.damageNumbers = [];
 
-    for (const arc of this.slashArcs) {
-      arc.parent.remove(arc.mesh);
-      arc.mesh.geometry.dispose();
-      (arc.mesh.material as THREE.Material).dispose();
+    for (const trail of this.slashTrails) {
+      this.scene.remove(trail.points);
+      trail.points.geometry.dispose();
+      (trail.points.material as THREE.PointsMaterial).dispose();
     }
-    this.slashArcs = [];
+    this.slashTrails = [];
 
     for (const hs of this.hitSparks) {
       this.scene.remove(hs.points);
