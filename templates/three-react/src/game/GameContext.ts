@@ -141,4 +141,8 @@ export interface GameContext {
   dungeonEnterPromptTarget: { x: number; y: number; z: number } | null;
   /** Last overworld tile index the player stood on (for tile-enter announcements) */
   lastOverworldTile: number | null;
+
+  // Edge travel prompt (heightmap → neighbor tile)
+  edgeTravelPrompt: THREE.Sprite | null;
+  edgeTravelEnterPrompt: THREE.Sprite | null;
 }

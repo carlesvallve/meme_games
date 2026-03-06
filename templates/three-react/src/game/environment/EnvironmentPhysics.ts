@@ -154,8 +154,9 @@ export class EnvironmentPhysics {
     let rx = newX;
     let rz = newZ;
 
-    // Clamp to world bounds
-    const halfBound = this.ctx.groundSize / 2 - radius;
+    // Clamp to world bounds (use heightmap ground size when available — it's smaller)
+    const effectiveGround = this.ctx.heightmapGroundSize || this.ctx.groundSize;
+    const halfBound = effectiveGround / 2 - radius;
     rx = Math.max(-halfBound, Math.min(halfBound, rx));
     rz = Math.max(-halfBound, Math.min(halfBound, rz));
 
