@@ -5,7 +5,7 @@ export function MenuScreen() {
   const isPaused = phase === 'paused';
 
   const title = isPaused ? 'PAUSED' : 'THREE REACT';
-  const subtitle = isPaused ? 'Press ESC to resume' : 'Voxel character demo';
+  const subtitle = isPaused ? 'Press ESC to resume' : 'Starter template';
   const buttonText = isPaused ? 'RESUME' : 'START';
 
   const handleClick = () => {

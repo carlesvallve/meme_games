@@ -1,14 +1,12 @@
 import { useState, useEffect } from 'react';
 import { useGameStore } from '../../../store';
 import { useIsMobile, btnStyle } from './shared';
-import { PlayerPanel } from './PlayerPanel';
-import { EnemyPanel } from './EnemyPanel';
 import { CameraPanel } from './CameraPanel';
 import { LightPanel } from './LightPanel';
 import { PostFXPanel } from './PostFXPanel';
-import { ScenePanel } from './ScenePanel';
+import { CharacterPanel } from './CharacterPanel';
 
-type ActivePanel = 'player' | 'enemy' | 'camera' | 'light' | 'postfx' | 'scene' | null;
+type ActivePanel = 'camera' | 'light' | 'postfx' | 'char' | null;
 
 export function SettingsPanel() {
   const [active, setActive] = useState<ActivePanel>(null);
@@ -40,12 +38,10 @@ export function SettingsPanel() {
         alignItems: isMobile ? 'stretch' : 'flex-end',
       }}
     >
-      {active === 'player' && <PlayerPanel />}
-      {active === 'enemy' && <EnemyPanel />}
+      {active === 'char' && <CharacterPanel />}
       {active === 'camera' && <CameraPanel />}
       {active === 'light' && <LightPanel />}
       {active === 'postfx' && <PostFXPanel />}
-      {active === 'scene' && <ScenePanel />}
 
       {/* Tab buttons */}
       <div
@@ -57,22 +53,10 @@ export function SettingsPanel() {
         }}
       >
         <button
-          onClick={() => toggle('scene')}
-          style={btnStyle(active === 'scene')}
+          onClick={() => toggle('char')}
+          style={btnStyle(active === 'char')}
         >
-          Scene
-        </button>
-        <button
-          onClick={() => toggle('player')}
-          style={btnStyle(active === 'player')}
-        >
-          Player
-        </button>
-        <button
-          onClick={() => toggle('enemy')}
-          style={btnStyle(active === 'enemy')}
-        >
-          Enemy
+          Char
         </button>
         <button
           onClick={() => toggle('camera')}

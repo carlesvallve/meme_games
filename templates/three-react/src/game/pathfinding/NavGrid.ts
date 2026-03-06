@@ -3,8 +3,20 @@
  * Pure TypeScript, no Three.js dependency.
  */
 
-import type { NavLink } from '../dungeon';
-import type { StairDef } from '../dungeon';
+/** Nav-link connecting two non-adjacent cells (e.g. ladders). */
+export interface NavLink {
+  toGX: number;
+  toGZ: number;
+  cost: number;
+  ladderIndex: number;
+}
+
+/** Stair definition for a dungeon cell. */
+export interface StairDef {
+  axis: 'x' | 'z';
+  direction: number;
+  totalHeight: number;
+}
 
 /** Slope direction: which edge of the box is the HIGH side.
  *  0 = +Z, 1 = +X, 2 = -Z, 3 = -X */

@@ -1,5 +1,4 @@
 import type * as THREE from 'three';
-import type { CharacterType } from './game/character';
 
 export interface VoxelModel {
   size: { x: number; y: number; z: number };
@@ -24,13 +23,3 @@ export interface ParticleOptions {
 export interface GameInstance {
   destroy: () => void;
 }
-
-export interface SpeechBubbleData {
-  id: number;
-  text: string;
-  x: number;
-  y: number;
-  opacity: number;
-}
-
-export type { CharacterType };

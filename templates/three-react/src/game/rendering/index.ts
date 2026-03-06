@@ -5,7 +5,6 @@ export { ProceduralSky, createSunLensflare, getSkyColors, lerpSkyColors } from '
 export type { SkyColors } from './Sky';
 export { PostProcessStack } from './PostProcessing';
 export { updateReveal, patchSceneArchitecture, revealUniforms } from './RevealShader';
-export { DeathSequence } from './DeathSequence';
 export {
   updateDayCycle,
   applyDungeonLighting,
