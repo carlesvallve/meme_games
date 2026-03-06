@@ -112,7 +112,7 @@ export function createCharacterManager(ctx: GameContext): GameCharacterManager {
       p.invulnDuration = pp.invulnDuration;
       p.flashDuration = pp.flashDuration;
       p.stunDuration = pp.stunDuration;
-      p.attackDuration = pp.attackDuration;
+      p.actionHoldTime = pp.actionHoldTime;
       p.exhaustDuration = pp.exhaustDuration;
       p.footIKEnabled = pp.footIKEnabled;
     }

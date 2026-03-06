@@ -24,6 +24,8 @@ export class VoxAnimator {
   private voxFrameIndex = 0;
   private voxFrameTimer = 0;
   private voxLoaded = false;
+  private actionHoldTimer = 0;
+  actionHolding = false;
 
   getStepMode(): StepMode {
     return this.voxEntry?.stepMode ?? 'walker';
@@ -74,21 +76,34 @@ export class VoxAnimator {
   update(owner: VoxAnimOwner, dt: number, isMoving: boolean, footIK: FootIK): void {
     if (!this.voxData || !this.voxLoaded) return;
 
-    // Action animation: let it finish then revert
+    // Action animation: play frames at VOX_FPS, then hold last frame for actionHoldTime
     if (this.voxAnimState === 'action') {
       const frames = this.voxData.frames['action'];
       if (!frames || frames.length === 0) {
-        this.voxAnimState = isMoving ? 'walk' : 'idle';
+        this.exitAction(owner, isMoving);
+      } else if (this.actionHolding) {
+        this.actionHoldTimer -= dt;
+        if (this.actionHoldTimer <= 0) {
+          this.actionHolding = false;
+          this.exitAction(owner, isMoving);
+        }
+        if (owner.params.footIKEnabled) footIK.apply(owner.mesh, owner.groundY);
+        return;
       } else {
-        const fps = VOX_FPS['action'] ?? 9;
+        const fps = VOX_FPS['action'] ?? 8;
         this.voxFrameTimer += dt;
         if (this.voxFrameTimer >= 1 / fps) {
           this.voxFrameTimer -= 1 / fps;
           this.voxFrameIndex++;
           if (this.voxFrameIndex >= frames.length) {
-            this.voxAnimState = isMoving ? 'walk' : 'idle';
-            this.voxFrameIndex = 0;
-            this.voxFrameTimer = 0;
+            this.voxFrameIndex = frames.length - 1;
+            const hold = owner.params.actionHoldTime;
+            if (hold > 0) {
+              this.actionHolding = true;
+              this.actionHoldTimer = hold;
+            } else {
+              this.exitAction(owner, isMoving);
+            }
           } else {
             const newGeo = frames[this.voxFrameIndex];
             if (newGeo && newGeo !== owner.mesh.geometry) {
@@ -141,11 +156,25 @@ export class VoxAnimator {
     if (owner.params.footIKEnabled) footIK.apply(owner.mesh, owner.groundY);
   }
 
+  /** Transition out of action state and immediately apply the first frame of the target anim. */
+  private exitAction(owner: VoxAnimOwner, isMoving: boolean): void {
+    const newState = isMoving ? 'walk' : 'idle';
+    this.voxAnimState = newState;
+    this.voxFrameIndex = 0;
+    this.voxFrameTimer = 0;
+    const targetFrames = this.voxData?.frames[newState];
+    if (targetFrames && targetFrames.length > 0 && targetFrames[0] && targetFrames[0] !== owner.mesh.geometry) {
+      owner.mesh.geometry = targetFrames[0];
+    }
+  }
+
   playAction(owner: VoxAnimOwner): void {
     if (!this.voxData || !this.voxLoaded) return;
     this.voxAnimState = 'action';
     this.voxFrameIndex = 0;
     this.voxFrameTimer = 0;
+    this.actionHolding = false;
+    this.actionHoldTimer = 0;
     const frames = this.voxData.frames['action'];
     if (frames && frames.length > 0 && frames[0]) {
       owner.mesh.geometry = frames[0];

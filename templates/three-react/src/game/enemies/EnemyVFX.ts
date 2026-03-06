@@ -4,7 +4,7 @@ import type { GoreSystem } from '../combat/GoreSystem';
 
 // ── Slash trail particles ────────────────────────────────────────────
 
-export type SlashStyle = 'horizontal' | 'vertical' | 'thrust' | 'short';
+export type SlashStyle = 'horizontal' | 'vertical' | 'thrust' | 'short' | 'default';
 
 export interface SlashTrail {
   points: THREE.Points;
@@ -13,11 +13,12 @@ export interface SlashTrail {
   lifetime: number;
 }
 
-const TRAIL_CONFIG: Record<SlashStyle, { count: number; lifetime: number; size: number; offset: number }> = {
-  horizontal: { count: 8,  lifetime: 0.2, size: 0.1, offset: 0.25 },
-  vertical:   { count: 8,  lifetime: 0.2,  size: 0.1,  offset: 0.25 },
-  thrust:     { count: 10, lifetime: 0.4,  size: 0.1, offset: 0.5 },
-  short:      { count: 7,  lifetime: 0.2, size: 0.1, offset: 0.35 },
+const TRAIL_CONFIG: Record<SlashStyle, { count: number; lifetime: number; size: number; offset: number; sideShift: number }> = {
+  horizontal: { count: 8,  lifetime: 0.2, size: 0.05, offset: 0.25, sideShift: 0.18 },
+  vertical:   { count: 8,  lifetime: 0.2,  size: 0.075,  offset: 0.25, sideShift: 0 },
+  thrust:     { count: 10, lifetime: 0.4,  size: 0.05, offset: 0.5,  sideShift: 0.1 },
+  short:      { count: 7,  lifetime: 0.3, size: 0.075, offset: 0.35, sideShift: 0.1 },
+  default:    { count: 6,  lifetime: 0.2, size: 0.05, offset: 0,    sideShift: 0 },
 };
 
 export function createSlashTrail(
@@ -47,7 +48,7 @@ export function createSlashTrail(
       // Particles spread along a vertical line, offset to the slash origin side
       const t = i / (cfg.count - 1);
       const spread = (t - 0.5) * 0.3; // vertical spread
-      const sideOffset = 0.18 * flipSign; // start on the side the slash comes from
+      const sideOffset = cfg.sideShift * flipSign;
       positions[i * 3]     = wpX + rightX * sideOffset + (Math.random() - 0.5) * 0.04;
       positions[i * 3 + 1] = wpY + spread;
       positions[i * 3 + 2] = wpZ + rightZ * sideOffset + (Math.random() - 0.5) * 0.04;
@@ -68,10 +69,11 @@ export function createSlashTrail(
       vy = speed;
       vz = -fwdZ * speed * 0.35;
     } else {
-      // Thrust/short: all start at weapon tip, drift backward
-      positions[i * 3]     = wpX + (Math.random() - 0.5) * 0.04;
+      // Thrust/short: start at weapon tip, offset laterally based on flip
+      const sideShift = cfg.sideShift * flipSign;
+      positions[i * 3]     = wpX + rightX * sideShift + (Math.random() - 0.5) * 0.04;
       positions[i * 3 + 1] = wpY + (Math.random() - 0.5) * 0.04;
-      positions[i * 3 + 2] = wpZ + (Math.random() - 0.5) * 0.04;
+      positions[i * 3 + 2] = wpZ + rightZ * sideShift + (Math.random() - 0.5) * 0.04;
       const backX = Math.sin(facing);
       const backZ = Math.cos(facing);
       const spread = (Math.random() - 0.5) * 0.8;

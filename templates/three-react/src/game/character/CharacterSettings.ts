@@ -54,8 +54,12 @@ export interface MovementParams {
   flashDuration: number;
   /** Stun duration when hit (seconds). */
   stunDuration: number;
-  /** Attack animation / hit window duration (seconds). */
-  attackDuration: number;
+  /** How long to hold the last action frame before returning to idle (seconds). */
+  actionHoldTime: number;
+  /** Forward lunge distance during attack (world units). */
+  lungeDistance: number;
+  /** How fast the lunge completes (seconds). */
+  lungeDuration: number;
   /** Exhaustion duration after combo (seconds). */
   exhaustDuration: number;
   /** Enable poor-man's foot IK: bottom voxels conform to terrain slope. */
@@ -91,7 +95,9 @@ export const DEFAULT_CHARACTER_PARAMS: MovementParams = {
   invulnDuration: 0.8,
   flashDuration: 0.15,
   stunDuration: 0.08,
-  attackDuration: 0.2,
+  actionHoldTime: 0.12,
+  lungeDistance: 0.3,
+  lungeDuration: 0.15,
   exhaustDuration: 1.0,
   footIKEnabled: false,
   // loot / VFX
@@ -121,6 +127,40 @@ export const VOX_FPS: Record<string, number> = {
   walk: 8,
   action: 8,
 };
+
+/** Per-archetype action hold time (seconds on last action frame before returning to idle). */
+const ACTION_HOLD_BY_ARCHETYPE: Partial<Record<string, number>> = {
+  knight:     0.22,
+  barbarian:  0.18,
+  adventurer: 0.12,
+  amazon:     0.08,
+  rogue:      0.04,
+  monk:       0.03,
+};
+
+const DEFAULT_ACTION_HOLD = 0.12;
+
+/** Get action hold time for a character archetype. */
+export function getActionHoldTime(archetype: string): number {
+  return ACTION_HOLD_BY_ARCHETYPE[archetype] ?? DEFAULT_ACTION_HOLD;
+}
+
+/** Per-archetype lunge config: [distance, duration]. */
+const LUNGE_BY_ARCHETYPE: Partial<Record<string, [number, number]>> = {
+  knight:     [0.20, 0.15],  // vertical — less lunge
+  barbarian:  [0.22, 0.15],  // vertical — less lunge
+  adventurer: [0.25, 0.15],  // horizontal — slightly less than default
+  amazon:     [0.40, 0.14],  // thrust — more forward
+  rogue:      [0.30, 0.15],  // short — default
+  monk:       [0.30, 0.15],  // short — default
+};
+
+const DEFAULT_LUNGE: [number, number] = [0.30, 0.15];
+
+/** Get lunge [distance, duration] for a character archetype. */
+export function getLungeConfig(archetype: string): [number, number] {
+  return LUNGE_BY_ARCHETYPE[archetype] ?? DEFAULT_LUNGE;
+}
 
 /** Default hop frequency (hops per second while walking) */
 export const DEFAULT_HOP_FREQUENCY = 4;
