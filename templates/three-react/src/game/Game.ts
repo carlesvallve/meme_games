@@ -270,6 +270,8 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     dungeonEnterPrompt: null,
     dungeonEnterPromptTarget: null,
     lastOverworldTile: null,
+    edgeTravelPrompt: null,
+    edgeTravelEnterPrompt: null,
   };
 
   // Hide terrain until a character is selected (avoid showing dungeon under menu/select screen)

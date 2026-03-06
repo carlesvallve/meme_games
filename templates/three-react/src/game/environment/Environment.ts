@@ -671,6 +671,11 @@ export class Environment implements TerrainLike {
     return this.ctx.heightmapGroundSize || this.ctx.groundSize;
   }
 
+  /** Get the raw context ground size (used for physics bounds clamping). */
+  getRawGroundSize(): number {
+    return this.ctx.groundSize;
+  }
+
   // ── Lifecycle ─────────────────────────────────────────────────────
 
   reregisterEntities(): void {

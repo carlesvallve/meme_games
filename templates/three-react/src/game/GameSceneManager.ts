@@ -474,7 +474,8 @@ export function createSceneManager(
       spawnedChar.mesh.visible = false;
     }
 
-    // Overworld / heightmap: restore player position from saved state
+    // Overworld: restore player position from saved state
+    // Heightmap uses zoomSpawnNorm (handled in spawnCharacters) or savedPlayerPos from dungeon return
     if ((isOverworld || terrainPreset === 'heightmap') && spawnedChar) {
       const owSaved = useGameStore.getState().overworldState?.savedPlayerPos;
       if (owSaved) {

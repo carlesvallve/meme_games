@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 import { useGameStore, DEFAULT_CAMERA_PARAMS } from '../store';
-import { getTileAtWorldPos, tileCenterWorld, OW_TILE_SIZE, OW_TOTAL_SIZE, generateDungeonFloorSubtitle } from './overworld';
+import { getTileAtWorldPos, tileCenterWorld, OW_TILE_SIZE, OW_TOTAL_SIZE, OW_GRID, generateDungeonFloorSubtitle } from './overworld';
 import type { POIDef } from './overworld';
 import { buildStoryRecipe } from './recipes/story';
-import { createTextLabel } from './rendering/TextLabel';
+import { createTextLabel, updateTextLabel } from './rendering/TextLabel';
 import {
   applyLightPreset,
   updateReveal,
@@ -236,11 +236,12 @@ export function createGameLoop(
           const { cx, cz } = tileCenterWorld(tileDef.row, tileDef.col);
           const nx = (pos.x - cx) / OW_TILE_SIZE;
           const nz = (pos.z - cz) / OW_TILE_SIZE;
-          // Save player position, active tile, and normalized spawn in one update
+          // Save active tile and normalized spawn (don't save overworld pos as savedPlayerPos
+          // — it would be misinterpreted as heightmap coords by the scene manager)
           const curOw = useGameStore.getState().overworldState!;
           useGameStore.getState().setOverworldState({
             ...curOw,
-            savedPlayerPos: { x: pos.x, z: pos.z, y: pos.y },
+            savedPlayerPos: null,
             activeTileIndex: tileIdx,
             zoomSpawnNorm: { nx, nz },
             zoomSpawnFacing: playerChar.getFacing(),
@@ -422,6 +423,165 @@ export function createGameLoop(
       } else if (ctx.dungeonEnterPrompt) {
         ctx.dungeonEnterPrompt.visible = false;
         ctx.dungeonEnterPromptTarget = null;
+      }
+
+      // ── Heightmap edge travel → neighbor tile ──
+      // DEBUG: log once per second
+      // DEBUG edge travel
+      if (ctx.terrain.preset === 'heightmap' && Math.random() < 0.02) {
+        const _p = playerChar.getPosition();
+        const _gs = ctx.terrain.getGroundSize();
+        const _hb = _gs / 2 - 0.3;
+        console.log('[EdgeTravel] pos:', _p.x.toFixed(1), _p.z.toFixed(1),
+          'ground:', _gs, 'halfBound:', _hb.toFixed(1),
+          'owState:', !!owState, 'activeTile:', owState?.activeTileIndex);
+      }
+      if (
+        ctx.terrain.preset === 'heightmap' &&
+        owState != null &&
+        owState.activeTileIndex !== null &&
+        phase === 'playing' &&
+        playerChar.isAlive &&
+        !ctx.exitTriggered
+      ) {
+        const tileIdx = owState.activeTileIndex;
+        const tileDef = owState.tiles[tileIdx];
+        const tileRow = Math.floor(tileIdx / OW_GRID);
+        const tileCol = tileIdx % OW_GRID;
+        // Use heightmap ground size (same as physics clamp)
+        const hmGroundSize = ctx.terrain.getGroundSize();
+        const playerRadius = 0.3;
+        const halfBound = hmGroundSize / 2 - playerRadius;
+        const threshold = 0.5;
+        const pPos = playerChar.getPosition();
+
+        // Determine which edge the player is near (if any)
+        type Edge = 'north' | 'south' | 'east' | 'west';
+        let edge: Edge | null = null;
+        let neighborRow = tileRow;
+        let neighborCol = tileCol;
+
+        if (pPos.z < -halfBound + threshold)      { edge = 'north'; neighborRow = tileRow - 1; }
+        else if (pPos.z > halfBound - threshold)   { edge = 'south'; neighborRow = tileRow + 1; }
+        else if (pPos.x > halfBound - threshold)   { edge = 'east';  neighborCol = tileCol + 1; }
+        else if (pPos.x < -halfBound + threshold)  { edge = 'west';  neighborCol = tileCol - 1; }
+
+        // Check if neighbor exists (within 3×3 grid)
+        const hasNeighbor = edge !== null &&
+          neighborRow >= 0 && neighborRow < OW_GRID &&
+          neighborCol >= 0 && neighborCol < OW_GRID;
+
+        if (hasNeighbor && edge) {
+          const neighborIdx = neighborRow * OW_GRID + neighborCol;
+          const neighborTile = owState.tiles[neighborIdx];
+          const neighborName = neighborTile.label || 'Unknown Lands';
+          const arrows: Record<Edge, string> = { east: '→', west: '←', north: '↑', south: '↓' };
+          const promptText = `${arrows[edge]} ${neighborName}`;
+
+          // Create or update direction label (only re-render text when it changes)
+          if (!ctx.edgeTravelPrompt) {
+            ctx.edgeTravelPrompt = createTextLabel(promptText, {
+              color: '#ffdd66',
+              fontSize: 28,
+              height: 0.22,
+              depthTest: false,
+              renderOrder: 950,
+            });
+            (ctx.edgeTravelPrompt as any).__lastText = promptText;
+            ctx.scene.add(ctx.edgeTravelPrompt);
+          } else if ((ctx.edgeTravelPrompt as any).__lastText !== promptText) {
+            updateTextLabel(ctx.edgeTravelPrompt, promptText);
+            (ctx.edgeTravelPrompt as any).__lastText = promptText;
+          }
+
+          // Create [ Enter ] label once
+          if (!ctx.edgeTravelEnterPrompt) {
+            ctx.edgeTravelEnterPrompt = createTextLabel('[ Enter ]', {
+              color: '#ffdd66',
+              fontSize: 24,
+              height: 0.18,
+              depthTest: false,
+              renderOrder: 950,
+            });
+            ctx.scene.add(ctx.edgeTravelEnterPrompt);
+          }
+
+          // Position above player head
+          const promptY = pPos.y + 1.8;
+          ctx.edgeTravelPrompt.position.set(pPos.x, promptY, pPos.z);
+          ctx.edgeTravelEnterPrompt.position.set(pPos.x, promptY - 0.25, pPos.z);
+          const pulse = 0.6 + 0.4 * Math.sin(performance.now() * 0.005);
+          (ctx.edgeTravelPrompt.material as THREE.SpriteMaterial).opacity = pulse;
+          (ctx.edgeTravelEnterPrompt.material as THREE.SpriteMaterial).opacity = pulse;
+          ctx.edgeTravelPrompt.visible = true;
+          ctx.edgeTravelEnterPrompt.visible = true;
+
+          // E key → travel to neighbor
+          if (ctx.cachedInputState.interact) {
+            ctx.exitTriggered = true;
+            ctx.edgeTravelPrompt.visible = false;
+            if (ctx.edgeTravelEnterPrompt) ctx.edgeTravelEnterPrompt.visible = false;
+
+            // Compute spawn position on opposite edge
+            const spawnMargin = 0.5;
+            const dungeonSize = useGameStore.getState().dungeonSize;
+            let spawnX = pPos.x;
+            let spawnZ = pPos.z;
+
+            switch (edge) {
+              case 'east':  spawnX = -halfBound + spawnMargin; break;
+              case 'west':  spawnX =  halfBound - spawnMargin; break;
+              case 'south': spawnZ = -halfBound + spawnMargin; break;
+              case 'north': spawnZ =  halfBound - spawnMargin; break;
+            }
+
+            // Normalize to -0.5..0.5 for zoomSpawnNorm
+            const nx = spawnX / dungeonSize;
+            const nz = spawnZ / dungeonSize;
+
+            // Facing toward center (away from edge)
+            const facingAngles: Record<Edge, number> = {
+              east: Math.PI / 2,    // face west (toward center)
+              west: -Math.PI / 2,   // face east
+              south: Math.PI,       // face north
+              north: 0,             // face south
+            };
+
+            // Update overworld state for neighbor tile
+            const curOw = useGameStore.getState().overworldState!;
+            useGameStore.getState().setOverworldState({
+              ...curOw,
+              activeTileIndex: neighborIdx,
+              zoomSpawnNorm: { nx, nz },
+              zoomSpawnFacing: facingAngles[edge],
+              savedPlayerPos: null,
+            });
+
+            const regionName = neighborName;
+            const styleName = neighborTile.heightmapStyle.charAt(0).toUpperCase() + neighborTile.heightmapStyle.slice(1);
+            const palName = neighborTile.paletteName.charAt(0).toUpperCase() + neighborTile.paletteName.slice(1);
+            useGameStore.getState().beginZoneTransition({ title: regionName, subtitle: `${palName} ${styleName}` });
+
+            ctx.postProcess.fadeTransition(() => {
+              const store = useGameStore.getState();
+              store.setPaletteName(neighborTile.paletteName);
+              store.setHeightmapStyle(neighborTile.heightmapStyle);
+              ctx.lastOverworldTile = null;
+              sceneManager.regenerateScene({
+                presetOverride: 'heightmap',
+                seed: neighborTile.seed,
+              });
+            }, 4.0);
+            return;
+          }
+        } else {
+          // Not near an edge with a neighbor — hide prompts
+          if (ctx.edgeTravelPrompt) ctx.edgeTravelPrompt.visible = false;
+          if (ctx.edgeTravelEnterPrompt) ctx.edgeTravelEnterPrompt.visible = false;
+        }
+      } else {
+        if (ctx.edgeTravelPrompt) ctx.edgeTravelPrompt.visible = false;
+        if (ctx.edgeTravelEnterPrompt) ctx.edgeTravelEnterPrompt.visible = false;
       }
 
       // Seppuku
