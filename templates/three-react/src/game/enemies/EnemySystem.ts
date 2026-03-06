@@ -619,7 +619,7 @@ export class EnemySystem {
           if (showSlashEffect) {
             const enemySlashStyle = enemy.voxEntry
               ? getSlashStyle(getArchetype(enemy.voxEntry.name))
-              : 'short';
+              : 'default';
             this.vfx.pushSlashArc(enemy.mesh, enemySlashStyle);
           }
         }

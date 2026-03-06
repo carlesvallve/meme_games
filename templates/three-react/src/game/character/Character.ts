@@ -9,6 +9,7 @@ import {
   randomInRange,
   getCharacterAnimScale,
 } from './VoxCharacterDB';
+import { getActionHoldTime, getLungeConfig } from './CharacterSettings';
 import { Entity, Layer } from '../core/Entity';
 import type { Environment } from '../environment';
 import type { NavGrid } from '../pathfinding';
@@ -126,13 +127,7 @@ export class Character implements BehaviorAgent {
   set flashTimer(v: number) {
     this.combat.flashTimer = v;
   }
-  get attackTimer(): number {
-    return this.combat.attackTimer;
-  }
-  set attackTimer(v: number) {
-    this.combat.attackTimer = v;
-  }
-  get isAttacking(): boolean {
+get isAttacking(): boolean {
     return this.combat.isAttacking;
   }
   set isAttacking(v: boolean) {
@@ -356,6 +351,7 @@ export class Character implements BehaviorAgent {
         getActionFrameCount: () => this.animator.getActionFrameCount(),
         getVoxAnimState: () => this.animator.getVoxAnimState(),
         getVoxFrameIndex: () => this.animator.getVoxFrameIndex(),
+        isActionHolding: () => this.animator.actionHolding,
       };
     }
     return this._combatOwner;
@@ -449,7 +445,14 @@ export class Character implements BehaviorAgent {
     }
 
     // Small critters scurry with faster animation
-    this.characterAnimScale = getCharacterAnimScale(getArchetype(entry.name));
+    const archetype = getArchetype(entry.name);
+    this.characterAnimScale = getCharacterAnimScale(archetype);
+
+    // Per-character action hold time and lunge
+    this.params.actionHoldTime = getActionHoldTime(archetype);
+    const [lungeDist, lungeDur] = getLungeConfig(archetype);
+    this.params.lungeDistance = lungeDist;
+    this.params.lungeDuration = lungeDur;
   }
 
   private _wasMoving = false;

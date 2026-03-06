@@ -18,6 +18,8 @@ export interface CombatOwner {
   getVoxAnimState(): string;
   /** Get current VOX frame index */
   getVoxFrameIndex(): number;
+  /** Whether the animator is holding the last action frame (combo window) */
+  isActionHolding(): boolean;
 }
 
 export class CharacterCombat {
@@ -29,13 +31,14 @@ export class CharacterCombat {
   private justTookDamage = false;
   invulnTimer = 0;
   flashTimer = 0;
-  attackTimer = 0;
   isAttacking = false;
   attackJustStarted = false;
   private attackHitApplied = false;
   attackCount = 0;
   exhaustTimer = 0;
-  private timeSinceLastAttack = 0;
+  private lungeElapsed = 0;
+  /** Buffered combo attack — fires when current hold finishes. */
+  private comboBuffered = false;
   stunTimer = 0;
 
   // ── Regeneration ──────────────────────────────────────────────────
@@ -68,12 +71,8 @@ export class CharacterCombat {
   private comboFlipped = false;
 
   // Lunge: push character forward during attack
-  private lungeDist = 0; // current lunge offset
-  private lungeDir = { x: 0, z: 0 }; // facing direction at attack start
-  private static readonly LUNGE_MAX = 0.15; // max forward push in world units
-
-  /** Fraction of attack duration for time-based fallback when VOX action has no frames. */
-  private static readonly MELEE_HIT_WINDOW_RATIO = 0.5;
+  private lungeDist = 0;
+  private lungeDir = { x: 0, z: 0 };
 
   /** Restore hunger by the given amount (clamped to maxHunger). */
   restoreHunger(amount: number): void {
@@ -133,20 +132,33 @@ export class CharacterCombat {
   startAttack(owner: CombatOwner, exhaustionEnabled = false): boolean {
     if (
       !this.isAlive ||
-      this.isAttacking ||
       this.exhaustTimer > 0 ||
       this.stunTimer > 0
     )
       return false;
 
-    if (this.timeSinceLastAttack > 1.0) {
+    // If mid-attack, buffer the combo input — it fires when hold finishes
+    if (this.isAttacking) {
+      this.comboBuffered = true;
+      return false;
+    }
+
+    this.executeAttack(owner, false, exhaustionEnabled);
+    return true;
+  }
+
+  /** Actually start an attack (called directly or from combo buffer). */
+  private executeAttack(owner: CombatOwner, isCombo = false, exhaustionEnabled = false): void {
+    // Reset combo if animation already returned to idle/walk (skip for buffered combos)
+    if (!isCombo && owner.getVoxAnimState() !== 'action') {
       this.attackCount = 0;
     }
 
     this.isAttacking = true;
     this.attackJustStarted = true;
-    this.attackTimer = owner.params.attackDuration;
-    this.timeSinceLastAttack = 0;
+    this.attackHitApplied = false;
+    this.comboBuffered = false;
+    this.lungeElapsed = 0;
     this.attackCount++;
 
     if (exhaustionEnabled && this.attackCount >= 7) {
@@ -167,7 +179,6 @@ export class CharacterCombat {
     this.lungeDist = 0;
 
     owner.playActionAnim();
-    return true;
   }
 
   isInAttackHitWindow(owner: CombatOwner): boolean {
@@ -180,10 +191,8 @@ export class CharacterCombat {
         owner.getVoxFrameIndex() === climaxFrameIndex
       );
     }
-    return (
-      this.attackTimer <=
-      owner.params.attackDuration * CharacterCombat.MELEE_HIT_WINDOW_RATIO
-    );
+    // No action frames — hit on first update
+    return true;
   }
 
   markAttackHitApplied(): void {
@@ -195,8 +204,6 @@ export class CharacterCombat {
   }
 
   update(owner: CombatOwner, dt: number): void {
-    this.timeSinceLastAttack += dt;
-
     // Knockback decay
     if (
       Math.abs(this.knockbackVX) > 0.01 ||
@@ -253,35 +260,51 @@ export class CharacterCombat {
       }
     }
 
-    // Attack timer + lunge
+    // Attack — animation-driven, ends when anim leaves 'action' state
     if (this.isAttacking) {
-      this.attackTimer -= dt;
-      const dur = owner.params.attackDuration;
-      const t = 1 - Math.max(0, this.attackTimer) / dur; // 0→1 over attack
-
-      // Lunge: quick forward push in first half, pull back in second half
-      const prevLunge = this.lungeDist;
-      if (t < 0.5) {
-        // Ease-out push: fast start, decelerate
-        const lt = t / 0.5;
-        this.lungeDist = CharacterCombat.LUNGE_MAX * (1 - (1 - lt) * (1 - lt));
+      // Check if animation returned to idle/walk → attack finished or combo fires
+      if (owner.getVoxAnimState() !== 'action') {
+        if (this.comboBuffered) {
+          // Fire buffered combo immediately
+          this.isAttacking = false;
+          this.executeAttack(owner, true);
+        } else {
+          this.isAttacking = false;
+          this.attackHitApplied = false;
+          owner.mesh.scale.x = Math.abs(owner.mesh.scale.x);
+          this.comboFlipped = false;
+          this.lungeDist = 0;
+        }
       } else {
-        // Ease-in pull back
-        const lt = (t - 0.5) / 0.5;
-        this.lungeDist = CharacterCombat.LUNGE_MAX * (1 - lt * lt);
-      }
-      const lungeDelta = this.lungeDist - prevLunge;
-      owner.mesh.position.x += this.lungeDir.x * lungeDelta;
-      owner.mesh.position.z += this.lungeDir.z * lungeDelta;
-
-      if (this.attackTimer <= 0) {
-        this.isAttacking = false;
-        this.attackTimer = 0;
-        this.attackHitApplied = false;
-        // Reset combo flip
-        owner.mesh.scale.x = Math.abs(owner.mesh.scale.x);
-        this.comboFlipped = false;
-        this.lungeDist = 0;
+        // Lunge forward during attack
+        this.lungeElapsed += dt;
+        const t = Math.min(1, this.lungeElapsed / owner.params.lungeDuration);
+        const prevLunge = this.lungeDist;
+        if (t < 0.5) {
+          // Ease-out push forward
+          const lt = t / 0.5;
+          this.lungeDist = owner.params.lungeDistance * (1 - (1 - lt) * (1 - lt));
+        } else {
+          // Settle at 90%
+          const lt = (t - 0.5) / 0.5;
+          const target = owner.params.lungeDistance * 0.9;
+          this.lungeDist = owner.params.lungeDistance + (target - owner.params.lungeDistance) * (lt * lt);
+        }
+        const lungeDelta = this.lungeDist - prevLunge;
+        if (Math.abs(lungeDelta) > 0.0001) {
+          const oldX = owner.mesh.position.x;
+          const oldZ = owner.mesh.position.z;
+          const newX = oldX + this.lungeDir.x * lungeDelta;
+          const newZ = oldZ + this.lungeDir.z * lungeDelta;
+          const resolved = owner.terrain.resolveMovement(
+            newX, newZ, owner.groundY,
+            owner.params.stepHeight, owner.params.capsuleRadius,
+            oldX, oldZ, owner.params.slopeHeight,
+          );
+          owner.mesh.position.x = resolved.x;
+          owner.mesh.position.z = resolved.z;
+          owner.groundY = resolved.y;
+        }
       }
     }
 

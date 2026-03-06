@@ -14,6 +14,8 @@ import { findPath } from '../pathfinding';
 // ── Attack arc helper ────────────────────────────────────────────────
 
 const MELEE_Y_TOLERANCE = 1.0;
+/** Shift arc origin behind character so it covers targets slightly inside/behind the mesh. */
+const ARC_ORIGIN_OFFSET = 0.15;
 
 export function isInAttackArc(
   attackerX: number,
@@ -26,18 +28,21 @@ export function isInAttackArc(
   reach: number,
   halfAngle: number,
 ): boolean {
-  const dx = targetX - attackerX;
+  const fwdX = -Math.sin(attackerFacing);
+  const fwdZ = -Math.cos(attackerFacing);
+  const ox = attackerX - fwdX * ARC_ORIGIN_OFFSET;
+  const oz = attackerZ - fwdZ * ARC_ORIGIN_OFFSET;
+
+  const dx = targetX - ox;
   const dy = targetY - attackerY;
-  const dz = targetZ - attackerZ;
+  const dz = targetZ - oz;
 
   if (Math.abs(dy) > MELEE_Y_TOLERANCE) return false;
 
   const dist2D = Math.sqrt(dx * dx + dz * dz);
-  if (dist2D > reach) return false;
+  if (dist2D > reach + ARC_ORIGIN_OFFSET) return false;
   if (dist2D < 0.001) return true;
 
-  const fwdX = -Math.sin(attackerFacing);
-  const fwdZ = -Math.cos(attackerFacing);
   const dot = fwdX * (dx / dist2D) + fwdZ * (dz / dist2D);
   return dot >= Math.cos(halfAngle);
 }

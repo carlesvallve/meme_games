@@ -338,18 +338,19 @@ export function getCharacterAnimScale(archetype: string): number {
 import type { SlashStyle } from '../enemies/EnemyVFX';
 
 const SLASH_STYLE_BY_ARCHETYPE: Partial<Record<string, SlashStyle>> = {
-  adventurer: 'horizontal',
-  knight: 'vertical',
-  barbarian: 'vertical',
+  adventurer: 'horizontal', // 'horizontal',
+  knight: 'short', // 'vertical',
+  barbarian: 'short', // 'vertical',
   amazon: 'thrust',
   rogue: 'short',
   monk: 'short',
 };
 
-/** Get the melee slash VFX style for a character archetype. Default 'short' for monsters/unmapped. */
+/** Get the melee slash VFX style for a character archetype. Default 'default' for monsters/unmapped. */
 export function getSlashStyle(archetype: string): SlashStyle {
-  return SLASH_STYLE_BY_ARCHETYPE[archetype] ?? 'short';
+  return SLASH_STYLE_BY_ARCHETYPE[archetype] ?? 'default';
 }
+
 
 function getPersonality(folder: string): Pick<VoxCharEntry, 'thoughts' | 'exclamations' | 'sounds'> {
   const archetype = getArchetype(folder);

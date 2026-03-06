@@ -25,6 +25,8 @@ export interface BehaviorAgent {
   updateClimb(dt: number): boolean;
   /** Check if character is currently climbing */
   isClimbing(): boolean;
+  /** Whether the character is currently attacking */
+  readonly isAttacking?: boolean;
 }
 
 export interface BehaviorContext {

@@ -88,6 +88,14 @@ export class PlayerControl extends Behavior {
       // Accelerate toward target speed
       this.currentSpeed = Math.min(params.speed, this.currentSpeed + ACCEL_RATE * dt);
 
+      // Slow down while attacking — heavy attacks lose more momentum
+      if (agent.isAttacking) {
+        const holdTime = params.actionHoldTime;
+        // Map holdTime to speed reduction: fast chars (0.03) keep ~90% speed, slow chars (0.35) keep ~30%
+        const keepFraction = 1 - Math.min(0.2, holdTime * 0.5);
+        this.currentSpeed *= keepFraction;
+      }
+
       const beforeX = agent.getX();
       const beforeZ = agent.getZ();
       agent.move(mx, mz, this.currentSpeed, params.stepHeight, params.capsuleRadius, dt, params.slopeHeight);
