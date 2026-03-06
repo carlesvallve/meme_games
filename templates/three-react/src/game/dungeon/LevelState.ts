@@ -25,7 +25,7 @@ export interface SavedCollectible {
 export interface SavedLoot {
   x: number;
   z: number;
-  type: 'coin' | 'potion' | 'food';
+  type: 'coin' | 'potion' | 'food' | 'gem';
   value: number;
   /** Potion color index (0-7) for effect mapping */
   colorIndex?: number;

@@ -38,8 +38,8 @@ export class CollectibleSystem {
     this.scene = scene;
     this.terrain = terrain;
     this.playerSpawn = playerSpawn ?? null;
-    this.count = count ?? 15;
-    this.respawnEnabled = count == null; // no respawn when count is explicitly set (dungeon mode)
+    this.count = count ?? 5;
+    this.respawnEnabled = false;
     this.geometry = new THREE.OctahedronGeometry(0.06, 0);
 
     for (let i = 0; i < this.count; i++) {
@@ -126,7 +126,7 @@ export class CollectibleSystem {
       if (dist < this.pickupRadius) {
         c.collected = true;
         c.mesh.visible = false;
-        c.respawnTimer = 15 + Math.random() * 15;
+        c.respawnTimer = 30 + Math.random() * 30;
         collected++;
         this.totalCollected++;
       }

@@ -770,7 +770,7 @@ export class DungeonBuilder {
   }
 
   /** Set callback to run when voxel dungeon prop chests are placed (so Game can register them with ChestSystem). */
-  setPropChestRegistrar(cb: ((list: { position: THREE.Vector3; mesh: THREE.Mesh; entity: Entity; openGeo?: THREE.BufferGeometry }[]) => void) | null): void {
+  setPropChestRegistrar(cb: ((list: { position: THREE.Vector3; mesh: THREE.Mesh; entity: Entity; openGeo?: THREE.BufferGeometry; variantId: string }[]) => void) | null): void {
     this.ctx.propChestRegistrar = cb;
   }
 

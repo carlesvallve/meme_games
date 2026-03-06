@@ -31,7 +31,7 @@ import {
 } from './dungeon';
 import type { LevelSnapshot } from './dungeon';
 import type { GameContext } from './GameContext';
-import { rerollRoster, type CharacterType } from './character';
+import { rerollRoster, type CharacterType, VOX_ENEMIES, getFilteredEnemies } from './character';
 import type { Character } from './character';
 
 export interface RegenerateOpts {
@@ -313,7 +313,7 @@ export function createSceneManager(
     const gemCount = isOverworld
       ? 0
       : terrainPreset === 'voxelDungeon'
-        ? Math.max(2, Math.ceil(ctx.terrain.getRoomCount() / 2))
+        ? Math.max(1, Math.ceil(ctx.terrain.getRoomCount() / 6))
         : undefined;
     ctx.collectibles = new CollectibleSystem(
       ctx.scene,
@@ -345,6 +345,26 @@ export function createSceneManager(
       isOverworld ? true : usePropChestsOnlyRegen, // skip free-standing chests on overworld
       heightmapChestCap,
     );
+    // Wire mimic spawn: when a mimic chest is opened, spawn a mimic enemy at that position
+    ctx.chestSystem.setMimicSpawnCallback((position, variant) => {
+      if (!ctx.enemySystem || !ctx.activeCharacter) return;
+      const mimicIds = VOX_ENEMIES.filter(e => e.id.startsWith('mimic'));
+      let entry = mimicIds[Math.floor(Math.random() * mimicIds.length)];
+      if (variant) {
+        const match = mimicIds.find(e => e.id.startsWith(`mimic_${variant}`));
+        if (match) entry = match;
+      }
+      const filtered = getFilteredEnemies([entry.id]);
+      const mimicEntry = filtered.length > 0 ? filtered[0] : entry;
+      const enemy = ctx.enemySystem.spawnEnemyAt(
+        position.x, position.z,
+        ctx.activeCharacter, false, mimicEntry,
+      );
+      // Override Y to chest's known floor position (getTerrainY may sample wall tops)
+      enemy.mesh.position.y = position.y;
+      enemy.groundY = position.y;
+      enemy.visualGroundY = position.y;
+    });
 
     if (usePropChestsOnlyRegen) {
       for (const mesh of ctx.collectibles.getMeshes()) mesh.visible = false;
@@ -353,8 +373,8 @@ export function createSceneManager(
     }
     if (usePropChestsOnlyRegen) {
       ctx.terrain.setPropChestRegistrar((list) => {
-        list.forEach(({ position, mesh, entity, openGeo }) =>
-          ctx.chestSystem.registerPropChest(position, mesh, entity, openGeo),
+        list.forEach(({ position, mesh, entity, openGeo, variantId }) =>
+          ctx.chestSystem.registerPropChest(position, mesh, entity, openGeo, variantId),
         );
         if (ctx.pendingSnapshot) {
           ctx.chestSystem.restoreState(ctx.pendingSnapshot.chests);

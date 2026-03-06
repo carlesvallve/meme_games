@@ -177,6 +177,7 @@ export class EnvironmentContext {
           mesh: THREE.Mesh;
           entity: Entity;
           openGeo?: THREE.BufferGeometry;
+          variantId: string;
         }[],
       ) => void)
     | null = null;

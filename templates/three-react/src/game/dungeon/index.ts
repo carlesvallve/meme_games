@@ -8,9 +8,9 @@ export type { VoxelDungeonConfig, VoxelDungeonResult, VoxelDungeonVisualResult }
 
 // Voxel dungeon DB
 export { DUNGEON_VARIANTS, getDungeonTiles, getAllThemePaths, getRandomTile, getTileById, getFirstTile } from './VoxDungeonDB';
-export { getPropsForCategory, getRandomProp, extractPropStyle, getRandomPropStyled, getPropById } from './VoxDungeonDB';
+export { getPropsForCategory, getRandomProp, extractPropStyle, getRandomPropStyled, getPropById, getChestTier } from './VoxDungeonDB';
 export { getAllPropPaths, getGroundTileIds, getPropCategories, getPropsWhere, getDungeonVariants } from './VoxDungeonDB';
-export type { TileRole, DungeonTileEntry, PropPlacement, DungeonPropEntry, DungeonVariant } from './VoxDungeonDB';
+export type { TileRole, DungeonTileEntry, PropPlacement, DungeonPropEntry, DungeonVariant, ChestTier } from './VoxDungeonDB';
 
 // Voxel dungeon loader
 export { preloadTheme, getTileGeometry, loadTileEntry, setCellSize, getCellSize, getWallTargetHeight, getGroundTargetHeight, clearCache } from './VoxDungeonLoader';

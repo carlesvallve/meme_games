@@ -117,7 +117,8 @@ export function buildFloorEnemyPool(floor: number): string[] {
   addTier(pool.mid, wMid, 'mid');
   addTier(pool.high, wHigh, 'high');
 
-  return ids;
+  // Mimics only spawn from chests, never via normal enemy spawning
+  return ids.filter(id => !id.startsWith('mimic'));
 }
 
 // ── Heightmap Overworld Pool ────────────────────────────────────────
