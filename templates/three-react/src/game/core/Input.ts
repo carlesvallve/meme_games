@@ -14,6 +14,16 @@ export interface InputState {
   interact: boolean;
 }
 
+// ── Gamepad constants ────────────────────────────────────────────────
+// Standard gamepad mapping (https://w3c.github.io/gamepad/#remapping)
+const GP_BUTTON_A = 0;       // Attack (bottom face button)
+const GP_BUTTON_B = 1;       // Cancel / interact
+const GP_BUTTON_X = 2;       // Interact
+const GP_BUTTON_Y = 3;       // Map
+const GP_BUTTON_START = 9;   // Pause
+const GP_BUTTON_SELECT = 8;  // Camera snap
+const GP_STICK_DEADZONE = 0.25;
+
 export class Input {
   private keys: Record<string, boolean> = {};
   /**
@@ -38,6 +48,10 @@ export class Input {
   private touchStartY = 0;
   private touchActive = false;
   private readonly minSwipeDistance = 30;
+
+  // ── Gamepad edge-detection (previous frame button state) ──
+  private prevGpButtons: boolean[] = [];
+  private gpLoggedOnce = false;
 
   private onKeyDown: (e: KeyboardEvent) => void;
   private onKeyUp: (e: KeyboardEvent) => void;
@@ -103,6 +117,60 @@ export class Input {
     window.addEventListener('keyup', this.onKeyUp);
     window.addEventListener('touchstart', this.onTouchStart, { passive: false });
     window.addEventListener('touchend', this.onTouchEnd, { passive: false });
+
+    // Gamepad connection logging
+    window.addEventListener('gamepadconnected', (e) => {
+      const gp = (e as GamepadEvent).gamepad;
+      console.log(`[Gamepad] Connected: "${gp.id}" (index: ${gp.index}, buttons: ${gp.buttons.length}, axes: ${gp.axes.length}, mapping: "${gp.mapping}")`);
+    });
+    window.addEventListener('gamepaddisconnected', (e) => {
+      const gp = (e as GamepadEvent).gamepad;
+      console.log(`[Gamepad] Disconnected: "${gp.id}"`);
+    });
+  }
+
+  /** Check if a gamepad button was just pressed this frame (edge-triggered). */
+  private gpJustPressed(gp: Gamepad, index: number): boolean {
+    const pressed = gp.buttons[index]?.pressed ?? false;
+    const wasPrev = this.prevGpButtons[index] ?? false;
+    return pressed && !wasPrev;
+  }
+
+  /** Poll gamepad and merge into queued flags + movement state. */
+  private pollGamepad(): { stickX: number; stickY: number } {
+    const gamepads = navigator.getGamepads?.();
+    if (!gamepads) return { stickX: 0, stickY: 0 };
+
+    // Use first connected gamepad
+    let gp: Gamepad | null = null;
+    for (let i = 0; i < gamepads.length; i++) {
+      if (gamepads[i]) { gp = gamepads[i]; break; }
+    }
+    if (!gp) return { stickX: 0, stickY: 0 };
+
+    if (!this.gpLoggedOnce) {
+      this.gpLoggedOnce = true;
+      console.log(`[Gamepad] Polling: "${gp.id}", mapping: "${gp.mapping}", axes: [${gp.axes.map(a => a.toFixed(2)).join(', ')}]`);
+    }
+
+    // Edge-triggered buttons → queue flags (like keydown)
+    if (this.gpJustPressed(gp, GP_BUTTON_A)) this.attackQueued = true;
+    if (this.gpJustPressed(gp, GP_BUTTON_B)) this.interactQueued = true;
+    if (this.gpJustPressed(gp, GP_BUTTON_X)) this.interactQueued = true;
+    if (this.gpJustPressed(gp, GP_BUTTON_Y)) this.mapKeyQueued = true;
+    if (this.gpJustPressed(gp, GP_BUTTON_START)) this.pauseQueued = true;
+    if (this.gpJustPressed(gp, GP_BUTTON_SELECT)) this.cameraSnapQueued = true;
+
+    // Save button state for next frame edge detection
+    this.prevGpButtons = gp.buttons.map(b => b.pressed);
+
+    // Left stick (axes 0 = X, 1 = Y)
+    let stickX = gp.axes[0] ?? 0;
+    let stickY = gp.axes[1] ?? 0;
+    if (Math.abs(stickX) < GP_STICK_DEADZONE) stickX = 0;
+    if (Math.abs(stickY) < GP_STICK_DEADZONE) stickY = 0;
+
+    return { stickX, stickY };
   }
 
   /**
@@ -110,10 +178,13 @@ export class Input {
    * Do NOT call during hitstop so queued attacks survive until the game resumes.
    */
   update(): InputState {
-    this.state.forward = !!(this.keys['KeyW'] || this.keys['ArrowUp']);
-    this.state.backward = !!(this.keys['KeyS'] || this.keys['ArrowDown']);
-    this.state.left = !!(this.keys['KeyA'] || this.keys['ArrowLeft']);
-    this.state.right = !!(this.keys['KeyD'] || this.keys['ArrowRight']);
+    // Poll gamepad before reading state (queues button presses, returns stick)
+    const { stickX, stickY } = this.pollGamepad();
+
+    this.state.forward = !!(this.keys['KeyW'] || this.keys['ArrowUp']) || stickY < -GP_STICK_DEADZONE;
+    this.state.backward = !!(this.keys['KeyS'] || this.keys['ArrowDown']) || stickY > GP_STICK_DEADZONE;
+    this.state.left = !!(this.keys['KeyA'] || this.keys['ArrowLeft']) || stickX < -GP_STICK_DEADZONE;
+    this.state.right = !!(this.keys['KeyD'] || this.keys['ArrowRight']) || stickX > GP_STICK_DEADZONE;
     this.state.attack = this.attackQueued;
     this.state.cancel = !!this.keys['Escape'];
     this.state.pause = this.pauseQueued;
