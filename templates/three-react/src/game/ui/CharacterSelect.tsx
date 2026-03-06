@@ -6,7 +6,9 @@ import {
   getMonsterSlots,
   getSlots,
   voxRoster,
+  getArchetype,
 } from '../character';
+import { isRangedHeroId } from '../character/CharacterSettings';
 import { audioSystem } from '../../utils/AudioSystem';
 import { voxPreviewManager } from './VoxPreview';
 import type { CharacterType } from '../character';
@@ -107,46 +109,78 @@ export function CharacterSelect() {
   const heroSlots = getHeroSlots();
   const monsterSlots = getMonsterSlots();
 
+  // Split heroes into melee (first row) and ranged (second row)
+  const { meleeSlots, rangedSlots } = useMemo(() => {
+    const melee: CharacterType[] = [];
+    const ranged: CharacterType[] = [];
+    for (const slot of heroSlots) {
+      const entry = voxRoster[slot];
+      const archetype = entry ? getArchetype(entry.name) : '';
+      if (isRangedHeroId(archetype)) {
+        ranged.push(slot);
+      } else {
+        melee.push(slot);
+      }
+    }
+    return { meleeSlots: melee, rangedSlots: ranged };
+  }, [heroSlots]);
+
   const allItems = useMemo(() => {
     const items: Array<
       | { type: 'hero'; slot: CharacterType }
       | { type: 'monster'; slot: CharacterType }
     > = [];
-    for (const slot of heroSlots) items.push({ type: 'hero', slot });
+    // Melee heroes first, then ranged heroes
+    for (const slot of meleeSlots) items.push({ type: 'hero', slot });
+    for (const slot of rangedSlots) items.push({ type: 'hero', slot });
     for (const slot of monsterSlots) items.push({ type: 'monster', slot });
     return items;
-  }, [heroSlots, monsterSlots]);
+  }, [meleeSlots, rangedSlots, monsterSlots]);
 
   // ── Row-aware focus ──
   // Virtual rows:
   //   'heroDice'                → single dice button
-  //   0..heroSlots.length-1     → hero card indices into allItems
+  //   meleeRow0..meleeRowN      → melee hero cards
+  //   rangedRow0..rangedRowN    → ranged hero cards
   //   'monsterDice'             → single dice button
-  //   heroSlots.length..end     → monster card indices into allItems
+  //   monsterRow0..monsterRowN  → monster cards
   type FocusTarget = { kind: 'none' } | { kind: 'heroDice' } | { kind: 'monsterDice' } | { kind: 'card'; index: number };
 
-  const heroRowCount = Math.ceil(heroSlots.length / COLUMNS);
+  const meleeRowCount = Math.ceil(meleeSlots.length / COLUMNS);
+  const rangedRowCount = Math.ceil(rangedSlots.length / COLUMNS);
   const monsterRowCount = Math.ceil(monsterSlots.length / COLUMNS);
+  const heroRowCount = meleeRowCount + rangedRowCount;
 
-  // Row layout: [heroDice, heroRow0, heroRow1, monsterDice, monsterRow0, monsterRow1]
+  // Row layout: [heroDice, meleeRows..., rangedRows..., monsterDice, monsterRows...]
   const getRowItems = useCallback((row: number): FocusTarget[] => {
     if (row === 0) return [{ kind: 'heroDice' }];
-    if (row >= 1 && row <= heroRowCount) {
+    // Melee rows
+    if (row >= 1 && row <= meleeRowCount) {
       const r = row - 1;
       const start = r * COLUMNS;
-      const end = Math.min(start + COLUMNS, heroSlots.length);
+      const end = Math.min(start + COLUMNS, meleeSlots.length);
       return Array.from({ length: end - start }, (_, i) => ({ kind: 'card' as const, index: start + i }));
     }
+    // Ranged rows
+    if (row > meleeRowCount && row <= meleeRowCount + rangedRowCount) {
+      const r = row - meleeRowCount - 1;
+      const start = r * COLUMNS;
+      const end = Math.min(start + COLUMNS, rangedSlots.length);
+      const offset = meleeSlots.length;
+      return Array.from({ length: end - start }, (_, i) => ({ kind: 'card' as const, index: offset + start + i }));
+    }
+    // Monster dice
     if (row === heroRowCount + 1) return [{ kind: 'monsterDice' }];
+    // Monster rows
     if (row > heroRowCount + 1) {
       const r = row - heroRowCount - 2;
       const start = r * COLUMNS;
       const end = Math.min(start + COLUMNS, monsterSlots.length);
-      const offset = heroSlots.length;
+      const offset = meleeSlots.length + rangedSlots.length;
       return Array.from({ length: end - start }, (_, i) => ({ kind: 'card' as const, index: offset + start + i }));
     }
     return [];
-  }, [heroSlots.length, monsterSlots.length, heroRowCount]);
+  }, [meleeSlots.length, rangedSlots.length, monsterSlots.length, meleeRowCount, rangedRowCount, heroRowCount]);
 
   const totalRows = 1 + heroRowCount + 1 + monsterRowCount;
 
@@ -263,9 +297,10 @@ export function CharacterSelect() {
     return () => window.removeEventListener('keydown', onKey);
   }, [focusRow, focusCol, totalRows, getRowItems, getFocusTarget, confirmCard, selectRandomHero, selectRandomMonster]);
 
-  // Hero + monster indices into allItems
-  const heroStart = 0;
-  const monsterStart = heroSlots.length;
+  // Section offsets into allItems
+  const meleeStart = 0;
+  const rangedStart = meleeSlots.length;
+  const monsterStart = meleeSlots.length + rangedSlots.length;
 
   // Helper: is a given card index focused?
   const isCardFocused = (cardIndex: number) =>
@@ -342,16 +377,41 @@ export function CharacterSelect() {
           <div style={{ flex: 1, height: 1, background: 'rgba(255,255,255,0.15)' }} />
         </div>
 
-        {/* Heroes */}
+        {/* Melee heroes */}
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: `repeat(${COLUMNS}, 1fr)`,
+          gap: 8,
+          marginBottom: 6,
+        }}>
+          {meleeSlots.map((_, i) => {
+            const cardIdx = meleeStart + i;
+            const row = 1 + Math.floor(i / COLUMNS);
+            const col = i % COLUMNS;
+            return (
+              <CardSlot
+                key={cardIdx}
+                index={cardIdx}
+                item={allItems[cardIdx]}
+                isFocused={isCardFocused(cardIdx)}
+                onHover={() => { mouseActiveRef.current = true; setFocusRow(row); setFocusCol(col); lastColRef.current = col; }}
+                onLeave={() => { mouseActiveRef.current = false; setFocusRow(-1); }}
+                confirmSelection={confirmCard}
+              />
+            );
+          })}
+        </div>
+
+        {/* Ranged heroes */}
         <div style={{
           display: 'grid',
           gridTemplateColumns: `repeat(${COLUMNS}, 1fr)`,
           gap: 8,
           marginBottom: 14,
         }}>
-          {heroSlots.map((_, i) => {
-            const cardIdx = heroStart + i;
-            const row = 1 + Math.floor(i / COLUMNS);
+          {rangedSlots.map((_, i) => {
+            const cardIdx = rangedStart + i;
+            const row = meleeRowCount + 1 + Math.floor(i / COLUMNS);
             const col = i % COLUMNS;
             return (
               <CardSlot
@@ -403,7 +463,7 @@ export function CharacterSelect() {
         }}>
           {monsterSlots.map((_, i) => {
             const cardIdx = monsterStart + i;
-            const row = heroRowCount + 2 + Math.floor(i / COLUMNS);
+            const row = meleeRowCount + rangedRowCount + 2 + Math.floor(i / COLUMNS);
             const col = i % COLUMNS;
             return (
               <CardSlot
