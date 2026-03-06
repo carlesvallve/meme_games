@@ -165,7 +165,7 @@ export const DEFAULT_CAMERA_PARAMS: CameraParams = {
   maxDistance: 25,
   distance: 12,
   pitchMin: -80,
-  pitchMax: -10,
+  pitchMax: 0,
   rotationSpeed: 0.005,
   zoomSpeed: 0.01,
   collisionLayers: Layer.None,

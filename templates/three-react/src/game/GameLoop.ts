@@ -347,17 +347,24 @@ export function createGameLoop(
         if (nearestPoi) {
           // Show/update ENTER prompt
           if (!ctx.dungeonEnterPrompt) {
-            ctx.dungeonEnterPrompt = createTextLabel('[ E ]', {
+            ctx.dungeonEnterPrompt = createTextLabel('[ Enter ]', {
               color: '#ffdd66',
-              fontSize: 36,
-              height: 0.3,
+              fontSize: 28,
+              height: 0.22,
               depthTest: false,
               renderOrder: 950,
             });
             ctx.scene.add(ctx.dungeonEnterPrompt);
           }
-          const promptY = ctx.terrain.getFloorY(nearestWx, nearestWz) + 1.6;
-          ctx.dungeonEnterPrompt.position.set(nearestWx, promptY, nearestWz);
+          // Position just below the dungeon name label (which is at floorY + 1.25)
+          // Offset toward camera same as name label (dungeonOffset = 0.5)
+          const promptY = ctx.terrain.getFloorY(nearestWx, nearestWz) + 0.95;
+          const camPos = ctx.cam.camera.position;
+          const dx = camPos.x - nearestWx;
+          const dz = camPos.z - nearestWz;
+          const len = Math.sqrt(dx * dx + dz * dz);
+          const off = len > 0.01 ? 0.5 / len : 0;
+          ctx.dungeonEnterPrompt.position.set(nearestWx + dx * off, promptY, nearestWz + dz * off);
           // Pulse opacity
           const pulse = 0.6 + 0.4 * Math.sin(performance.now() * 0.005);
           (ctx.dungeonEnterPrompt.material as THREE.SpriteMaterial).opacity = pulse;

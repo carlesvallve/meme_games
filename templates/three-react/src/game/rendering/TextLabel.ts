@@ -26,6 +26,10 @@ export interface TextLabelOpts {
   renderOrder?: number;
   /** Max chars per line before wrapping. Default 28 */
   maxLineChars?: number;
+  /** World-space offset toward camera. When set, the label's onBeforeRender
+   *  automatically pushes it toward the camera by this distance from its
+   *  base position. Useful for POI labels on 3D structures. Default undefined (no offset). */
+  cameraOffset?: number;
 }
 
 /** Split text into lines, wrapping at word boundaries when exceeding maxChars. */
@@ -113,6 +117,25 @@ export function createTextLabel(text: string, opts: TextLabelOpts = {}): THREE.S
   const aspect = canvas.width / canvas.height;
   sprite.scale.set(scaledH * aspect, scaledH, 1);
   sprite.renderOrder = renderOrder;
+
+  // Auto-offset toward camera if requested
+  const cameraOffset = opts.cameraOffset;
+  if (cameraOffset != null && cameraOffset > 0) {
+    const basePos = new THREE.Vector3();
+    let baseSet = false;
+    sprite.onBeforeRender = (_r, _s, camera) => {
+      // Capture base position on first render (after caller sets position)
+      if (!baseSet) { basePos.copy(sprite.position); baseSet = true; }
+      const dx = camera.position.x - basePos.x;
+      const dz = camera.position.z - basePos.z;
+      const len = Math.sqrt(dx * dx + dz * dz);
+      if (len > 0.01) {
+        sprite.position.x = basePos.x + (dx / len) * cameraOffset;
+        sprite.position.z = basePos.z + (dz / len) * cameraOffset;
+      }
+    };
+  }
+
   // Stash opts for updateTextLabel
   (sprite as any).__textLabelOpts = { color, outlineColor, outlineWidth, fontSize, height, depthTest, opacity, renderOrder, maxLineChars };
   return sprite;
