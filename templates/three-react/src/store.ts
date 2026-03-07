@@ -130,6 +130,14 @@ interface SavedSettings {
   postProcess?: PostProcessSettings;
   particleToggles?: ParticleToggles;
   gridOpacity?: number;
+  gridCellSize?: number;
+  charSpeed?: number;
+  charMoveSpeed?: number;
+  charHop?: boolean;
+  charDebugPath?: boolean;
+  charStringPull?: boolean;
+  charStepHeight?: number;
+  charSnapMode?: 'free' | '4dir' | '8dir';
 }
 
 function loadSettings(): SavedSettings {
@@ -155,6 +163,14 @@ function saveSettings(): void {
     postProcess: s.postProcess,
     particleToggles: s.particleToggles,
     gridOpacity: s.gridOpacity,
+    gridCellSize: s.gridCellSize,
+    charSpeed: s.charSpeed,
+    charMoveSpeed: s.charMoveSpeed,
+    charHop: s.charHop,
+    charDebugPath: s.charDebugPath,
+    charStringPull: s.charStringPull,
+    charStepHeight: s.charStepHeight,
+    charSnapMode: s.charSnapMode,
   };
   try {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(data));
@@ -174,6 +190,8 @@ interface GameStore {
   torchEnabled: boolean;
   torchParams: TorchParams;
   gridOpacity: number;
+  gridCellSize: number;
+  setGridCellSize: (v: number) => void;
   timeOfDay: number;
   dayCycleEnabled: boolean;
   dayCycleSpeed: number;
@@ -186,10 +204,18 @@ interface GameStore {
   charSpeed: number;
   charMoveSpeed: number;
   charHop: boolean;
+  charDebugPath: boolean;
+  charStringPull: boolean;
+  charStepHeight: number;
+  charSnapMode: 'free' | '4dir' | '8dir';
   setCharAnimation: (v: string) => void;
   setCharSpeed: (v: number) => void;
   setCharMoveSpeed: (v: number) => void;
   setCharHop: (v: boolean) => void;
+  setCharDebugPath: (v: boolean) => void;
+  setCharStringPull: (v: boolean) => void;
+  setCharStepHeight: (v: number) => void;
+  setCharSnapMode: (v: 'free' | '4dir' | '8dir') => void;
   /** Populated by Game.ts after model loads */
   charAnimationList: string[];
   setCharAnimationList: (v: string[]) => void;
@@ -225,6 +251,10 @@ interface GameStore {
   onPauseToggle: (() => void) | null;
   onResetCameraParams: (() => void) | null;
   onResetLightParams: (() => void) | null;
+  obstacleSnap: boolean;
+  setObstacleSnap: (v: boolean) => void;
+  onGenerateObstacles: (() => void) | null;
+  onClearObstacles: (() => void) | null;
 }
 
 const saved = loadSettings();
@@ -243,6 +273,8 @@ export const useGameStore = create<GameStore>((set) => ({
   torchEnabled: saved.torchEnabled ?? false,
   torchParams: saved.torchParams ?? { ...DEFAULT_TORCH_PARAMS },
   gridOpacity: saved.gridOpacity ?? 0.25,
+  gridCellSize: saved.gridCellSize ?? 1,
+  setGridCellSize: (gridCellSize) => set({ gridCellSize }),
   timeOfDay: saved.timeOfDay ?? 10,
   dayCycleEnabled: saved.dayCycleEnabled ?? false,
   dayCycleSpeed: saved.dayCycleSpeed ?? 1,
@@ -251,13 +283,21 @@ export const useGameStore = create<GameStore>((set) => ({
   postProcess: saved.postProcess ?? { ...DEFAULT_POST_PROCESS },
 
   charAnimation: 'Idle',
-  charSpeed: 1,
-  charMoveSpeed: 5,
-  charHop: true,
+  charSpeed: saved.charSpeed ?? 1,
+  charMoveSpeed: saved.charMoveSpeed ?? 5,
+  charHop: saved.charHop ?? true,
+  charDebugPath: saved.charDebugPath ?? false,
+  charStringPull: saved.charStringPull ?? true,
+  charStepHeight: saved.charStepHeight ?? 0.5,
+  charSnapMode: (saved.charSnapMode ?? 'free') as 'free' | '4dir' | '8dir',
   setCharAnimation: (charAnimation) => set({ charAnimation }),
   setCharSpeed: (charSpeed) => set({ charSpeed }),
   setCharMoveSpeed: (charMoveSpeed) => set({ charMoveSpeed }),
   setCharHop: (charHop) => set({ charHop }),
+  setCharDebugPath: (charDebugPath) => set({ charDebugPath }),
+  setCharStringPull: (charStringPull) => set({ charStringPull }),
+  setCharStepHeight: (charStepHeight) => set({ charStepHeight }),
+  setCharSnapMode: (charSnapMode) => set({ charSnapMode }),
   charAnimationList: [],
   setCharAnimationList: (charAnimationList) => set({ charAnimationList }),
 
@@ -289,10 +329,14 @@ export const useGameStore = create<GameStore>((set) => ({
   setPostProcessParam: (key, value) =>
     set((s) => ({ postProcess: { ...s.postProcess, [key]: value } })),
 
+  obstacleSnap: true,
+  setObstacleSnap: (obstacleSnap) => set({ obstacleSnap }),
   onStartGame: null,
   onPauseToggle: null,
   onResetCameraParams: null,
   onResetLightParams: null,
+  onGenerateObstacles: null,
+  onClearObstacles: null,
 }));
 
 // Auto-save settings to localStorage on any change

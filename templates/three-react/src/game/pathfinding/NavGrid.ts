@@ -711,24 +711,8 @@ export class NavGrid {
       }
     }
 
-    // Recompute passability for neighbors of newly blocked cells
-    for (let gz = 0; gz < height; gz++) {
-      for (let gx = 0; gx < width; gx++) {
-        const cell = this.cells[gz * width + gx];
-        if (cell.blocked) continue;
-        let mask = cell.passable;
-        for (let dir = 0; dir < 8; dir++) {
-          if (!(mask & (1 << dir))) continue;
-          const ngx = gx + DIR_DGX[dir];
-          const ngz = gz + DIR_DGZ[dir];
-          if (ngx < 0 || ngx >= width || ngz < 0 || ngz >= height) continue;
-          if (this.cells[ngz * width + ngx].blocked) {
-            mask &= ~(1 << dir);
-          }
-        }
-        cell.passable = mask;
-      }
-    }
+    // Full recompute: handles diagonal corner checks properly
+    this.recomputePassability();
   }
 
   /** Add a bidirectional nav-link between two cells (e.g. for ladders). */
@@ -822,14 +806,41 @@ export class NavGrid {
       if (x0 === x1 && z0 === z1) break;
 
       const e2 = 2 * err;
-      const willMoveX = e2 > -dz;
-      const willMoveZ = e2 < dx;
+      // Use inclusive checks so borderline cases (line through grid intersection)
+      // are treated as diagonal — prevents inconsistent corner clipping
+      const willMoveX = e2 >= -dz;
+      const willMoveZ = e2 <= dx;
 
       if (willMoveX && willMoveZ) {
         // Diagonal step — check both adjacent cells (corner-cutting prevention)
         const adjX = this.getCell(x0 + sx, z0);
         const adjZ = this.getCell(x0, z0 + sz);
         if (!adjX || adjX.blocked || !adjZ || adjZ.blocked) return false;
+      } else {
+        // Cardinal step — still check for corner clipping from character radius.
+        // If a blocked cell sits diagonally and both cardinal neighbors are open,
+        // the character's radius can clip through the blocked cell's corner.
+        if (willMoveX) {
+          // Moving along X — check diagonals ahead
+          for (const dz2 of [-1, 1]) {
+            const diag = this.getCell(x0 + sx, z0 + dz2);
+            if (diag && diag.blocked) {
+              const adjX = this.getCell(x0 + sx, z0);
+              const adjZ = this.getCell(x0, z0 + dz2);
+              if (adjX && !adjX.blocked && adjZ && !adjZ.blocked) return false;
+            }
+          }
+        } else {
+          // Moving along Z — check diagonals ahead
+          for (const dx2 of [-1, 1]) {
+            const diag = this.getCell(x0 + dx2, z0 + sz);
+            if (diag && diag.blocked) {
+              const adjX = this.getCell(x0 + dx2, z0);
+              const adjZ = this.getCell(x0, z0 + sz);
+              if (adjX && !adjX.blocked && adjZ && !adjZ.blocked) return false;
+            }
+          }
+        }
       }
 
       if (willMoveX) { err -= dz; x0 += sx; }

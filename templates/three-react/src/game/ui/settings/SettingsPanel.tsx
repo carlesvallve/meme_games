@@ -5,8 +5,9 @@ import { CameraPanel } from './CameraPanel';
 import { LightPanel } from './LightPanel';
 import { PostFXPanel } from './PostFXPanel';
 import { CharacterPanel } from './CharacterPanel';
+import { WorldPanel } from './WorldPanel';
 
-type ActivePanel = 'camera' | 'light' | 'postfx' | 'char' | null;
+type ActivePanel = 'camera' | 'light' | 'postfx' | 'char' | 'world' | null;
 
 export function SettingsPanel() {
   const [active, setActive] = useState<ActivePanel>(null);
@@ -38,6 +39,7 @@ export function SettingsPanel() {
         alignItems: isMobile ? 'stretch' : 'flex-end',
       }}
     >
+      {active === 'world' && <WorldPanel />}
       {active === 'char' && <CharacterPanel />}
       {active === 'camera' && <CameraPanel />}
       {active === 'light' && <LightPanel />}
@@ -52,6 +54,12 @@ export function SettingsPanel() {
           gap: 4,
         }}
       >
+        <button
+          onClick={() => toggle('world')}
+          style={btnStyle(active === 'world')}
+        >
+          World
+        </button>
         <button
           onClick={() => toggle('char')}
           style={btnStyle(active === 'char')}
