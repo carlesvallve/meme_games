@@ -258,6 +258,8 @@ export class DummyCharacter {
     this.moveSpeed = speed;
     this.wasMoving = true;
     const pos = this.root.position;
+    const oldX = pos.x;
+    const oldZ = pos.z;
     pos.x += nx * speed * dt;
     pos.z += nz * speed * dt;
 
@@ -265,6 +267,22 @@ export class DummyCharacter {
     const half = this.navGrid.getHalfSize();
     pos.x = Math.max(-half, Math.min(half, pos.x));
     pos.z = Math.max(-half, Math.min(half, pos.z));
+
+    // Ledge guard: prevent dropping more than stepDown (NavGrid cell-based, like voxel engine)
+    {
+      const oldG = this.navGrid.worldToGrid(oldX, oldZ);
+      const newG = this.navGrid.worldToGrid(pos.x, pos.z);
+      if (oldG.gx !== newG.gx || oldG.gz !== newG.gz) {
+        const oldCell = this.navGrid.getCell(oldG.gx, oldG.gz);
+        const newCell = this.navGrid.getCell(newG.gx, newG.gz);
+        const oldH = oldCell ? oldCell.surfaceHeight : 0;
+        const newH = newCell ? newCell.surfaceHeight : 0;
+        if (oldH - newH > this.stepDown) {
+          pos.x = oldX;
+          pos.z = oldZ;
+        }
+      }
+    }
 
     // Smooth facing
     const targetAngle = Math.atan2(nx, nz);
