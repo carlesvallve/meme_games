@@ -5,8 +5,10 @@ import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js';
 import type { NavGrid } from './pathfinding/NavGrid';
 import type { AABBBox } from './pathfinding/NavGrid';
 import { findPath } from './pathfinding/AStar';
+import type { WaypointMeta } from './pathfinding/AStar';
 import { resolveCollision, getSurfaceHeight } from './CollisionUtils';
 import { audioSystem } from './AudioSystem';
+import type { LadderDef } from './LadderSystem';
 import {
   DEFAULT_TURN_SPEED,
   WAYPOINT_THRESHOLD,
@@ -15,7 +17,30 @@ import {
   STEP_UP_RATE,
   GRAVITY,
   MAX_FALL_SPEED,
+  CLIMB_SPEED,
+  MOUNT_SPEED,
+  DISMOUNT_SPEED,
+  CLIMB_WALL_OFFSET,
+  RUNG_PAUSE,
+  DISMOUNT_DIST,
+  LADDER_RUNG_SPACING,
+  LADDER_SEARCH_RADIUS,
+  LADDER_DOT_THRESHOLD,
 } from './GameConstants';
+
+interface ClimbState {
+  ladder: LadderDef;
+  direction: 'up' | 'down';
+  phase: 'mount' | 'climb' | 'dismount';
+  phaseTime: number;
+  mountDuration: number;
+  dismountDuration: number;
+  startX: number; startZ: number;
+  targetFacing: number;
+  rungCount: number;
+  currentRung: number;
+  rungPauseTimer: number;
+}
 
 export class DummyCharacter {
   readonly root: THREE.Group;
@@ -49,6 +74,11 @@ export class DummyCharacter {
   private collisionRadius = 0.25;
   private stepUp = 0.5;
   private stepDown = 1.0;
+
+  // Ladder climbing
+  private ladderDefs: LadderDef[] = [];
+  private climbState: ClimbState | null = null;
+  private pathMeta: WaypointMeta[] = [];
   private turnSpeed = DEFAULT_TURN_SPEED;
   private gravity = GRAVITY;
   private maxFallSpeed = MAX_FALL_SPEED;
@@ -62,8 +92,8 @@ export class DummyCharacter {
     this.navGrid = navGrid;
     this.root = new THREE.Group();
 
-    const geo = new THREE.BoxGeometry(0.5, 1, 0.5);
-    geo.translate(0, 0.5, 0);
+    const geo = new THREE.BoxGeometry(0.25, 0.5, 0.25);
+    geo.translate(0, 0.25, 0);
     const mat = new THREE.MeshStandardMaterial({ color: 0x44aaff, roughness: 0.6 });
     const mesh = new THREE.Mesh(geo, mat);
     mesh.castShadow = true;
@@ -120,6 +150,197 @@ export class DummyCharacter {
     if (!enabled && this.pathLine) {
       this.clearPathLine();
     }
+  }
+
+  setLadderDefs(defs: LadderDef[]): void {
+    this.ladderDefs = defs;
+  }
+
+  isClimbing(): boolean {
+    return this.climbState !== null;
+  }
+
+  /** Start climbing a ladder. Called automatically when path has a ladder waypoint. */
+  private startClimb(ladder: LadderDef, direction: 'up' | 'down'): void {
+    const pos = this.root.position;
+
+    // facingDX/DZ points from low cell INTO the wall (toward high cell).
+    // The ladder mesh sits on the low cell side, against the wall.
+    // Mount position: on the low cell side, offset slightly from the wall face.
+    // For climbing UP: mount at low side (stand in front of wall, face the wall)
+    // For climbing DOWN: mount at high side (stand on top, face away from edge)
+    const wallX = (ladder.lowWorldX + ladder.highWorldX) * 0.5;
+    const wallZ = (ladder.lowWorldZ + ladder.highWorldZ) * 0.5;
+    // Stand offset from wall toward the low side
+    const climbX = wallX - ladder.facingDX * CLIMB_WALL_OFFSET;
+    const climbZ = wallZ - ladder.facingDZ * CLIMB_WALL_OFFSET;
+
+    const mountDist = Math.sqrt((climbX - pos.x) ** 2 + (climbZ - pos.z) ** 2);
+
+    // Face the wall when climbing up, face away when climbing down
+    const targetFacing = direction === 'up'
+      ? Math.atan2(ladder.facingDX, ladder.facingDZ)   // face into wall
+      : Math.atan2(-ladder.facingDX, -ladder.facingDZ); // face away from wall
+
+    const dy = ladder.topY - ladder.bottomY;
+    const rungCount = Math.max(1, Math.floor(dy / LADDER_RUNG_SPACING));
+
+    this.climbState = {
+      ladder,
+      direction,
+      phase: 'mount',
+      phaseTime: 0,
+      mountDuration: Math.max(0.05, mountDist / MOUNT_SPEED),
+      dismountDuration: Math.max(0.05, DISMOUNT_DIST / DISMOUNT_SPEED),
+      startX: pos.x,
+      startZ: pos.z,
+      targetFacing,
+      rungCount,
+      currentRung: direction === 'up' ? 0 : rungCount,
+      rungPauseTimer: 0,
+    };
+
+    this.moveSpeed = 0;
+  }
+
+  /** Try to find a ladder aligned with WASD movement direction when blocked. */
+  private tryAutoLadder(moveDX: number, moveDZ: number, gx: number, gz: number): void {
+    if (this.ladderDefs.length === 0) return;
+
+    const links = this.navGrid.getNavLinks(gx, gz);
+    if (!links) return;
+
+    let bestDot = LADDER_DOT_THRESHOLD;
+    let bestLadder: LadderDef | null = null;
+    let bestDir: 'up' | 'down' = 'up';
+
+    for (const link of links) {
+      if (link.ladderIndex < 0 || link.ladderIndex >= this.ladderDefs.length) continue;
+      const ladder = this.ladderDefs[link.ladderIndex];
+
+      // Direction from current cell to link target
+      const toWorld = this.navGrid.gridToWorld(link.toGX, link.toGZ);
+      const fromWorld = this.navGrid.gridToWorld(gx, gz);
+      const dx = toWorld.x - fromWorld.x;
+      const dz = toWorld.z - fromWorld.z;
+      const len = Math.sqrt(dx * dx + dz * dz);
+      if (len < 0.01) continue;
+
+      // Dot product with movement direction
+      const dot = (moveDX * dx + moveDZ * dz) / len;
+      if (dot > bestDot) {
+        bestDot = dot;
+        bestLadder = ladder;
+        // Determine direction based on height comparison
+        const fromCell = this.navGrid.getCell(gx, gz);
+        const toCell = this.navGrid.getCell(link.toGX, link.toGZ);
+        bestDir = (toCell && fromCell && toCell.surfaceHeight > fromCell.surfaceHeight) ? 'up' : 'down';
+      }
+    }
+
+    if (bestLadder) {
+      this.startClimb(bestLadder, bestDir);
+    }
+  }
+
+  /** Update the climbing state machine each frame. Returns true while climbing. */
+  private updateClimb(dt: number): boolean {
+    const cs = this.climbState;
+    if (!cs) return false;
+
+    const pos = this.root.position;
+    const ladder = cs.ladder;
+    cs.phaseTime += dt;
+
+    // Smoothly face the ladder throughout all phases
+    this.facingAngle = lerpAngle(this.facingAngle, cs.targetFacing, 1 - Math.exp(-12 * dt));
+    this.root.rotation.y = this.facingAngle;
+
+    // Climb XZ: midpoint between low/high cells, offset toward low side
+    const wallX = (ladder.lowWorldX + ladder.highWorldX) * 0.5;
+    const wallZ = (ladder.lowWorldZ + ladder.highWorldZ) * 0.5;
+    const climbX = wallX - ladder.facingDX * CLIMB_WALL_OFFSET;
+    const climbZ = wallZ - ladder.facingDZ * CLIMB_WALL_OFFSET;
+
+    if (cs.phase === 'mount') {
+      // Walk toward the ladder climb position
+      const t = Math.min(cs.phaseTime / cs.mountDuration, 1);
+      pos.x = cs.startX + (climbX - cs.startX) * t;
+      pos.z = cs.startZ + (climbZ - cs.startZ) * t;
+
+      if (t >= 1) {
+        cs.phase = 'climb';
+        cs.phaseTime = 0;
+      }
+    } else if (cs.phase === 'climb') {
+      // Keep character locked to ladder XZ
+      pos.x = climbX;
+      pos.z = climbZ;
+
+      // Rung pause
+      if (cs.rungPauseTimer > 0) {
+        cs.rungPauseTimer -= dt;
+        pos.y = this.visualGroundY;
+        return true;
+      }
+
+      // Continuous vertical movement toward next rung
+      const targetRung = cs.direction === 'up' ? cs.currentRung + 1 : cs.currentRung - 1;
+      const rungT = cs.rungCount > 0 ? targetRung / cs.rungCount : 1;
+      const totalDY = ladder.topY - ladder.bottomY;
+      const targetY = ladder.bottomY + totalDY * rungT;
+
+      const diff = targetY - this.groundY;
+      const step = CLIMB_SPEED * dt;
+
+      if (Math.abs(diff) <= step) {
+        // Reached the rung — play step SFX
+        this.groundY = targetY;
+        this.visualGroundY = targetY;
+        cs.currentRung = targetRung;
+        cs.rungPauseTimer = RUNG_PAUSE;
+        audioSystem.playStep(0.6);
+
+        // Check if done
+        const done = cs.direction === 'up'
+          ? cs.currentRung >= cs.rungCount
+          : cs.currentRung <= 0;
+        if (done) {
+          cs.phase = 'dismount';
+          cs.phaseTime = 0;
+          cs.startX = pos.x;
+          cs.startZ = pos.z;
+        }
+      } else {
+        // Move toward target rung
+        this.groundY += (diff > 0 ? 1 : -1) * step;
+        this.visualGroundY = this.groundY;
+      }
+
+      pos.y = this.visualGroundY;
+      return true;
+    } else if (cs.phase === 'dismount') {
+      // Walk from ladder onto the destination cell
+      const exitX = cs.direction === 'up' ? ladder.highWorldX : ladder.lowWorldX;
+      const exitZ = cs.direction === 'up' ? ladder.highWorldZ : ladder.lowWorldZ;
+
+      const t = Math.min(cs.phaseTime / cs.dismountDuration, 1);
+      pos.x = cs.startX + (exitX - cs.startX) * t;
+      pos.z = cs.startZ + (exitZ - cs.startZ) * t;
+
+      if (t >= 1) {
+        pos.x = exitX;
+        pos.z = exitZ;
+        this.groundY = cs.direction === 'up' ? ladder.topY : ladder.bottomY;
+        this.visualGroundY = this.groundY;
+        this.velocityY = 0;
+        this.climbState = null;
+        return false;
+      }
+    }
+
+    pos.y = this.visualGroundY;
+    return true;
   }
 
   /** Get navgrid surface height at a world position (for debug line) */
@@ -216,6 +437,9 @@ export class DummyCharacter {
    *  Free mode: continuous movement with collision.
    *  Grid modes: continuous movement with direction snapping + settle to cell center. */
   moveDirectional(dx: number, dz: number, cameraAngleY: number, dt: number, speed: number): void {
+    // Don't allow movement while climbing
+    if (this.climbState) return;
+
     if (dx === 0 && dz === 0) {
       if (this.moveSpeed > 0 && this.path.length === 0) {
         const isGrid = this.snapMode === '4dir' || this.snapMode === '8dir';
@@ -278,9 +502,13 @@ export class DummyCharacter {
         const newCell = this.navGrid.getCell(newG.gx, newG.gz);
         const oldH = oldCell ? oldCell.surfaceHeight : 0;
         const newH = newCell ? newCell.surfaceHeight : 0;
-        if (oldH - newH > this.stepDown) {
+        const heightDiff = newH - oldH;
+        const blocked = (oldH - newH > this.stepDown) || (heightDiff > this.stepUp);
+        if (blocked) {
           pos.x = oldX;
           pos.z = oldZ;
+          // Auto-trigger ladder: search nearby nav-links aligned with movement
+          this.tryAutoLadder(nx, nz, oldG.gx, oldG.gz);
         }
       }
     }
@@ -327,6 +555,15 @@ export class DummyCharacter {
             this.pathPaused = false;
             this.moveSpeed = speed;
             this.clickCount = 0;
+            // Check if the current waypoint is a ladder — start climbing immediately
+            const meta = this.pathMeta[this.pathIndex];
+            if (meta && meta.ladderIndex != null && meta.ladderIndex >= 0 && meta.ladderIndex < this.ladderDefs.length) {
+              const ladder = this.ladderDefs[meta.ladderIndex];
+              const dir = meta.climbDirection ?? 'up';
+              this.pathIndex++;
+              this.startClimb(ladder, dir);
+              this.updatePathLine();
+            }
             return true;
           }
         }
@@ -336,10 +573,32 @@ export class DummyCharacter {
     }
 
     // Generate new path
+    const goalGrid = this.navGrid.worldToGrid(gx, gz);
+    const goalCell = this.navGrid.getCell(goalGrid.gx, goalGrid.gz);
+    console.log(`[GOTO] goal world(${gx.toFixed(1)},${gz.toFixed(1)}) grid(${goalGrid.gx},${goalGrid.gz}) h=${goalCell?.surfaceHeight.toFixed(2)} blocked=${goalCell?.blocked} passable=${goalCell?.passable} links=${this.navGrid.getNavLinks(goalGrid.gx, goalGrid.gz)?.length ?? 0}`);
     const result = findPath(this.navGrid, pos.x, pos.z, gx, gz, 10000, cardinalOnly, this.stringPull);
-    if (!result.found || result.path.length < 2) return false;
+    if (!result.found || result.path.length < 2) {
+      console.log(`[GOTO] No path found!`);
+      return false;
+    }
+    console.log(`[GOTO] Path found: ${result.path.length} waypoints, meta:`, result.meta.map(m => m.ladderIndex));
     this.path = result.path;
+    this.pathMeta = result.meta;
     this.pathIndex = 1;
+
+    // If the first waypoint we're heading to is a ladder, start climbing immediately
+    // (handles case where character is already standing on the ladder's low cell)
+    // But only if autoMove is enabled — otherwise let the path be shown first
+    const firstMeta = this.pathMeta[1];
+    if (this.autoMove && firstMeta && firstMeta.ladderIndex != null && firstMeta.ladderIndex >= 0 && firstMeta.ladderIndex < this.ladderDefs.length) {
+      const ladder = this.ladderDefs[firstMeta.ladderIndex];
+      const dir = firstMeta.climbDirection ?? 'up';
+      console.log(`[CLIMB] Immediate climb from start: ladder#${firstMeta.ladderIndex}, dir=${dir}`);
+      this.pathIndex = 2; // skip past ladder waypoint
+      this.startClimb(ladder, dir);
+      this.updatePathLine();
+      return true;
+    }
     this.settleTarget = null;
     this.goalRadius = markerRadius;
     this.clickCount = 1;
@@ -370,6 +629,12 @@ export class DummyCharacter {
 
   /** Advance path following + settle + collision + hop. Call every frame. */
   update(dt: number, speed: number): void {
+    // ── Climbing state machine takes priority ──
+    if (this.climbState) {
+      console.log(`[CLIMB] phase=${this.climbState.phase}, groundY=${this.groundY.toFixed(2)}, visualY=${this.visualGroundY.toFixed(2)}, posY=${this.root.position.y.toFixed(2)}, rung=${this.climbState.currentRung}/${this.climbState.rungCount}`);
+    }
+    if (this.updateClimb(dt)) return;
+
     const pos = this.root.position;
 
     // ── Settle: glide to nearest cell center on key release (grid modes) ──
@@ -406,7 +671,10 @@ export class DummyCharacter {
         // Set groundY to this waypoint's NavGrid height (stable, no collision artifacts)
         this.prevWaypointNavH = this.pathNavHeights[this.pathIndex] ?? 0;
         this.groundY = this.prevWaypointNavH;
+
+        // Advance to next waypoint
         this.pathIndex++;
+
         if (this.pathIndex >= this.path.length) {
           // Snap to exact goal
           const goal = this.path[this.path.length - 1];
@@ -414,9 +682,20 @@ export class DummyCharacter {
           pos.z = goal.z;
           this.path.length = 0;
           this.pathNavHeights.length = 0;
+          this.pathMeta.length = 0;
           this.moveSpeed = 0;
           this.clearPathLine();
         } else {
+          // Check if the NEW waypoint we're heading toward is a ladder
+          const meta = this.pathMeta[this.pathIndex];
+          console.log(`[PATH] heading to waypoint ${this.pathIndex}/${this.path.length}, meta:`, meta, `ladderDefs=${this.ladderDefs.length}`);
+          if (meta && meta.ladderIndex != null && meta.ladderIndex >= 0 && meta.ladderIndex < this.ladderDefs.length) {
+            const ladder = this.ladderDefs[meta.ladderIndex];
+            const dir = meta.climbDirection ?? 'up';
+            console.log(`[CLIMB] Starting climb: ladder#${meta.ladderIndex}, dir=${dir}, bottomY=${ladder.bottomY}, topY=${ladder.topY}`);
+            this.startClimb(ladder, dir);
+            return; // climbing takes over
+          }
           this.updatePathLine();
         }
       } else {
@@ -516,7 +795,7 @@ export class DummyCharacter {
     // ── Hop + step SFX ──
     this.footSfxTimer += dt;
     if (this.hopEnabled && this.moveSpeed > 0) {
-      this.hopPhase += dt * this.moveSpeed * 2;
+      this.hopPhase += dt * this.moveSpeed * 4;
       const hop = Math.abs(Math.sin(this.hopPhase)) * HOP_HEIGHT;
       pos.y = this.visualGroundY + hop;
 

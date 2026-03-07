@@ -132,7 +132,7 @@ const SETTINGS_KEY = 'three-react:settings';
 const TRANSIENT_KEYS = new Set([
   'phase', 'charAnimation', 'charAnimationList', 'settingsPanelOpen',
   'onStartGame', 'onPauseToggle', 'onResetCameraParams', 'onResetLightParams',
-  'onGenerateObstacles', 'onGenerateTerrain', 'onClearObstacles',
+  'onGenerateObstacles', 'onGenerateTerrain', 'onGenerateLadders', 'onClearObstacles', 'onGenerateWorld',
 ]);
 
 function loadSettings(): Record<string, unknown> {
@@ -250,7 +250,9 @@ interface GameStore {
   setObstacleSnap: (v: boolean) => void;
   onGenerateObstacles: (() => void) | null;
   onGenerateTerrain: (() => void) | null;
+  onGenerateLadders: (() => void) | null;
   onClearObstacles: (() => void) | null;
+  onGenerateWorld: (() => void) | null;
 }
 
 const saved = loadSettings();
@@ -345,7 +347,9 @@ export const useGameStore = create<GameStore>((set) => ({
   onResetLightParams: null,
   onGenerateObstacles: null,
   onGenerateTerrain: null,
+  onGenerateLadders: null,
   onClearObstacles: null,
+  onGenerateWorld: null,
 }));
 
 // Auto-save settings to localStorage on any change

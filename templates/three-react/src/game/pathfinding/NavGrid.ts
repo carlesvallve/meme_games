@@ -372,8 +372,109 @@ export class NavGrid {
   }
 
   /** Recompute per-edge passability for all non-blocked cells. */
-  private recomputePassability(): void {
+  recomputePassability(): void {
     this.computePassability(this.stepUp, this.stepDown);
+  }
+
+  /** Re-run the reachability flood-fill including nav-links (ladders).
+   *  Unblocks elevated cells reachable from ground via walking + nav-links,
+   *  then recomputes passability edges for newly-unblocked cells.
+   *
+   *  Key insight: blocked cells have passable=0, so we can't rely on precomputed
+   *  passability edges to spread through them. Instead, when we reach a cell
+   *  (via edge or nav-link), we also check all 8-dir neighbors by direct height
+   *  comparison — if a blocked neighbor is within stepUp range, we unblock and
+   *  enqueue it, allowing the flood to spread across entire terraces. */
+  recomputeReachability(): void {
+    const { width, height, stepUp, stepDown } = this;
+    const EPS = 0.01;
+    const totalCells = width * height;
+    const reachable = new Uint8Array(totalCells);
+    const queue: number[] = [];
+
+    // Seed: all non-blocked cells at ground level or within stepUp of ground
+    for (let i = 0; i < totalCells; i++) {
+      const cell = this.cells[i];
+      if (!cell.blocked && cell.surfaceHeight <= stepUp) {
+        reachable[i] = 1;
+        queue.push(i);
+      }
+    }
+
+    // BFS through passable edges, nav-links, AND direct height checks for blocked neighbors
+    while (queue.length > 0) {
+      const idx = queue.shift()!;
+      const cgx = idx % width;
+      const cgz = (idx - cgx) / width;
+      const cell = this.cells[idx];
+
+      // Walk through passable edges (for already-unblocked cells with computed edges)
+      for (let dir = 0; dir < 8; dir++) {
+        if (!(cell.passable & (1 << dir))) continue;
+        const ngx = cgx + DIR_DGX[dir];
+        const ngz = cgz + DIR_DGZ[dir];
+        if (ngx < 0 || ngx >= width || ngz < 0 || ngz >= height) continue;
+        const nIdx = ngz * width + ngx;
+        if (reachable[nIdx]) continue;
+        const neighbor = this.cells[nIdx];
+        if (neighbor.blocked) continue;
+        reachable[nIdx] = 1;
+        queue.push(nIdx);
+      }
+
+      // Also check all 8 neighbors by direct height difference — this catches
+      // blocked cells that have passable=0 but are within step range (same terrace).
+      // Only check cardinal directions to avoid corner-cutting issues.
+      for (let dir = 0; dir < 8; dir += 2) {
+        const ngx = cgx + DIR_DGX[dir];
+        const ngz = cgz + DIR_DGZ[dir];
+        if (ngx < 0 || ngx >= width || ngz < 0 || ngz >= height) continue;
+        const nIdx = ngz * width + ngx;
+        if (reachable[nIdx]) continue;
+        const neighbor = this.cells[nIdx];
+        if (!neighbor.blocked) continue; // already handled above
+        if (neighbor.surfaceHeight <= 0) continue; // no real surface
+
+        // Direct height check — same logic as computePassability
+        const heightDiff = neighbor.surfaceHeight - cell.surfaceHeight;
+        if (heightDiff > stepUp + EPS) continue;   // too high to reach
+        if (-heightDiff > stepDown + EPS) continue; // too far below
+
+        // Unblock and enqueue — the flood will spread from here to more terrace cells
+        neighbor.blocked = false;
+        reachable[nIdx] = 1;
+        queue.push(nIdx);
+      }
+
+      // Traverse nav-links (ladders) — can reach blocked cells and unblock them
+      const links = this.navLinks.get(idx);
+      if (links) {
+        for (const link of links) {
+          const nIdx = link.toGZ * width + link.toGX;
+          if (reachable[nIdx]) continue;
+          const neighbor = this.cells[nIdx];
+          if (neighbor.surfaceHeight <= 0) continue; // no real surface
+          // Unblock the target cell if it was blocked
+          if (neighbor.blocked) {
+            neighbor.blocked = false;
+          }
+          reachable[nIdx] = 1;
+          queue.push(nIdx);
+        }
+      }
+    }
+
+    // Block any elevated cells still unreachable
+    for (let i = 0; i < totalCells; i++) {
+      const cell = this.cells[i];
+      if (!cell.blocked && cell.surfaceHeight > stepUp && !reachable[i]) {
+        cell.blocked = true;
+        cell.passable = 0;
+      }
+    }
+
+    // Recompute passability edges for all cells (newly unblocked ones need edges)
+    this.recomputePassability();
   }
 
   /** Shared passability computation used by both build() and recomputePassability().

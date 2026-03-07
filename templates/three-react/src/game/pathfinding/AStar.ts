@@ -175,8 +175,9 @@ export function findPath(
       const worldPath = gridPathToWorld(grid, gridPath, startX, startZ, goalX, goalZ);
       const meta = reconstructMeta(cameFrom, cameViaLink, currentIdx, w, grid, gridPath);
 
-      // String-pull: remove redundant waypoints where line-of-sight exists
-      const finalPath = useStringPull ? stringPull(grid, worldPath) : worldPath;
+      // Don't string-pull paths that use ladders — meta indices must stay aligned with path
+      const hasLadder = meta.some(m => m.ladderIndex != null && m.ladderIndex >= 0);
+      const finalPath = (useStringPull && !hasLadder) ? stringPull(grid, worldPath) : worldPath;
 
       return { found: true, path: finalPath, rawPath: worldPath, meta };
     }
@@ -226,9 +227,15 @@ export function findPath(
     if (links) {
       for (const link of links) {
         const nIdx = link.toGZ * w + link.toGX;
+        const targetCell = grid.getCell(link.toGX, link.toGZ);
         if (closed[nIdx]) continue;
+        if (targetCell?.blocked) {
+          console.log(`[A*] Nav-link from (${cgx},${cgz}) to (${link.toGX},${link.toGZ}) BLOCKED — skipping`);
+          continue;
+        }
         const tentativeG = currentG + link.cost;
         if (tentativeG < gScore[nIdx]) {
+          console.log(`[A*] Using nav-link ladder#${link.ladderIndex} from (${cgx},${cgz}) to (${link.toGX},${link.toGZ}), cost=${tentativeG.toFixed(1)}`);
           cameFrom[nIdx] = currentIdx;
           cameViaLink[nIdx] = link.ladderIndex;
           gScore[nIdx] = tentativeG;

@@ -26,6 +26,22 @@ export const DESCENT_PENALTY = 12;
 /** Base cost for traversing a ladder nav-link. Strongly prefers ramps/flat but uses ladders when needed. */
 export const LADDER_COST = 8;
 
+// ── Ladder / Climbing ────────────────────────────────────────────────
+export const LADDER_COLOR = 0x8B6914; // wood brown
+export const LADDER_RUNG_SPACING = 0.5; // meters between rungs (matches cell size)
+export const LADDER_RAIL_WIDTH = 0.25; // side-to-side between rails
+export const LADDER_RAIL_THICKNESS = 0.04;
+export const LADDER_RUNG_THICKNESS = 0.03;
+export const LADDER_WALL_OFFSET = 0.06; // distance from cliff face
+export const CLIMB_SPEED = 3.0; // m/s up the ladder
+export const MOUNT_SPEED = 3.0; // m/s toward ladder entry
+export const DISMOUNT_SPEED = 3.0; // m/s away from ladder
+export const CLIMB_WALL_OFFSET = 0.15; // character offset from cliff face
+export const RUNG_PAUSE = 0.04; // seconds pause at each rung
+export const DISMOUNT_DIST = 0.3; // how far to walk off the ladder
+export const LADDER_SEARCH_RADIUS = 2; // navgrid cells to search for ladders
+export const LADDER_DOT_THRESHOLD = 0.3; // min alignment with movement direction
+
 // ── UI / Markers (Game.ts) ───────────────────────────────────────────
 export const RING_STROKE = 0.05;
 export const MARKER_SNAP_SPEED = 16;

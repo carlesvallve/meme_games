@@ -57,6 +57,17 @@ export function WorldPanel() {
         <Toggle label='Snap to Grid' value={obstacleSnap} onChange={setObstacleSnap} />
         <div style={{ display: 'flex', gap: 6 }}>
           <button
+            onClick={() => useGameStore.getState().onGenerateWorld?.()}
+            style={{
+              ...obstacleBtnStyle,
+              background: 'rgba(100,150,255,0.2)',
+              color: '#8af',
+              border: '1px solid rgba(100,150,255,0.4)',
+            }}
+          >
+            World
+          </button>
+          <button
             onClick={() => useGameStore.getState().onGenerateObstacles?.()}
             style={obstacleBtnStyle}
           >
@@ -67,6 +78,12 @@ export function WorldPanel() {
             style={obstacleBtnStyle}
           >
             Terrain
+          </button>
+          <button
+            onClick={() => useGameStore.getState().onGenerateLadders?.()}
+            style={obstacleBtnStyle}
+          >
+            Ladders
           </button>
           <button
             onClick={() => useGameStore.getState().onClearObstacles?.()}
