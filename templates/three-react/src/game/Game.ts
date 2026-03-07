@@ -261,7 +261,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   let markerGeo = createMarkerGeo(gridCellSize);
   const markerMat = new THREE.MeshBasicMaterial({ color: 0xffff44, transparent: true, opacity: 0 });
   const clickMarker = new THREE.Mesh(markerGeo, markerMat);
-  clickMarker.position.y = 0.02;
+  clickMarker.position.y = 0.05;
   scene.add(clickMarker);
   let markerFade = 0;
   // Smooth snap: marker lerps to snapped grid position on mouse release
@@ -314,9 +314,9 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
         mx = snapped.x;
         mz = snapped.z;
       }
-      const outerRadius = gridCellSize * 0.45 + RING_STROKE * 0.5;
+      const outerRadius = gridCellSize * 0.45 - RING_STROKE * 0.5;
       if (character.goTo(hit.x, hit.z, useGameStore.getState().charMoveSpeed, outerRadius, isDrag)) {
-        const markerY = hit.y + 0.02;
+        const markerY = hit.y + 0.05;
         // During drag in grid modes: show marker at raw mouse pos, snap on release
         if (isDrag && isGrid && goalPointerDown) {
           clickMarker.position.set(hit.x, markerY, hit.z);

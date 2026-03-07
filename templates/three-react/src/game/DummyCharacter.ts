@@ -1,8 +1,6 @@
 import * as THREE from 'three';
-import { Line2 } from 'three/examples/jsm/lines/Line2.js';
-import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
-import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js';
 import type { NavGrid } from './pathfinding/NavGrid';
+import { PathLineRenderer } from './rendering/PathLineRenderer';
 import type { AABBBox } from './pathfinding/NavGrid';
 import { findPath } from './pathfinding/AStar';
 import type { WaypointMeta } from './pathfinding/AStar';
@@ -67,13 +65,7 @@ export class DummyCharacter {
   private wasMoving = false;
 
   // Debug path visualization
-  private debugPath = false;
-  private pathLine: Line2 | null = null;
-  private pathLineGeo: LineGeometry | null = null;
-  private pathLineMat: LineMaterial | null = null;
-  /** Cached perfect path line positions — reused during climbing instead of rebuilding */
-  private frozenPathPositions: number[] | null = null;
-  private scene: THREE.Scene | null = null;
+  private pathLine = new PathLineRenderer();
   private goalRadius = 0;
   private obstacles: ReadonlyArray<AABBBox> = [];
   private collisionRadius = 0.25;
@@ -108,7 +100,7 @@ export class DummyCharacter {
 
   /** Call once after adding root to scene */
   setScene(scene: THREE.Scene): void {
-    this.scene = scene;
+    this.pathLine.setScene(scene);
   }
 
   setObstacles(obs: ReadonlyArray<AABBBox>): void {
@@ -133,7 +125,7 @@ export class DummyCharacter {
     this.navGrid = navGrid;
     this.path.length = 0;
     this.settleTarget = null;
-    this.clearPathLine();
+    this.pathLine.clear();
   }
 
   setStringPull(v: boolean): void { this.stringPull = v; }
@@ -151,10 +143,7 @@ export class DummyCharacter {
   }
 
   setDebugPath(enabled: boolean): void {
-    this.debugPath = enabled;
-    if (!enabled && this.pathLine) {
-      this.clearPathLine();
-    }
+    this.pathLine.setEnabled(enabled);
   }
 
   setLadderDefs(defs: LadderDef[]): void {
@@ -341,8 +330,8 @@ export class DummyCharacter {
         this.visualGroundY = this.groundY;
         this.velocityY = 0;
         this.climbState = null;
-        this.frozenPathPositions = null;
-        this.clearPathLine();
+        this.pathLine.clearFrozen();
+        this.pathLine.clear();
         return false;
       }
     }
@@ -351,136 +340,24 @@ export class DummyCharacter {
     return true;
   }
 
-  /** Get navgrid surface height at a world position (for debug line) */
-  private getSurfaceAt(wx: number, wz: number): number {
+  /** Get navgrid surface height at a world position */
+  private getSurfaceAt = (wx: number, wz: number): number => {
     const grid = this.navGrid.worldToGrid(wx, wz);
     const cell = this.navGrid.getCell(grid.gx, grid.gz);
     return cell ? cell.surfaceHeight + 0.05 : 0.05;
-  }
+  };
 
   private updatePathLine(): void {
-    if (!this.debugPath || !this.scene) return;
-    this.clearPathLine();
-
-    // During climbing, use the frozen positions from before climbing started
-    if (this.climbState && this.frozenPathPositions && this.frozenPathPositions.length >= 6) {
-      const positions = [...this.frozenPathPositions];
-      // Trim vertices from the front that are above/below the current groundY
-      // (remove segments the character has already climbed past)
-      while (positions.length >= 9) {
-        const nextY = positions[4]; // Y of second vertex
-        const charY = this.groundY + 0.05;
-        const climbing = this.climbState.direction === 'up';
-        // Remove first vertex if we've climbed past it or it's at the same height (horizontal approach)
-        const pastIt = climbing ? charY > nextY - 0.01 : charY < nextY + 0.01;
-        if (pastIt) {
-          positions.splice(0, 3);
-        } else {
-          break;
-        }
-      }
-      // Update first vertex Y to track climb progress
-      if (positions.length >= 3) {
-        positions[1] = this.groundY + 0.05;
-      }
-
-      this.pathLineGeo = new LineGeometry();
-      this.pathLineGeo.setPositions(positions);
-      this.pathLineMat = new LineMaterial({
-        color: 0xffff00,
-        linewidth: 3,
-        transparent: true,
-        opacity: 0.8,
-        resolution: new THREE.Vector2(window.innerWidth, window.innerHeight),
-      });
-      this.pathLine = new Line2(this.pathLineGeo, this.pathLineMat);
-      this.pathLine.computeLineDistances();
-      this.scene.add(this.pathLine);
-      return;
-    }
-
-    const remaining = this.path.slice(this.pathIndex);
-    if (remaining.length < 1) return;
-
-    const pos = this.root.position;
-    const BIAS = 0.05;
-
-    const waypoints: { x: number; z: number }[] = [{ x: pos.x, z: pos.z }];
-    for (const wp of remaining) {
-      waypoints.push({ x: wp.x, z: wp.z });
-    }
-
-    // Build positions: for each segment, if waypoints have different heights,
-    // walk cell-by-cell to find precise transitions. If same height, draw flat.
-    const cs = this.navGrid.cellSize;
-    const positions: number[] = [];
-    let prevH = this.groundY + 0.05;
-    positions.push(waypoints[0].x, prevH, waypoints[0].z);
-
-    for (let i = 1; i < waypoints.length; i++) {
-      const from = waypoints[i - 1];
-      const to = waypoints[i];
-      const toH = this.getSurfaceAt(to.x, to.z);
-      const dx = to.x - from.x;
-      const dz = to.z - from.z;
-      const segLen = Math.sqrt(dx * dx + dz * dz);
-
-      if (segLen < 0.001) continue;
-
-      if (Math.abs(toH - prevH) > 0.01) {
-        // Height change: place step at midpoint between waypoints
-        const mx = (from.x + to.x) * 0.5;
-        const mz = (from.z + to.z) * 0.5;
-        positions.push(mx, prevH, mz);
-        positions.push(mx, toH, mz);
-      }
-
-      positions.push(to.x, toH, to.z);
-      prevH = toH;
-    }
-
-    // Trim final endpoint back by goalRadius (visual only — stop line at marker ring edge)
-    if (this.goalRadius > 0 && positions.length >= 6) {
-      const n = positions.length;
-      const ex = positions[n - 3], ez = positions[n - 1];
-      const px = positions[n - 6], pz = positions[n - 4];
-      const dx = ex - px, dz = ez - pz;
-      const len = Math.sqrt(dx * dx + dz * dz);
-      if (len > this.goalRadius) {
-        positions[n - 3] = ex - (dx / len) * this.goalRadius;
-        positions[n - 1] = ez - (dz / len) * this.goalRadius;
-      }
-    }
-
-    // Cache positions so climbing can reuse the perfect line.
-    // Only cache when NOT climbing — we want the pre-climb line.
-    if (!this.climbState) {
-      this.frozenPathPositions = [...positions];
-    }
-
-    this.pathLineGeo = new LineGeometry();
-    this.pathLineGeo.setPositions(positions);
-    this.pathLineMat = new LineMaterial({
-      color: 0xffff00,
-      linewidth: 3,
-      transparent: true,
-      opacity: 0.8,
-      resolution: new THREE.Vector2(window.innerWidth, window.innerHeight),
+    this.pathLine.update({
+      charPos: this.root.position,
+      groundY: this.groundY,
+      path: this.path,
+      pathIndex: this.pathIndex,
+      goalRadius: this.goalRadius,
+      cellSize: this.navGrid.cellSize,
+      climbState: this.climbState,
+      getSurfaceAt: this.getSurfaceAt,
     });
-    this.pathLine = new Line2(this.pathLineGeo, this.pathLineMat);
-    this.pathLine.computeLineDistances();
-    this.scene.add(this.pathLine);
-  }
-
-  private clearPathLine(): void {
-    if (this.pathLine && this.scene) {
-      this.scene.remove(this.pathLine);
-      this.pathLineMat?.dispose();
-      this.pathLineGeo?.dispose();
-      this.pathLine = null;
-      this.pathLineGeo = null;
-      this.pathLineMat = null;
-    }
   }
 
   /** Camera-relative WASD movement.
@@ -507,7 +384,7 @@ export class DummyCharacter {
     this.settleTarget = null;
     if (this.path.length > 0) {
       this.path.length = 0;
-      this.clearPathLine();
+      this.pathLine.clear();
     }
 
     // Rotate input by camera Y angle
@@ -638,6 +515,9 @@ export class DummyCharacter {
     this.pathMeta = result.meta;
     this.pathIndex = 1;
 
+    this.settleTarget = null;
+    this.goalRadius = markerRadius;
+
     // If the first waypoint we're heading to is a ladder, start climbing immediately
     // (handles case where character is already standing on the ladder's low cell)
     // But only if autoMove is enabled — otherwise let the path be shown first
@@ -652,8 +532,6 @@ export class DummyCharacter {
       this.updatePathLine();
       return true;
     }
-    this.settleTarget = null;
-    this.goalRadius = markerRadius;
     this.clickCount = 1;
     // Pre-compute NavGrid heights for each waypoint (used for groundY interpolation)
     this.pathNavHeights = result.path.map(wp => {
@@ -687,7 +565,7 @@ export class DummyCharacter {
       console.log(`[CLIMB] phase=${this.climbState.phase}, groundY=${this.groundY.toFixed(2)}, visualY=${this.visualGroundY.toFixed(2)}, posY=${this.root.position.y.toFixed(2)}, rung=${this.climbState.currentRung}/${this.climbState.rungCount}`);
     }
     if (this.updateClimb(dt)) {
-      if (this.debugPath && (this.frozenPathPositions || (this.path.length > 0 && this.pathIndex < this.path.length))) {
+      if (this.pathLine.isEnabled() && (this.pathLine.hasFrozenPositions() || (this.path.length > 0 && this.pathIndex < this.path.length))) {
         this.updatePathLine();
       }
       return;
@@ -742,7 +620,7 @@ export class DummyCharacter {
           this.pathNavHeights.length = 0;
           this.pathMeta.length = 0;
           this.moveSpeed = 0;
-          this.clearPathLine();
+          this.pathLine.clear();
         } else {
           // Check if the NEW waypoint we're heading toward is a ladder
           const meta = this.pathMeta[this.pathIndex];
@@ -794,7 +672,7 @@ export class DummyCharacter {
     }
 
     // ── Rebuild debug path line each frame to track character smoothly ──
-    if (this.debugPath && this.path.length > 0 && this.pathIndex < this.path.length && !this.pathPaused) {
+    if (this.pathLine.isEnabled() && this.path.length > 0 && this.pathIndex < this.path.length && !this.pathPaused) {
       this.updatePathLine();
     }
 
@@ -881,24 +759,14 @@ export class DummyCharacter {
 
   /** Update the path line's last vertex to a custom world position (for smooth marker tracking) */
   setPathLineEndpoint(x: number, z: number): void {
-    if (!this.pathLine || !this.pathLineGeo) return;
-    const attr = this.pathLineGeo.getAttribute('instanceEnd') as THREE.InterleavedBufferAttribute;
-    if (!attr || !attr.data) return;
-    const arr = attr.data.array as Float32Array;
-    const numSegments = arr.length / 6;
-    if (numSegments < 1) return;
-    const si = (numSegments - 1) * 6;
-    arr[si + 3] = x;
-    arr[si + 4] = this.getSurfaceAt(x, z);
-    arr[si + 5] = z;
-    attr.data.needsUpdate = true;
-    this.pathLine.computeLineDistances();
+    this.pathLine.setEndpoint(x, z, this.getSurfaceAt, this.goalRadius);
   }
 
   /** True while following an A* click-to-move path */
   isPathActive(): boolean {
     return this.path.length > 0;
   }
+
 
 
   getFacingAngle(): number {
@@ -914,7 +782,7 @@ export class DummyCharacter {
   }
 
   dispose(): void {
-    this.clearPathLine();
+    this.pathLine.dispose();
     this.root.traverse((child) => {
       if ((child as THREE.Mesh).isMesh) {
         const mesh = child as THREE.Mesh;
