@@ -476,14 +476,10 @@ export class DummyCharacter {
         const g = this.navGrid.worldToGrid(pos.x, pos.z);
         const navCell = this.navGrid.getCell(g.gx, g.gz);
         const cellH = navCell ? navCell.surfaceHeight : 0;
-        if (targetNavH > this.prevWaypointNavH) {
-          // Ascending: don't drop below prev waypoint height (protects diagonal stair traversal
-          // where ground cells between stair steps would cause groundY=0 → collision blocks next step)
-          this.groundY = Math.max(cellH, this.prevWaypointNavH);
-        } else {
-          // Descending/flat: follow NavGrid cell height directly
-          this.groundY = cellH;
-        }
+        // Never drop below the minimum of prev/target waypoint heights during path traversal.
+        // Prevents falling through ground-level cells between two elevated waypoints.
+        const minWaypointH = Math.min(this.prevWaypointNavH, targetNavH);
+        this.groundY = Math.max(cellH, minWaypointH);
       } else {
         const surfaceY = getSurfaceHeight(pos.x, pos.z, this.obstacles, this.collisionRadius * 0.5);
         if (surfaceY - this.groundY <= this.stepUp) {

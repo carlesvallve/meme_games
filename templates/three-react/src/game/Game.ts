@@ -356,6 +356,188 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     refreshDebugNav();
   }
 
+  // ── Terrain generator: Monument Valley-style connected platforms + stairs ──
+
+  function generateTerrain(): void {
+    clearObstacles();
+
+    const store = useGameStore.getState();
+    const stepH = store.charStepUp;
+    const cs = gridCellSize;
+    const gridHalf = Math.floor(WORLD_SIZE / cs / 2) - 1;
+
+    // Height map on grid cells — 0 = ground level
+    const heightMap = new Map<string, number>();
+    const key = (gx: number, gz: number) => `${gx},${gz}`;
+
+    // ── 1. Generate platforms at various elevations ──
+    const platformCount = 5 + Math.floor(Math.random() * 5);
+    interface Platform { cx: number; cz: number; w: number; d: number; h: number }
+    const platforms: Platform[] = [];
+
+    for (let i = 0; i < platformCount; i++) {
+      const w = 3 + Math.floor(Math.random() * 5); // 3-7 cells wide
+      const d = 3 + Math.floor(Math.random() * 5);
+      const cx = Math.floor((Math.random() - 0.5) * (gridHalf * 2 - w));
+      const cz = Math.floor((Math.random() - 0.5) * (gridHalf * 2 - d));
+      // Height: 1-5 step heights, quantized to stepH
+      const levels = 1 + Math.floor(Math.random() * 5);
+      const h = levels * stepH;
+
+      platforms.push({ cx, cz, w, d, h });
+
+      for (let gx = cx; gx < cx + w; gx++) {
+        for (let gz = cz; gz < cz + d; gz++) {
+          if (Math.abs(gx) > gridHalf || Math.abs(gz) > gridHalf) continue;
+          const existing = heightMap.get(key(gx, gz)) ?? 0;
+          // Overlapping platforms: take the max height
+          heightMap.set(key(gx, gz), Math.max(existing, h));
+        }
+      }
+    }
+
+    // ── 2. Connect platforms with stair ramps ──
+    // Sort by distance and connect nearby pairs
+    for (let i = 0; i < platforms.length; i++) {
+      const a = platforms[i];
+      // Find closest platform with different height
+      let bestJ = -1;
+      let bestDist = Infinity;
+      for (let j = 0; j < platforms.length; j++) {
+        if (i === j) continue;
+        const b = platforms[j];
+        if (Math.abs(a.h - b.h) < 0.01) continue; // same height, skip
+        const dx = (a.cx + a.w / 2) - (b.cx + b.w / 2);
+        const dz = (a.cz + a.d / 2) - (b.cz + b.d / 2);
+        const dist = Math.sqrt(dx * dx + dz * dz);
+        if (dist < bestDist) { bestDist = dist; bestJ = j; }
+      }
+      if (bestJ < 0) continue;
+
+      const b = platforms[bestJ];
+      // Pick edge points on each platform to connect
+      const acx = Math.round(a.cx + a.w / 2);
+      const acz = Math.round(a.cz + a.d / 2);
+      const bcx = Math.round(b.cx + b.w / 2);
+      const bcz = Math.round(b.cz + b.d / 2);
+
+      const lowH = Math.min(a.h, b.h);
+      const highH = Math.max(a.h, b.h);
+      const steps = Math.round((highH - lowH) / stepH);
+      if (steps < 1) continue;
+
+      // Walk from low to high platform in a straight line
+      const fromX = a.h < b.h ? acx : bcx;
+      const fromZ = a.h < b.h ? acz : bcz;
+      const toX = a.h < b.h ? bcx : acx;
+      const toZ = a.h < b.h ? bcz : acz;
+
+      const ddx = toX - fromX;
+      const ddz = toZ - fromZ;
+      const dist = Math.max(Math.abs(ddx), Math.abs(ddz));
+      if (dist < 1) continue;
+
+      // Place stair cells along the path
+      const stairLen = Math.max(steps, dist);
+      for (let s = 0; s <= stairLen; s++) {
+        const t = s / stairLen;
+        const gx = Math.round(fromX + ddx * t);
+        const gz = Math.round(fromZ + ddz * t);
+        if (Math.abs(gx) > gridHalf || Math.abs(gz) > gridHalf) continue;
+        const stairH = lowH + (highH - lowH) * t;
+        // Quantize to stepH
+        const quantH = Math.round(stairH / stepH) * stepH;
+        const existing = heightMap.get(key(gx, gz)) ?? 0;
+        heightMap.set(key(gx, gz), Math.max(existing, quantH));
+      }
+    }
+
+    // ── 3. Entry ramps: every platform gets a staircase down to ground ──
+    for (const plat of platforms) {
+      // Pick a random edge side for the entry ramp
+      const side = Math.floor(Math.random() * 4);
+      let startGX: number, startGZ: number, dirGX: number, dirGZ: number;
+      if (side === 0) {
+        // North edge: ramp extends in -Z
+        startGX = plat.cx + Math.floor(plat.w / 2);
+        startGZ = plat.cz - 1;
+        dirGX = 0; dirGZ = -1;
+      } else if (side === 1) {
+        // South edge: ramp extends in +Z
+        startGX = plat.cx + Math.floor(plat.w / 2);
+        startGZ = plat.cz + plat.d;
+        dirGX = 0; dirGZ = 1;
+      } else if (side === 2) {
+        // West edge: ramp extends in -X
+        startGX = plat.cx - 1;
+        startGZ = plat.cz + Math.floor(plat.d / 2);
+        dirGX = -1; dirGZ = 0;
+      } else {
+        // East edge: ramp extends in +X
+        startGX = plat.cx + plat.w;
+        startGZ = plat.cz + Math.floor(plat.d / 2);
+        dirGX = 1; dirGZ = 0;
+      }
+
+      // Build staircase from platform height down to ground
+      const stepsDown = Math.round(plat.h / stepH);
+      for (let s = 0; s < stepsDown; s++) {
+        const gx = startGX + dirGX * s;
+        const gz = startGZ + dirGZ * s;
+        if (Math.abs(gx) > gridHalf || Math.abs(gz) > gridHalf) break;
+        const h = plat.h - s * stepH;
+        if (h <= 0) break;
+        const existing = heightMap.get(key(gx, gz)) ?? 0;
+        heightMap.set(key(gx, gz), Math.max(existing, h));
+      }
+    }
+
+    // ── 5. Add small debris/rubble around platforms for organic feel ──
+    for (const plat of platforms) {
+      const debrisCount = 2 + Math.floor(Math.random() * 4);
+      for (let d = 0; d < debrisCount; d++) {
+        // Scatter 1-2 cells outside platform edges
+        const side = Math.floor(Math.random() * 4);
+        let gx: number, gz: number;
+        if (side === 0) { gx = plat.cx - 1 - Math.floor(Math.random() * 2); gz = plat.cz + Math.floor(Math.random() * plat.d); }
+        else if (side === 1) { gx = plat.cx + plat.w + Math.floor(Math.random() * 2); gz = plat.cz + Math.floor(Math.random() * plat.d); }
+        else if (side === 2) { gx = plat.cx + Math.floor(Math.random() * plat.w); gz = plat.cz - 1 - Math.floor(Math.random() * 2); }
+        else { gx = plat.cx + Math.floor(Math.random() * plat.w); gz = plat.cz + plat.d + Math.floor(Math.random() * 2); }
+        if (Math.abs(gx) > gridHalf || Math.abs(gz) > gridHalf) continue;
+        // Small height: 1-2 steps, never taller than the adjacent platform
+        const dh = stepH * (1 + Math.floor(Math.random() * 2));
+        const h = Math.min(dh, plat.h);
+        const existing = heightMap.get(key(gx, gz)) ?? 0;
+        if (existing < h) heightMap.set(key(gx, gz), h);
+      }
+    }
+
+    // ── 4. Place boxes from height map ──
+    // Clear zone around spawn (center)
+    const clearR = 2;
+    for (const [k, h] of heightMap) {
+      if (h <= 0) continue;
+      const [gxStr, gzStr] = k.split(',');
+      const gx = parseInt(gxStr);
+      const gz = parseInt(gzStr);
+      // Skip center spawn area
+      if (Math.abs(gx) <= clearR && Math.abs(gz) <= clearR) continue;
+      const wx = gx * cs + cs * 0.5;
+      const wz = gz * cs + cs * 0.5;
+      // Pick color based on height tier for visual distinction
+      const tier = Math.round(h / stepH) - 1;
+      const color = EARTHY_COLORS[tier % EARTHY_COLORS.length];
+      placeBox(wx, wz, cs * 0.5, cs * 0.5, h, color);
+    }
+
+    // Rebuild navGrid + grid overlay
+    const { charStepUp, charStepDown } = useGameStore.getState();
+    navGrid.build(obstacles, charStepUp, charStepDown, 0.25);
+    character.setObstacles(obstacles);
+    gridOverlay.rebuild(WORLD_SIZE, gridCellSize, GROUND_COLOR, obstacles, obstacleColors);
+    refreshDebugNav();
+  }
+
   function clearObstacles(): void {
     for (const mesh of obstacleMeshes) {
       scene.remove(mesh);
@@ -592,6 +774,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       applyLightPreset(sceneLights, DEFAULT_LIGHT_PRESET, true);
     },
     onGenerateObstacles: () => generateObstacles(),
+    onGenerateTerrain: () => generateTerrain(),
     onClearObstacles: () => clearObstacles(),
   });
 

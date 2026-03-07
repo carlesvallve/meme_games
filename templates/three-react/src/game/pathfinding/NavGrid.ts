@@ -79,8 +79,8 @@ export class NavGrid {
   private originX: number;
   private originZ: number;
   private cells: NavCell[];
-  private stepUp = 0.5;
-  private stepDown = 1.0;
+  stepUp = 0.5;
+  stepDown = 1.0;
   private slopeHeight = 1.0;
   private navLinks: Map<number, NavLink[]> = new Map();
   private spawnRegionLabel = -1;
@@ -132,11 +132,12 @@ export class NavGrid {
         const worldZ = originZ + (gz + 0.5) * cellSize;
 
         // Surface height = max height of overlapping boxes at cell center
+        // Use EPS tolerance so boxes sitting exactly on cell boundaries are detected
         let surfaceHeight = 0;
         for (const box of boxes) {
           if (
-            Math.abs(worldX - box.x) < box.halfW &&
-            Math.abs(worldZ - box.z) < box.halfD
+            Math.abs(worldX - box.x) < box.halfW + EPS &&
+            Math.abs(worldZ - box.z) < box.halfD + EPS
           ) {
             const h = getBoxHeightAt(box, worldX, worldZ);
             surfaceHeight = Math.max(surfaceHeight, h);
@@ -188,7 +189,8 @@ export class NavGrid {
           if (heightDiff > stepUp + EPS) continue;   // too high to climb
           if (-heightDiff > stepDown + EPS) continue; // too far to drop
 
-          // Diagonal: both adjacent cardinals must also be passable
+          // Diagonal: both adjacent cardinal neighbors must be passable from current cell
+          // (prevents corner-cutting through diagonal walls)
           if (dir % 2 === 1) {
             const [c1, c2] = DIAGONAL_CARDINALS[dir];
             const n1gx = gx + DIR_DGX[c1];
@@ -202,10 +204,10 @@ export class NavGrid {
             const adj1 = this.cells[n1gz * width + n1gx];
             const adj2 = this.cells[n2gz * width + n2gx];
             if (adj1.blocked || adj2.blocked) continue;
-            const diff1 = adj1.surfaceHeight - cell.surfaceHeight;
-            if (diff1 > stepUp + EPS || -diff1 > stepDown + EPS) continue;
-            const diff2 = adj2.surfaceHeight - cell.surfaceHeight;
-            if (diff2 > stepUp + EPS || -diff2 > stepDown + EPS) continue;
+            // Block diagonal if a cardinal neighbor is a wall ABOVE us (can't cut through walls).
+            // Drops below are fine — we're walking over a ledge, not through a wall.
+            if (adj1.surfaceHeight - cell.surfaceHeight > stepUp + EPS) continue;
+            if (adj2.surfaceHeight - cell.surfaceHeight > stepUp + EPS) continue;
           }
 
           mask |= 1 << dir;
@@ -439,10 +441,9 @@ export class NavGrid {
             const adj1 = this.cells[n1gz * width + n1gx];
             const adj2 = this.cells[n2gz * width + n2gx];
             if (adj1.blocked || adj2.blocked) continue;
-            const d1 = adj1.surfaceHeight - cell.surfaceHeight;
-            if (d1 > this.stepUp || -d1 > this.stepDown) continue;
-            const d2 = adj2.surfaceHeight - cell.surfaceHeight;
-            if (d2 > this.stepUp || -d2 > this.stepDown) continue;
+            // Block diagonal if a cardinal neighbor is a wall ABOVE us
+            if (adj1.surfaceHeight - cell.surfaceHeight > this.stepUp) continue;
+            if (adj2.surfaceHeight - cell.surfaceHeight > this.stepUp) continue;
           }
           mask |= 1 << dir;
         }

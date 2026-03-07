@@ -60,7 +60,13 @@ export function WorldPanel() {
             onClick={() => useGameStore.getState().onGenerateObstacles?.()}
             style={obstacleBtnStyle}
           >
-            Generate
+            Obstacles
+          </button>
+          <button
+            onClick={() => useGameStore.getState().onGenerateTerrain?.()}
+            style={obstacleBtnStyle}
+          >
+            Terrain
           </button>
           <button
             onClick={() => useGameStore.getState().onClearObstacles?.()}

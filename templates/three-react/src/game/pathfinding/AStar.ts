@@ -105,10 +105,10 @@ function heuristic(ax: number, az: number, bx: number, bz: number): number {
     : dx * SQRT2 + (dz - dx);
 }
 
-/** Cost multiplier for each unit of height change on an edge.
- *  Makes A* prefer completing stair descent before going sideways,
- *  since diagonal shortcuts across elevation changes incur extra cost. */
-const ELEVATION_PENALTY = 2;
+/** Cost multiplier for climbing up (ascending stairs). */
+const CLIMB_PENALTY = 2;
+/** Cost multiplier for any descent — strongly discourages leaving elevated paths. */
+const DESCENT_PENALTY = 12;
 /** Base cost for traversing a ladder nav-link. Strongly prefers ramps/flat but uses ladders when needed. */
 const LADDER_COST = 8;
 
@@ -203,11 +203,16 @@ export function findPath(
       const baseCost = dir % 2 === 0 ? 1 : SQRT2;
       const currentCell = grid.getCell(cgx, cgz)!;
       const neighborCell = grid.getCell(ngx, ngz)!;
-      const heightDelta = Math.abs(currentCell.surfaceHeight - neighborCell.surfaceHeight);
+      const heightDelta = neighborCell.surfaceHeight - currentCell.surfaceHeight;
+      // Ascending (climbing stairs): light penalty
+      // Descending (dropping): heavy penalty — strongly prefer staying elevated
+      const heightCost = heightDelta > 0
+        ? heightDelta * CLIMB_PENALTY
+        : -heightDelta * DESCENT_PENALTY;
       // Light penalty for very constrained cells (dead ends) — don't penalize stairs
       const edgeCount = popcount8(neighborCell.passable);
       const edgePenalty = edgeCount <= 1 ? 1 : 0;
-      const cost = baseCost + heightDelta * ELEVATION_PENALTY + edgePenalty;
+      const cost = baseCost + heightCost + edgePenalty;
       const tentativeG = currentG + cost;
 
       if (tentativeG < gScore[nIdx]) {
