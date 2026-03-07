@@ -79,7 +79,8 @@ export class NavGrid {
   private originX: number;
   private originZ: number;
   private cells: NavCell[];
-  private stepHeight = 0.5;
+  private stepUp = 0.5;
+  private stepDown = 1.0;
   private slopeHeight = 1.0;
   private navLinks: Map<number, NavLink[]> = new Map();
   private spawnRegionLabel = -1;
@@ -115,8 +116,9 @@ export class NavGrid {
     }
   }
 
-  build(boxes: ReadonlyArray<AABBBox>, stepHeight: number, capsuleRadius: number): void {
-    this.stepHeight = stepHeight;
+  build(boxes: ReadonlyArray<AABBBox>, stepUp: number, stepDown: number, capsuleRadius: number): void {
+    this.stepUp = stepUp;
+    this.stepDown = stepDown;
     this.navLinks.clear();
     const { width, height, cellSize, originX, originZ } = this;
     const EPS = 0.01; // small tolerance for floating-point boundary comparisons
@@ -145,7 +147,7 @@ export class NavGrid {
         let blocked = false;
         for (const box of boxes) {
           const effectiveH = getBoxHeightAt(box, worldX, worldZ);
-          if (effectiveH - surfaceHeight <= stepHeight + EPS) continue;
+          if (effectiveH - surfaceHeight <= stepUp + EPS) continue;
           if (
             Math.abs(worldX - box.x) < box.halfW + capsuleRadius &&
             Math.abs(worldZ - box.z) < box.halfD + capsuleRadius
@@ -181,8 +183,10 @@ export class NavGrid {
           const neighbor = this.cells[ngz * width + ngx];
           if (neighbor.blocked) continue;
 
-          // Height check (with epsilon for floating-point boundary cases)
-          if (Math.abs(cell.surfaceHeight - neighbor.surfaceHeight) > stepHeight + EPS) continue;
+          // Directional height check: going up uses stepUp, going down uses stepDown
+          const heightDiff = neighbor.surfaceHeight - cell.surfaceHeight;
+          if (heightDiff > stepUp + EPS) continue;   // too high to climb
+          if (-heightDiff > stepDown + EPS) continue; // too far to drop
 
           // Diagonal: both adjacent cardinals must also be passable
           if (dir % 2 === 1) {
@@ -198,8 +202,10 @@ export class NavGrid {
             const adj1 = this.cells[n1gz * width + n1gx];
             const adj2 = this.cells[n2gz * width + n2gx];
             if (adj1.blocked || adj2.blocked) continue;
-            if (Math.abs(cell.surfaceHeight - adj1.surfaceHeight) > stepHeight + EPS) continue;
-            if (Math.abs(cell.surfaceHeight - adj2.surfaceHeight) > stepHeight + EPS) continue;
+            const diff1 = adj1.surfaceHeight - cell.surfaceHeight;
+            if (diff1 > stepUp + EPS || -diff1 > stepDown + EPS) continue;
+            const diff2 = adj2.surfaceHeight - cell.surfaceHeight;
+            if (diff2 > stepUp + EPS || -diff2 > stepDown + EPS) continue;
           }
 
           mask |= 1 << dir;
@@ -214,10 +220,10 @@ export class NavGrid {
     const reachable = new Uint8Array(totalCells);
     const queue: number[] = [];
 
-    // Seed: all non-blocked cells at ground level or within stepHeight of ground
+    // Seed: all non-blocked cells at ground level or within stepUp of ground
     for (let i = 0; i < totalCells; i++) {
       const cell = this.cells[i];
-      if (!cell.blocked && cell.surfaceHeight <= stepHeight) {
+      if (!cell.blocked && cell.surfaceHeight <= stepUp) {
         reachable[i] = 1;
         if (cell.passable > 0) queue.push(i);
       }
@@ -247,7 +253,7 @@ export class NavGrid {
     // Block unreachable elevated cells
     for (let i = 0; i < totalCells; i++) {
       const cell = this.cells[i];
-      if (!cell.blocked && cell.surfaceHeight > stepHeight && !reachable[i]) {
+      if (!cell.blocked && cell.surfaceHeight > stepUp && !reachable[i]) {
         cell.blocked = true;
         cell.passable = 0;
       }
@@ -421,7 +427,9 @@ export class NavGrid {
           if (ngx < 0 || ngx >= width || ngz < 0 || ngz >= height) continue;
           const neighbor = this.cells[ngz * width + ngx];
           if (neighbor.blocked) continue;
-          if (Math.abs(cell.surfaceHeight - neighbor.surfaceHeight) > this.stepHeight) continue;
+          const hDiff = neighbor.surfaceHeight - cell.surfaceHeight;
+          if (hDiff > this.stepUp) continue;
+          if (-hDiff > this.stepDown) continue;
           if (dir % 2 === 1) {
             const [c1, c2] = DIAGONAL_CARDINALS[dir];
             const n1gx = gx + DIR_DGX[c1], n1gz = gz + DIR_DGZ[c1];
@@ -431,8 +439,10 @@ export class NavGrid {
             const adj1 = this.cells[n1gz * width + n1gx];
             const adj2 = this.cells[n2gz * width + n2gx];
             if (adj1.blocked || adj2.blocked) continue;
-            if (Math.abs(cell.surfaceHeight - adj1.surfaceHeight) > this.stepHeight) continue;
-            if (Math.abs(cell.surfaceHeight - adj2.surfaceHeight) > this.stepHeight) continue;
+            const d1 = adj1.surfaceHeight - cell.surfaceHeight;
+            if (d1 > this.stepUp || -d1 > this.stepDown) continue;
+            const d2 = adj2.surfaceHeight - cell.surfaceHeight;
+            if (d2 > this.stepUp || -d2 > this.stepDown) continue;
           }
           mask |= 1 << dir;
         }
@@ -533,11 +543,13 @@ export class NavGrid {
     heights: Float32Array,
     hmResolution: number,
     groundSize: number,
-    stepHeight: number,
+    stepUp: number,
+    stepDown?: number,
     slopeHeight?: number,
   ): void {
-    this.stepHeight = stepHeight;
-    this.slopeHeight = slopeHeight ?? stepHeight;
+    this.stepUp = stepUp;
+    this.stepDown = stepDown ?? stepUp;
+    this.slopeHeight = slopeHeight ?? stepUp;
     this.navLinks.clear();
     const { width, height, cellSize, originX, originZ } = this;
     const totalCells = width * height;
@@ -605,7 +617,7 @@ export class NavGrid {
     // It samples gradient at (pos + moveDir * eps) using getTerrainY with radius.
     const charRadius = 0.25;
     const sampleR = charRadius * 0.5;
-    const effectiveSlopeHeight = slopeHeight ?? stepHeight * 2;
+    const effectiveSlopeHeight = slopeHeight ?? stepUp * 2;
     const maxSlope = (effectiveSlopeHeight / hmCellSize) * 0.4;
     const eps = hmCellSize * 0.5;
 
@@ -654,7 +666,7 @@ export class NavGrid {
         const hMax = Math.max(h00, h10, h01, h11);
         const hMin = Math.min(h00, h10, h01, h11);
 
-        if (hMax - hMin > stepHeight) {
+        if (hMax - hMin > stepUp) {
           cell.blocked = true;
         }
       }
@@ -678,8 +690,10 @@ export class NavGrid {
           const neighbor = this.cells[ngz * width + ngx];
           if (neighbor.blocked) continue;
 
-          // Height difference between cell centers
-          if (Math.abs(cell.surfaceHeight - neighbor.surfaceHeight) > stepHeight) continue;
+          // Directional height check
+          const hmDiff = neighbor.surfaceHeight - cell.surfaceHeight;
+          if (hmDiff > stepUp) continue;
+          if (-hmDiff > this.stepDown) continue;
 
           // Ahead-gradient check: mirrors resolveMovement.
           // resolveMovement checks gradient ahead of the move direction.
@@ -708,8 +722,10 @@ export class NavGrid {
             const adj1 = this.cells[n1gz * width + n1gx];
             const adj2 = this.cells[n2gz * width + n2gx];
             if (adj1.blocked || adj2.blocked) continue;
-            if (Math.abs(cell.surfaceHeight - adj1.surfaceHeight) > stepHeight) continue;
-            if (Math.abs(cell.surfaceHeight - adj2.surfaceHeight) > stepHeight) continue;
+            const hd1 = adj1.surfaceHeight - cell.surfaceHeight;
+            if (hd1 > stepUp || -hd1 > this.stepDown) continue;
+            const hd2 = adj2.surfaceHeight - cell.surfaceHeight;
+            if (hd2 > stepUp || -hd2 > this.stepDown) continue;
           }
 
           mask |= 1 << dir;
@@ -722,7 +738,7 @@ export class NavGrid {
   /** Block nav cells that overlap with tall debris boxes (height > stepHeight above surface). */
   applyDebrisBlocking(debris: ReadonlyArray<{ x: number; z: number; halfW: number; halfD: number; height: number; rotation?: number }>): void {
     const { width, height, cellSize, originX, originZ } = this;
-    const stepH = this.stepHeight;
+    const stepH = this.stepUp;
     for (const box of debris) {
       // Compute AABB that encloses the possibly-rotated box (for broad-phase cell scan)
       let scanHW = box.halfW, scanHD = box.halfD;
@@ -841,15 +857,15 @@ export class NavGrid {
   }
 
   /** Bresenham-style grid line-of-sight check.
-   *  Checks consecutive cell height differences against stepHeight,
-   *  so paths that climb gradually (0→0.5→1.0) are valid but
-   *  direct jumps (0→1.0) are not. */
+   *  Uses stepUp as threshold for BOTH directions — this is for string-pull
+   *  path smoothing, not passability. We want to preserve stair detail
+   *  regardless of stepDown (which only controls passability). */
   hasLineOfSight(gx1: number, gz1: number, gx2: number, gz2: number): boolean {
-    // Reject if start and end cells have height difference >= stepHeight
+    // Reject if start and end cells have height difference >= stepUp
     // (prevents string-pull from collapsing stair-to-ground transitions)
     const startC = this.getCell(gx1, gz1);
     const endC = this.getCell(gx2, gz2);
-    if (startC && endC && Math.abs(startC.surfaceHeight - endC.surfaceHeight) >= this.stepHeight - 0.01) {
+    if (startC && endC && Math.abs(endC.surfaceHeight - startC.surfaceHeight) >= this.stepUp - 0.01) {
       return false;
     }
 
@@ -911,8 +927,8 @@ export class NavGrid {
       const cell = this.getCell(x0, z0);
       if (!cell || cell.blocked) return false;
 
-      // Check consecutive height difference — must be strictly less than step height
-      if (Math.abs(cell.surfaceHeight - prevCell!.surfaceHeight) >= this.stepHeight - 0.01) return false;
+      // Check consecutive height difference — use stepUp for both directions (preserves stair detail)
+      if (Math.abs(cell.surfaceHeight - prevCell!.surfaceHeight) >= this.stepUp - 0.01) return false;
 
       // Check that the edge between prevCell and cell is actually passable
       // (prevents string-pull from cutting through stair sides)

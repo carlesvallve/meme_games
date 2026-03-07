@@ -181,7 +181,8 @@ interface GameStore {
   charHop: boolean;
   charDebugPath: boolean;
   charStringPull: boolean;
-  charStepHeight: number;
+  charStepUp: number;
+  charStepDown: number;
   charRotSpeed: number;
   setCharRotSpeed: (v: number) => void;
   charGravity: number;
@@ -197,7 +198,8 @@ interface GameStore {
   setCharHop: (v: boolean) => void;
   setCharDebugPath: (v: boolean) => void;
   setCharStringPull: (v: boolean) => void;
-  setCharStepHeight: (v: number) => void;
+  setCharStepUp: (v: number) => void;
+  setCharStepDown: (v: number) => void;
   setCharSnapMode: (v: 'free' | '4dir' | '8dir') => void;
   /** Populated by Game.ts after model loads */
   charAnimationList: string[];
@@ -273,7 +275,8 @@ export const useGameStore = create<GameStore>((set) => ({
   charHop: (saved.charHop as boolean) ?? true,
   charDebugPath: (saved.charDebugPath as boolean) ?? false,
   charStringPull: (saved.charStringPull as boolean) ?? true,
-  charStepHeight: (saved.charStepHeight as number) ?? 0.5,
+  charStepUp: (saved.charStepUp as number) ?? 0.5,
+  charStepDown: (saved.charStepDown as number) ?? 1.0,
   charRotSpeed: (saved.charRotSpeed as number) ?? 12,
   setCharRotSpeed: (charRotSpeed) => set({ charRotSpeed }),
   charGravity: (saved.charGravity as number) ?? 60,
@@ -289,7 +292,8 @@ export const useGameStore = create<GameStore>((set) => ({
   setCharHop: (charHop) => set({ charHop }),
   setCharDebugPath: (charDebugPath) => set({ charDebugPath }),
   setCharStringPull: (charStringPull) => set({ charStringPull }),
-  setCharStepHeight: (charStepHeight) => set({ charStepHeight }),
+  setCharStepUp: (charStepUp) => set({ charStepUp }),
+  setCharStepDown: (charStepDown) => set({ charStepDown }),
   setCharSnapMode: (charSnapMode) => set({ charSnapMode }),
   charAnimationList: [],
   setCharAnimationList: (charAnimationList) => set({ charAnimationList }),

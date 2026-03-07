@@ -148,7 +148,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   scene.add(gridOverlay.group);
 
   let navGrid = new NavGrid(WORLD_SIZE, WORLD_SIZE, gridCellSize);
-  navGrid.build([], useGameStore.getState().charStepHeight, 0.25);
+  navGrid.build([], useGameStore.getState().charStepUp, useGameStore.getState().charStepDown, 0.25);
 
   const character = new DummyCharacter(navGrid);
   // Snap initial position to grid center (0,0 is always a cell center with odd world size)
@@ -196,7 +196,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
 
     const store = useGameStore.getState();
     const snap = store.obstacleSnap;
-    const stepH = store.charStepHeight;
+    const stepH = store.charStepUp;
     const cs = gridCellSize;
     const clearRadius = cs * 3;
 
@@ -349,8 +349,8 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     }
 
     // Rebuild navGrid + grid overlay with obstacles
-    const stepHeight = useGameStore.getState().charStepHeight;
-    navGrid.build(obstacles, stepHeight, 0.25);
+    const { charStepUp, charStepDown } = useGameStore.getState();
+    navGrid.build(obstacles, charStepUp, charStepDown, 0.25);
     character.setObstacles(obstacles);
     gridOverlay.rebuild(WORLD_SIZE, gridCellSize, GROUND_COLOR, obstacles, obstacleColors);
     refreshDebugNav();
@@ -366,13 +366,15 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     obstacles = [];
     obstacleColors = [];
 
-    const stepHeight = useGameStore.getState().charStepHeight;
-    navGrid.build([], stepHeight, 0.25);
+    const { charStepUp: clearStepUp, charStepDown: clearStepDown } = useGameStore.getState();
+    navGrid.build([], clearStepUp, clearStepDown, 0.25);
     character.setObstacles([]);
     gridOverlay.rebuild(WORLD_SIZE, gridCellSize, GROUND_COLOR, [], []);
     refreshDebugNav();
   }
 
+  let prevStepUp = useGameStore.getState().charStepUp;
+  let prevStepDown = useGameStore.getState().charStepDown;
   let prevDebugNav = false;
   function refreshDebugNav(): void {
     const enabled = useGameStore.getState().debugNavGrid;
@@ -388,7 +390,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
 
     // Rebuild navGrid (preserve current obstacles)
     navGrid = new NavGrid(WORLD_SIZE, WORLD_SIZE, gridCellSize);
-    navGrid.build(obstacles, useGameStore.getState().charStepHeight, 0.25);
+    navGrid.build(obstacles, useGameStore.getState().charStepUp, useGameStore.getState().charStepDown, 0.25);
     character.setNavGrid(navGrid);
 
     // Rebuild click marker to match new cell size
@@ -651,6 +653,13 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     if (store.gridCellSize !== gridCellSize) {
       rebuildGrid(store.gridCellSize);
     }
+    // Rebuild navGrid when step heights change (affects passability)
+    if (store.charStepUp !== prevStepUp || store.charStepDown !== prevStepDown) {
+      prevStepUp = store.charStepUp;
+      prevStepDown = store.charStepDown;
+      navGrid.build(obstacles, store.charStepUp, store.charStepDown, 0.25);
+      refreshDebugNav();
+    }
     gridOverlay.setOpacity(store.gridOpacity);
 
     // Sync debug navGrid overlay
@@ -673,7 +682,8 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     character.setDebugPath(store.charDebugPath);
     character.setAutoMove(store.charAutoMove);
     character.setStringPull(store.charStringPull);
-    character.setStepHeight(store.charStepHeight);
+    character.setStepUp(store.charStepUp);
+    character.setStepDown(store.charStepDown);
     character.setTurnSpeed(store.charRotSpeed);
     character.setGravity(store.charGravity);
     character.setSnapMode(store.charSnapMode);

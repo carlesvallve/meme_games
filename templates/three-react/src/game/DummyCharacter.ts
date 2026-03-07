@@ -46,7 +46,8 @@ export class DummyCharacter {
   private goalRadius = 0;
   private obstacles: ReadonlyArray<AABBBox> = [];
   private collisionRadius = 0.25;
-  private stepHeight = 0.5;
+  private stepUp = 0.5;
+  private stepDown = 1.0;
   private turnSpeed = DEFAULT_TURN_SPEED;
   private gravity = GRAVITY;
   private maxFallSpeed = MAX_FALL_SPEED;
@@ -78,8 +79,11 @@ export class DummyCharacter {
     this.obstacles = obs;
   }
 
-  setStepHeight(v: number): void {
-    this.stepHeight = v;
+  setStepUp(v: number): void {
+    this.stepUp = v;
+  }
+  setStepDown(v: number): void {
+    this.stepDown = v;
   }
   setTurnSpeed(v: number): void {
     this.turnSpeed = v;
@@ -397,13 +401,23 @@ export class DummyCharacter {
           this.updatePathLine();
         }
       } else {
-        // Slow down on stairs (elevation change between waypoints)
+        // Slow down on stairs: climbing up, or small descent (within stepUp = stair steps).
+        // Large drops and flat segments use full speed.
+        // Only slow if BOTH the current segment has elevation change AND the target node
+        // differs in height from its successor (we're mid-stairs, not on the last step).
         let moveSpd = speed;
         if (this.pathNavHeights.length > 0 && this.pathIndex > 0) {
           const prevH = this.pathNavHeights[this.pathIndex - 1] ?? 0;
           const curH = this.pathNavHeights[this.pathIndex] ?? 0;
-          if (Math.abs(curH - prevH) > 0.01) {
-            moveSpd *= 0.5; // half speed on stairs
+          const diff = curH - prevH;
+          const isStair = diff > 0.01 || (diff < -0.01 && -diff <= this.stepUp);
+          if (isStair) {
+            // Check if target node continues to change elevation (mid-stairs)
+            // If next segment is flat, we're on the last step — don't slow down
+            const nextH = this.pathNavHeights[this.pathIndex + 1];
+            if (nextH !== undefined && Math.abs(nextH - curH) > 0.01) {
+              moveSpd *= 0.5;
+            }
           }
         }
         // Clamp speed on final approach to prevent overshoot (like voxel-engine)
@@ -432,7 +446,7 @@ export class DummyCharacter {
       const resolved = resolveCollision(
         pos.x, pos.z,
         this.obstacles, this.collisionRadius,
-        this.groundY, this.stepHeight,
+        this.groundY, this.stepUp,
       );
       pos.x = resolved.x;
       pos.z = resolved.z;
@@ -454,7 +468,7 @@ export class DummyCharacter {
         }
       } else {
         const surfaceY = getSurfaceHeight(pos.x, pos.z, this.obstacles, this.collisionRadius * 0.5);
-        if (surfaceY - this.groundY <= this.stepHeight) {
+        if (surfaceY - this.groundY <= this.stepUp) {
           this.groundY = surfaceY;
         }
       }

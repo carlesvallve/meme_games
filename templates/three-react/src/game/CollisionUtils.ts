@@ -3,7 +3,7 @@ import type { AABBBox } from './pathfinding/NavGrid';
 /**
  * Push-out collision resolution matching voxel-engine's pushOutOfDebris.
  * 4 iterative passes, shortest-axis push when inside, closest-point push when outside.
- * Skips boxes the entity can step onto (effectiveH - currentY <= stepHeight).
+ * Skips boxes the entity can step onto (effectiveH - currentY <= stepUp).
  */
 export function resolveCollision(
   newX: number,
@@ -11,7 +11,7 @@ export function resolveCollision(
   obstacles: ReadonlyArray<AABBBox>,
   radius: number,
   currentY: number,
-  stepHeight: number,
+  stepUp: number,
 ): { x: number; z: number } {
   let rx = newX;
   let rz = newZ;
@@ -19,7 +19,7 @@ export function resolveCollision(
   for (let pass = 0; pass < 4; pass++) {
     for (const box of obstacles) {
       // Skip steppable obstacles
-      if (box.height - currentY <= stepHeight) continue;
+      if (box.height - currentY <= stepUp) continue;
 
       // Relative position to box center
       const relX = rx - box.x;
