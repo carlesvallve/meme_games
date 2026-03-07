@@ -29,6 +29,7 @@ import { DummyCharacter } from './DummyCharacter';
 import { GridOverlay } from './GridOverlay';
 import { ObstacleGenerator } from './ObstacleGenerator';
 import { LadderSystem } from './LadderSystem';
+import { LadderGenerator } from './LadderGenerator';
 import { audioSystem } from './AudioSystem';
 import {
   WORLD_SIZE,
@@ -168,6 +169,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   // ── Obstacles & Ladders ────────────────────────────────────────────
   const obstacleGen = new ObstacleGenerator(scene);
   const ladderSystem = new LadderSystem(scene);
+  const ladderGenerator = new LadderGenerator();
 
   function rebuildAfterGeneration(): void {
     const { charStepUp, charStepDown } = useGameStore.getState();
@@ -179,10 +181,9 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
 
   function generateLadders(): void {
     // Clear previous ladders, rebuild navGrid fresh, then place ladders
-    ladderSystem.clear();
     const { charStepUp, charStepDown } = useGameStore.getState();
     navGrid.build(obstacleGen.obstacles, charStepUp, charStepDown, CAPSULE_RADIUS);
-    ladderSystem.rebuild(navGrid, obstacleGen.obstacles);
+    ladderGenerator.generate(navGrid, ladderSystem);
     character.setLadderDefs(ladderSystem.ladders);
     // Rebuild overlay after ladders unblocked cells and added nav-links
     gridOverlay.rebuild(WORLD_SIZE, gridCellSize, GROUND_COLOR, obstacleGen.obstacles, obstacleGen.colors);
