@@ -84,11 +84,11 @@ export const DEFAULT_TORCH_PARAMS: TorchParams = {
 export const DEFAULT_LIGHT_PRESET: LightPreset = 'default';
 
 export const LIGHT_DEFAULTS = {
-  ambient: 1.0,
+  ambient: 1.2,
   dirPrimary: 2.0,
-  dirFill: 1.0,
+  dirFill: 1.5,
   dirRim: 0.7,
-  hemi: 0.8,
+  hemi: 1.0,
 };
 
 export const LIGHT_PRESET_SCALES: Record<LightPreset, number> = {
@@ -103,7 +103,7 @@ export const LIGHT_EXTERIOR_SCALE = 1.6;
 export const DEFAULT_POST_PROCESS: PostProcessSettings = {
   enabled: true,
   bloom: { enabled: true, strength: 0.3, radius: 0.4, threshold: 0.85 },
-  ssao: { enabled: true, radius: 0.5, minDistance: 0.001, maxDistance: 0.1 },
+  ssao: { enabled: false, radius: 0.5, minDistance: 0.001, maxDistance: 0.1 },
   vignette: { enabled: true, offset: 1.0, darkness: 1.2 },
   colorGrade: { enabled: true, brightness: 0, contrast: 0.1, saturation: 0 },
 };
@@ -116,31 +116,18 @@ export const DEFAULT_PARTICLE_TOGGLES: ParticleToggles = {
 };
 
 // ── localStorage persistence ──────────────────────────────────────────
+// Automatically saves all serializable state (skips functions, arrays, nulls, and transient keys).
 
 const SETTINGS_KEY = 'three-react:settings';
 
-interface SavedSettings {
-  cameraParams?: CameraParams;
-  lightPreset?: LightPreset;
-  torchEnabled?: boolean;
-  torchParams?: TorchParams;
-  timeOfDay?: number;
-  dayCycleEnabled?: boolean;
-  dayCycleSpeed?: number;
-  postProcess?: PostProcessSettings;
-  particleToggles?: ParticleToggles;
-  gridOpacity?: number;
-  gridCellSize?: number;
-  charSpeed?: number;
-  charMoveSpeed?: number;
-  charHop?: boolean;
-  charDebugPath?: boolean;
-  charStringPull?: boolean;
-  charStepHeight?: number;
-  charSnapMode?: 'free' | '4dir' | '8dir';
-}
+/** Keys that should never be persisted (transient / runtime-only) */
+const TRANSIENT_KEYS = new Set([
+  'phase', 'charAnimation', 'charAnimationList', 'settingsPanelOpen',
+  'onStartGame', 'onPauseToggle', 'onResetCameraParams', 'onResetLightParams',
+  'onGenerateObstacles', 'onClearObstacles',
+]);
 
-function loadSettings(): SavedSettings {
+function loadSettings(): Record<string, unknown> {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
     if (raw) return JSON.parse(raw);
@@ -151,27 +138,15 @@ function loadSettings(): SavedSettings {
 }
 
 function saveSettings(): void {
-  const s = useGameStore.getState();
-  const data: SavedSettings = {
-    cameraParams: s.cameraParams,
-    lightPreset: s.lightPreset,
-    torchEnabled: s.torchEnabled,
-    torchParams: s.torchParams,
-    timeOfDay: s.timeOfDay,
-    dayCycleEnabled: s.dayCycleEnabled,
-    dayCycleSpeed: s.dayCycleSpeed,
-    postProcess: s.postProcess,
-    particleToggles: s.particleToggles,
-    gridOpacity: s.gridOpacity,
-    gridCellSize: s.gridCellSize,
-    charSpeed: s.charSpeed,
-    charMoveSpeed: s.charMoveSpeed,
-    charHop: s.charHop,
-    charDebugPath: s.charDebugPath,
-    charStringPull: s.charStringPull,
-    charStepHeight: s.charStepHeight,
-    charSnapMode: s.charSnapMode,
-  };
+  const s = useGameStore.getState() as unknown as Record<string, unknown>;
+  const data: Record<string, unknown> = {};
+  for (const key of Object.keys(s)) {
+    if (TRANSIENT_KEYS.has(key)) continue;
+    const val = s[key];
+    // Skip functions and null callbacks
+    if (typeof val === 'function' || val === null) continue;
+    data[key] = val;
+  }
   try {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(data));
   } catch {
@@ -208,6 +183,10 @@ interface GameStore {
   charStringPull: boolean;
   charStepHeight: number;
   charSnapMode: 'free' | '4dir' | '8dir';
+  charAutoMove: boolean;
+  setCharAutoMove: (v: boolean) => void;
+  charContinuousPath: boolean;
+  setCharContinuousPath: (v: boolean) => void;
   setCharAnimation: (v: string) => void;
   setCharSpeed: (v: number) => void;
   setCharMoveSpeed: (v: number) => void;
@@ -251,6 +230,8 @@ interface GameStore {
   onPauseToggle: (() => void) | null;
   onResetCameraParams: (() => void) | null;
   onResetLightParams: (() => void) | null;
+  debugNavGrid: boolean;
+  setDebugNavGrid: (v: boolean) => void;
   obstacleSnap: boolean;
   setObstacleSnap: (v: boolean) => void;
   onGenerateObstacles: (() => void) | null;
@@ -262,34 +243,38 @@ const saved = loadSettings();
 export const useGameStore = create<GameStore>((set) => ({
   phase: 'menu',
 
-  particleToggles: saved.particleToggles ?? { ...DEFAULT_PARTICLE_TOGGLES },
+  particleToggles: (saved.particleToggles as ParticleToggles) ?? { ...DEFAULT_PARTICLE_TOGGLES },
   cameraParams: (() => {
     const def = { ...DEFAULT_CAMERA_PARAMS };
-    const savedCam = saved.cameraParams;
+    const savedCam = saved.cameraParams as CameraParams | undefined;
     if (!savedCam) return def;
     return { ...def, ...savedCam };
   })(),
-  lightPreset: saved.lightPreset ?? DEFAULT_LIGHT_PRESET,
-  torchEnabled: saved.torchEnabled ?? false,
-  torchParams: saved.torchParams ?? { ...DEFAULT_TORCH_PARAMS },
-  gridOpacity: saved.gridOpacity ?? 0.25,
-  gridCellSize: saved.gridCellSize ?? 1,
+  lightPreset: (saved.lightPreset as LightPreset) ?? DEFAULT_LIGHT_PRESET,
+  torchEnabled: (saved.torchEnabled as boolean) ?? false,
+  torchParams: (saved.torchParams as TorchParams) ?? { ...DEFAULT_TORCH_PARAMS },
+  gridOpacity: (saved.gridOpacity as number) ?? 0.25,
+  gridCellSize: (saved.gridCellSize as number) ?? 0.5,
   setGridCellSize: (gridCellSize) => set({ gridCellSize }),
-  timeOfDay: saved.timeOfDay ?? 10,
-  dayCycleEnabled: saved.dayCycleEnabled ?? false,
-  dayCycleSpeed: saved.dayCycleSpeed ?? 1,
-  fastNights: true,
+  timeOfDay: (saved.timeOfDay as number) ?? 10,
+  dayCycleEnabled: (saved.dayCycleEnabled as boolean) ?? false,
+  dayCycleSpeed: (saved.dayCycleSpeed as number) ?? 1,
+  fastNights: (saved.fastNights as boolean) ?? true,
   sunDebug: false,
-  postProcess: saved.postProcess ?? { ...DEFAULT_POST_PROCESS },
+  postProcess: (saved.postProcess as PostProcessSettings) ?? { ...DEFAULT_POST_PROCESS },
 
   charAnimation: 'Idle',
-  charSpeed: saved.charSpeed ?? 1,
-  charMoveSpeed: saved.charMoveSpeed ?? 5,
-  charHop: saved.charHop ?? true,
-  charDebugPath: saved.charDebugPath ?? false,
-  charStringPull: saved.charStringPull ?? true,
-  charStepHeight: saved.charStepHeight ?? 0.5,
-  charSnapMode: (saved.charSnapMode ?? 'free') as 'free' | '4dir' | '8dir',
+  charSpeed: (saved.charSpeed as number) ?? 1,
+  charMoveSpeed: (saved.charMoveSpeed as number) ?? 5,
+  charHop: (saved.charHop as boolean) ?? true,
+  charDebugPath: (saved.charDebugPath as boolean) ?? false,
+  charStringPull: (saved.charStringPull as boolean) ?? true,
+  charStepHeight: (saved.charStepHeight as number) ?? 0.5,
+  charSnapMode: ((saved.charSnapMode as string) ?? '8dir') as 'free' | '4dir' | '8dir',
+  charAutoMove: (saved.charAutoMove as boolean) ?? true,
+  setCharAutoMove: (charAutoMove) => set({ charAutoMove }),
+  charContinuousPath: (saved.charContinuousPath as boolean) ?? true,
+  setCharContinuousPath: (charContinuousPath) => set({ charContinuousPath }),
   setCharAnimation: (charAnimation) => set({ charAnimation }),
   setCharSpeed: (charSpeed) => set({ charSpeed }),
   setCharMoveSpeed: (charMoveSpeed) => set({ charMoveSpeed }),
@@ -329,7 +314,9 @@ export const useGameStore = create<GameStore>((set) => ({
   setPostProcessParam: (key, value) =>
     set((s) => ({ postProcess: { ...s.postProcess, [key]: value } })),
 
-  obstacleSnap: true,
+  debugNavGrid: (saved.debugNavGrid as boolean) ?? false,
+  setDebugNavGrid: (debugNavGrid) => set({ debugNavGrid }),
+  obstacleSnap: (saved.obstacleSnap as boolean) ?? true,
   setObstacleSnap: (obstacleSnap) => set({ obstacleSnap }),
   onStartGame: null,
   onPauseToggle: null,

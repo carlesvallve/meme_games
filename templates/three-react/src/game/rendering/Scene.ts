@@ -77,7 +77,7 @@ export function createScene(paletteName = 'meadow'): { scene: THREE.Scene; light
   scene.add(dirMoon);
 
   // Hemisphere
-  const hemi = new THREE.HemisphereLight(0x8080b0, 0x2a2a45, LIGHT_DEFAULTS.hemi);
+  const hemi = new THREE.HemisphereLight(0x8080b0, 0x405060, LIGHT_DEFAULTS.hemi);
   scene.add(hemi);
 
   // Procedural sky + lensflare

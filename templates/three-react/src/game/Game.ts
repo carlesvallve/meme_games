@@ -27,6 +27,8 @@ import { createDustMotes, createRainEffect, createDebrisEffect } from '../utils/
 import { NavGrid } from './pathfinding/NavGrid';
 import type { AABBBox } from './pathfinding/NavGrid';
 import { DummyCharacter } from './DummyCharacter';
+import { GridOverlay } from './GridOverlay';
+import { audioSystem } from './AudioSystem';
 
 // ── Particle helpers ─────────────────────────────────────────────────
 
@@ -128,8 +130,9 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   const WORLD_SIZE = 41; // odd so there's always a center cell
   const groundGeo = new THREE.PlaneGeometry(WORLD_SIZE, WORLD_SIZE);
   groundGeo.rotateX(-Math.PI / 2);
+  const GROUND_COLOR = 0x9B8B75;
   const groundMat = new THREE.MeshStandardMaterial({
-    color: 0x556655,
+    color: GROUND_COLOR,
     roughness: 0.9,
     metalness: 0.0,
   });
@@ -139,12 +142,10 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
 
   // Grid overlay + NavGrid (rebuilt when cellSize changes)
   let gridCellSize = useGameStore.getState().gridCellSize;
-  let gridDivisions = Math.round(WORLD_SIZE / gridCellSize);
-  let gridHelper = new THREE.GridHelper(WORLD_SIZE, gridDivisions, 0x888888, 0x444444);
-  (gridHelper.material as THREE.Material).opacity = useGameStore.getState().gridOpacity;
-  (gridHelper.material as THREE.Material).transparent = true;
-  gridHelper.position.y = 0.01;
-  scene.add(gridHelper);
+  const gridOverlay = new GridOverlay();
+  gridOverlay.setOpacity(useGameStore.getState().gridOpacity);
+  gridOverlay.rebuild(WORLD_SIZE, gridCellSize, GROUND_COLOR, [], []);
+  scene.add(gridOverlay.group);
 
   let navGrid = new NavGrid(WORLD_SIZE, WORLD_SIZE, gridCellSize);
   navGrid.build([], useGameStore.getState().charStepHeight, 0.25);
@@ -158,9 +159,37 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
 
   // ── Obstacles ──────────────────────────────────────────────────────
   let obstacles: AABBBox[] = [];
+  let obstacleColors: number[] = [];
   let obstacleMeshes: THREE.Mesh[] = [];
 
   const EARTHY_COLORS = [0x8B7355, 0x6B5B45, 0x7A6B55, 0x9B8B75, 0x5C4D3C, 0x8B8070, 0x6E6355];
+
+  /** Place a single box obstacle and its mesh */
+  function placeBox(x: number, z: number, halfW: number, halfD: number, height: number, color: number): void {
+    const box: AABBBox = { x, z, halfW, halfD, height };
+    obstacles.push(box);
+    obstacleColors.push(color);
+    const geo = new THREE.BoxGeometry(halfW * 2, height, halfD * 2);
+    geo.translate(0, height / 2, 0);
+    const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.85, metalness: 0.05 });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(x, 0, z);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    scene.add(mesh);
+    obstacleMeshes.push(mesh);
+  }
+
+  /** Random grid position avoiding center clear zone */
+  function randGridPos(cs: number, clearRadius: number): { gx: number; gz: number } {
+    const gridHalf = Math.floor(WORLD_SIZE / cs / 2) - 2;
+    let gx: number, gz: number;
+    do {
+      gx = Math.floor((Math.random() - 0.5) * gridHalf * 2);
+      gz = Math.floor((Math.random() - 0.5) * gridHalf * 2);
+    } while (Math.abs(gx * cs) < clearRadius && Math.abs(gz * cs) < clearRadius);
+    return { gx, gz };
+  }
 
   function generateObstacles(): void {
     clearObstacles();
@@ -169,79 +198,122 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     const snap = store.obstacleSnap;
     const stepH = store.charStepHeight;
     const cs = gridCellSize;
-    const wallCount = 10 + Math.floor(Math.random() * 11); // 10-20 walls
-    const debrisCount = 8 + Math.floor(Math.random() * 8); // 8-15 debris
+    const clearRadius = cs * 3;
 
-    for (let i = 0; i < wallCount + debrisCount; i++) {
-      const isDebris = i >= wallCount;
-      let halfW: number, halfD: number, height: number, x: number, z: number;
+    // ── Compound shapes: L, U, T, +, corridors ──
+    const shapeCount = 4 + Math.floor(Math.random() * 4); // 4-7 compound shapes
+    for (let s = 0; s < shapeCount; s++) {
+      const color = EARTHY_COLORS[Math.floor(Math.random() * EARTHY_COLORS.length)];
+      const height = 1.2 + Math.random() * 1.5;
+      const shape = Math.floor(Math.random() * 5); // 0=L, 1=U, 2=T, 3=+, 4=corridor
+      const { gx: ox, gz: oz } = randGridPos(cs, clearRadius);
+      // Randomly rotate shape (0, 90, 180, 270)
+      const rot = Math.floor(Math.random() * 4);
 
-      if (isDebris) {
-        // Mix: ~60% steppable (below stepHeight), ~40% blocking (above)
-        height = Math.random() < 0.6
-          ? 0.05 + Math.random() * stepH * 0.9   // steppable
-          : stepH + 0.1 + Math.random() * 0.3;   // just above stepHeight
+      // Build shape as list of cell offsets relative to origin
+      let cells: { dx: number; dz: number }[] = [];
+      const armLen = 3 + Math.floor(Math.random() * 4); // 3-6 cells
+      const armLen2 = 3 + Math.floor(Math.random() * 3);
 
-        if (snap) {
-          // Snap debris to cell bounds (1 cell each axis)
-          halfW = cs * 0.5;
-          halfD = cs * 0.5;
-          const gx = Math.floor((Math.random() - 0.5) * (WORLD_SIZE / cs - 4));
-          const gz = Math.floor((Math.random() - 0.5) * (WORLD_SIZE / cs - 4));
-          x = gx * cs + cs * 0.5;
-          z = gz * cs + cs * 0.5;
-        } else {
-          halfW = 0.2 + Math.random() * 0.4;
-          halfD = 0.2 + Math.random() * 0.4;
-          x = (Math.random() - 0.5) * (WORLD_SIZE - 4);
-          z = (Math.random() - 0.5) * (WORLD_SIZE - 4);
-        }
-        // Debris can be near center — skip avoidance
-      } else if (snap) {
-        // Snap dimensions to whole cell multiples (1-3 cells per half-extent)
-        const cellsW = 1 + Math.floor(Math.random() * 3);
-        const cellsD = 1 + Math.floor(Math.random() * 3);
-        halfW = cellsW * cs * 0.5;
-        halfD = cellsD * cs * 0.5;
-        height = 1 + Math.random() * 2;
-
-        // Snap position to grid cell edges so box bounds align with grid lines
-        do {
-          const gx = Math.floor((Math.random() - 0.5) * (WORLD_SIZE / cs - 4));
-          const gz = Math.floor((Math.random() - 0.5) * (WORLD_SIZE / cs - 4));
-          x = gx * cs + (cellsW % 2 === 0 ? 0 : cs * 0.5);
-          z = gz * cs + (cellsD % 2 === 0 ? 0 : cs * 0.5);
-        } while (Math.abs(x) < cs * 2 && Math.abs(z) < cs * 2);
+      if (shape === 0) {
+        // L-shape: horizontal arm + vertical arm
+        for (let i = 0; i < armLen; i++) cells.push({ dx: i, dz: 0 });
+        for (let i = 1; i < armLen2; i++) cells.push({ dx: 0, dz: i });
+      } else if (shape === 1) {
+        // U-shape: two parallel arms + bottom connector
+        for (let i = 0; i < armLen; i++) { cells.push({ dx: 0, dz: i }); cells.push({ dx: 3, dz: i }); }
+        cells.push({ dx: 1, dz: 0 }); cells.push({ dx: 2, dz: 0 });
+      } else if (shape === 2) {
+        // T-shape: horizontal bar + vertical stem
+        const barLen = 3 + Math.floor(Math.random() * 3);
+        for (let i = 0; i < barLen; i++) cells.push({ dx: i, dz: 0 });
+        const mid = Math.floor(barLen / 2);
+        for (let i = 1; i < armLen; i++) cells.push({ dx: mid, dz: i });
+      } else if (shape === 3) {
+        // + shape: cross
+        const arm = 2 + Math.floor(Math.random() * 2);
+        for (let i = -arm; i <= arm; i++) { cells.push({ dx: i, dz: 0 }); if (i !== 0) cells.push({ dx: 0, dz: i }); }
       } else {
-        halfW = 0.5 + Math.random() * 1.5;
-        halfD = 0.5 + Math.random() * 1.5;
-        height = 1 + Math.random() * 2;
-
-        do {
-          x = (Math.random() - 0.5) * (WORLD_SIZE - 4);
-          z = (Math.random() - 0.5) * (WORLD_SIZE - 4);
-        } while (Math.abs(x) < 1.5 && Math.abs(z) < 1.5);
+        // Corridor/wall: long thin wall (1 cell wide, 5-10 long)
+        const wallLen = 5 + Math.floor(Math.random() * 6);
+        for (let i = 0; i < wallLen; i++) cells.push({ dx: i, dz: 0 });
       }
 
-      const box: AABBBox = { x, z, halfW, halfD, height };
-      obstacles.push(box);
+      // Apply rotation (90° increments)
+      if (rot > 0) {
+        cells = cells.map(({ dx, dz }) => {
+          if (rot === 1) return { dx: -dz, dz: dx };
+          if (rot === 2) return { dx: -dx, dz: -dz };
+          return { dx: dz, dz: -dx };
+        });
+      }
 
-      const geo = new THREE.BoxGeometry(halfW * 2, height, halfD * 2);
-      geo.translate(0, height / 2, 0);
-      const color = EARTHY_COLORS[Math.floor(Math.random() * EARTHY_COLORS.length)];
-      const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.85, metalness: 0.05 });
-      const mesh = new THREE.Mesh(geo, mat);
-      mesh.position.set(x, 0, z);
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-      scene.add(mesh);
-      obstacleMeshes.push(mesh);
+      // Place each cell as a box
+      if (snap) {
+        for (const { dx, dz } of cells) {
+          const cx = (ox + dx) * cs + cs * 0.5;
+          const cz = (oz + dz) * cs + cs * 0.5;
+          placeBox(cx, cz, cs * 0.5, cs * 0.5, height, color);
+        }
+      } else {
+        // Non-snap: place as merged AABB per shape segment
+        for (const { dx, dz } of cells) {
+          const cx = ox * cs + dx * cs + cs * 0.5;
+          const cz = oz * cs + dz * cs + cs * 0.5;
+          placeBox(cx, cz, cs * 0.5, cs * 0.5, height, color);
+        }
+      }
     }
 
-    // Rebuild navGrid with obstacles (stepHeight determines which are blocking)
+    // ── Large solid blocks (rooms/pillars) ──
+    const blockCount = 2 + Math.floor(Math.random() * 3);
+    for (let i = 0; i < blockCount; i++) {
+      const color = EARTHY_COLORS[Math.floor(Math.random() * EARTHY_COLORS.length)];
+      const height = 1 + Math.random() * 2;
+      const cellsW = 2 + Math.floor(Math.random() * 4); // 2-5 cells wide
+      const cellsD = 2 + Math.floor(Math.random() * 4);
+      const { gx, gz } = randGridPos(cs, clearRadius);
+
+      if (snap) {
+        const halfW = cellsW * cs * 0.5;
+        const halfD = cellsD * cs * 0.5;
+        const x = gx * cs + (cellsW % 2 === 0 ? 0 : cs * 0.5);
+        const z = gz * cs + (cellsD % 2 === 0 ? 0 : cs * 0.5);
+        placeBox(x, z, halfW, halfD, height, color);
+      } else {
+        const halfW = (1 + Math.random() * 3);
+        const halfD = (1 + Math.random() * 3);
+        const x = gx * cs;
+        const z = gz * cs;
+        placeBox(x, z, halfW, halfD, height, color);
+      }
+    }
+
+    // ── Scattered debris (steppable + some blocking) ──
+    const debrisCount = 8 + Math.floor(Math.random() * 8);
+    for (let i = 0; i < debrisCount; i++) {
+      const height = Math.random() < 0.6
+        ? 0.05 + Math.random() * stepH * 0.9
+        : stepH + 0.1 + Math.random() * 0.3;
+      const color = EARTHY_COLORS[Math.floor(Math.random() * EARTHY_COLORS.length)];
+
+      if (snap) {
+        const gx = Math.floor((Math.random() - 0.5) * (WORLD_SIZE / cs - 4));
+        const gz = Math.floor((Math.random() - 0.5) * (WORLD_SIZE / cs - 4));
+        placeBox(gx * cs + cs * 0.5, gz * cs + cs * 0.5, cs * 0.5, cs * 0.5, height, color);
+      } else {
+        const x = (Math.random() - 0.5) * (WORLD_SIZE - 4);
+        const z = (Math.random() - 0.5) * (WORLD_SIZE - 4);
+        placeBox(x, z, 0.2 + Math.random() * 0.4, 0.2 + Math.random() * 0.4, height, color);
+      }
+    }
+
+    // Rebuild navGrid + grid overlay with obstacles
     const stepHeight = useGameStore.getState().charStepHeight;
     navGrid.build(obstacles, stepHeight, 0.25);
     character.setObstacles(obstacles);
+    gridOverlay.rebuild(WORLD_SIZE, gridCellSize, GROUND_COLOR, obstacles, obstacleColors);
+    refreshDebugNav();
   }
 
   function clearObstacles(): void {
@@ -252,26 +324,27 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     }
     obstacleMeshes = [];
     obstacles = [];
+    obstacleColors = [];
 
     const stepHeight = useGameStore.getState().charStepHeight;
     navGrid.build([], stepHeight, 0.25);
     character.setObstacles([]);
+    gridOverlay.rebuild(WORLD_SIZE, gridCellSize, GROUND_COLOR, [], []);
+    refreshDebugNav();
+  }
+
+  let prevDebugNav = false;
+  function refreshDebugNav(): void {
+    const enabled = useGameStore.getState().debugNavGrid;
+    gridOverlay.setDebugNav(enabled ? navGrid : null, obstacles);
+    prevDebugNav = enabled;
   }
 
   function rebuildGrid(newCellSize: number): void {
-    // Remove old grid
-    scene.remove(gridHelper);
-    gridHelper.geometry.dispose();
-    (gridHelper.material as THREE.Material).dispose();
-
-    // Create new grid
     gridCellSize = newCellSize;
-    gridDivisions = Math.round(WORLD_SIZE / gridCellSize);
-    gridHelper = new THREE.GridHelper(WORLD_SIZE, gridDivisions, 0x888888, 0x444444);
-    (gridHelper.material as THREE.Material).opacity = useGameStore.getState().gridOpacity;
-    (gridHelper.material as THREE.Material).transparent = true;
-    gridHelper.position.y = 0.01;
-    scene.add(gridHelper);
+
+    // Rebuild grid overlay with current obstacles
+    gridOverlay.rebuild(WORLD_SIZE, gridCellSize, GROUND_COLOR, obstacles, obstacleColors);
 
     // Rebuild navGrid (preserve current obstacles)
     navGrid = new NavGrid(WORLD_SIZE, WORLD_SIZE, gridCellSize);
@@ -285,6 +358,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       clickMarker.geometry = markerGeo;
       markerCellSize = gridCellSize;
     }
+    refreshDebugNav();
   }
 
   // ── Torch light ──────────────────────────────────────────────────────
@@ -313,18 +387,22 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   // Raycaster for click-to-move
   const groundRaycaster = new THREE.Raycaster();
   const pointerNDC = new THREE.Vector2();
+  let goalPointerDown = false;
+  let goalPointerMoved = false;
+  let goalPointerDownPos = { x: 0, y: 0 };
+  let goalPointerType: string = 'mouse';
+  let goalFiredOnDown = false;
+  const GOAL_DRAG_THRESHOLD = 8;
 
-  const onContextMenu = (e: MouseEvent) => {
-    e.preventDefault();
+  function tryGoTo(clientX: number, clientY: number, isDrag = false): void {
     const rect = canvas.getBoundingClientRect();
-    pointerNDC.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-    pointerNDC.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+    pointerNDC.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+    pointerNDC.y = -((clientY - rect.top) / rect.height) * 2 + 1;
     groundRaycaster.setFromCamera(pointerNDC, cam.camera);
     const hits = groundRaycaster.intersectObject(ground);
     if (hits.length > 0) {
       const hit = hits[0].point;
       const snapMode = useGameStore.getState().charSnapMode;
-      // Snap marker position to grid in grid modes
       let mx = hit.x, mz = hit.z;
       if (snapMode === '4dir' || snapMode === '8dir') {
         const snapped = character.getSnappedGoal(hit.x, hit.z);
@@ -332,14 +410,74 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
         mz = snapped.z;
       }
       const outerRadius = gridCellSize * 0.45 + RING_STROKE * 0.5;
-      if (character.goTo(hit.x, hit.z, useGameStore.getState().charMoveSpeed, outerRadius)) {
+      if (character.goTo(hit.x, hit.z, useGameStore.getState().charMoveSpeed, outerRadius, isDrag)) {
         clickMarker.position.set(mx, 0.02, mz);
         markerMat.opacity = 1;
-        markerFade = -1; // -1 = waiting for path arrival
+        markerFade = -1;
       }
     }
+  }
+
+  // Left click / single finger touch → path goal (+ continuous path on drag)
+  // Uses pointerId tracking for reliable cross-platform behavior.
+  // goTo() handles autoMove logic internally via clickCount.
+  let goalPointerId = -1;
+
+  const onPointerDownGoal = (e: PointerEvent) => {
+    if (e.button !== 0) return;
+    audioSystem.init();
+    goalPointerId = e.pointerId;
+    goalPointerDown = true;
+    goalPointerMoved = false;
+    goalFiredOnDown = false;
+    goalPointerDownPos = { x: e.clientX, y: e.clientY };
+    goalPointerType = e.pointerType;
+    // Mouse: always fire immediately on down
+    if (e.pointerType === 'mouse') {
+      tryGoTo(e.clientX, e.clientY);
+      goalFiredOnDown = true;
+    }
   };
-  canvas.addEventListener('contextmenu', onContextMenu);
+  const onPointerMoveGoal = (e: PointerEvent) => {
+    if (!goalPointerDown || e.pointerId !== goalPointerId) return;
+    if (!goalPointerMoved) {
+      const dx = e.clientX - goalPointerDownPos.x;
+      const dy = e.clientY - goalPointerDownPos.y;
+      if (Math.sqrt(dx * dx + dy * dy) < GOAL_DRAG_THRESHOLD) return;
+      goalPointerMoved = true;
+      // Touch continuous path: fire on first confirmed drag
+      if (goalPointerType === 'touch' && useGameStore.getState().charContinuousPath) {
+        tryGoTo(e.clientX, e.clientY, true);
+      }
+    }
+    if (useGameStore.getState().charContinuousPath) {
+      tryGoTo(e.clientX, e.clientY, true);
+      goalFiredOnDown = true;
+    }
+  };
+  const onPointerUpGoal = (e: PointerEvent) => {
+    if (!goalPointerDown || e.pointerId !== goalPointerId) return;
+    // Only fire on up if we didn't already fire on down/move (prevents double-fire)
+    if (!goalPointerMoved && !goalFiredOnDown) {
+      tryGoTo(e.clientX, e.clientY);
+    }
+    goalPointerDown = false;
+    goalPointerId = -1;
+  };
+  // Cancel goal tracking when second finger touches (two-finger = camera/zoom)
+  const onTouchStartGoal = (e: TouchEvent) => {
+    if (e.touches.length >= 2) {
+      goalPointerDown = false;
+      goalPointerId = -1;
+    }
+  };
+  canvas.addEventListener('pointerdown', onPointerDownGoal);
+  window.addEventListener('pointermove', onPointerMoveGoal);
+  window.addEventListener('pointerup', onPointerUpGoal);
+  window.addEventListener('pointercancel', onPointerUpGoal);
+  canvas.addEventListener('touchstart', onTouchStartGoal, { passive: true });
+
+  // Context menu prevention handled by Camera
 
   // ── Particle systems ────────────────────────────────────────────────
   const particles: ParticleSystems = { dust: null, lightRain: null, rain: null, debris: null };
@@ -438,7 +576,12 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     if (store.gridCellSize !== gridCellSize) {
       rebuildGrid(store.gridCellSize);
     }
-    (gridHelper.material as THREE.Material).opacity = store.gridOpacity;
+    gridOverlay.setOpacity(store.gridOpacity);
+
+    // Sync debug navGrid overlay
+    if (store.debugNavGrid !== prevDebugNav) {
+      refreshDebugNav();
+    }
 
     // Sync particles
     const toggles = store.particleToggles;
@@ -453,6 +596,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
 
     // ── Character input + update ──────────────────────────────────────
     character.setDebugPath(store.charDebugPath);
+    character.setAutoMove(store.charAutoMove);
     character.setStringPull(store.charStringPull);
     character.setStepHeight(store.charStepHeight);
     character.setSnapMode(store.charSnapMode);
@@ -544,7 +688,11 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       torchLight.dispose();
 
       // Character + marker
-      canvas.removeEventListener('contextmenu', onContextMenu);
+      canvas.removeEventListener('pointerdown', onPointerDownGoal);
+      window.removeEventListener('pointermove', onPointerMoveGoal);
+      window.removeEventListener('pointerup', onPointerUpGoal);
+      window.removeEventListener('pointercancel', onPointerUpGoal);
+      canvas.removeEventListener('touchstart', onTouchStartGoal);
       scene.remove(character.root);
       character.dispose();
       scene.remove(clickMarker);
@@ -558,9 +706,8 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       scene.remove(ground);
       groundGeo.dispose();
       groundMat.dispose();
-      scene.remove(gridHelper);
-      gridHelper.geometry.dispose();
-      (gridHelper.material as THREE.Material).dispose();
+      scene.remove(gridOverlay.group);
+      gridOverlay.dispose();
 
       // Particles
       for (const sys of Object.values(particles)) {

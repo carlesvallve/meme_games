@@ -6,10 +6,12 @@ import type { NavGrid } from './pathfinding/NavGrid';
 import type { AABBBox } from './pathfinding/NavGrid';
 import { findPath } from './pathfinding/AStar';
 import { resolveCollision, getSurfaceHeight } from './CollisionUtils';
+import { audioSystem } from './AudioSystem';
 
 const TURN_SPEED = 12;
 const WAYPOINT_THRESHOLD = 0.3;
 const HOP_HEIGHT = 0.06;
+const FOOT_SFX_COOLDOWN = 0.12;
 
 export class DummyCharacter {
   readonly root: THREE.Group;
@@ -20,6 +22,8 @@ export class DummyCharacter {
   private moveSpeed = 0;
   private hopEnabled = true;
   private hopPhase = 0;
+  private lastHopHalf = 0;
+  private footSfxTimer = 0;
 
   // Movement
   private snapMode: 'free' | '4dir' | '8dir' = 'free';
@@ -96,6 +100,13 @@ export class DummyCharacter {
     }
   }
 
+  /** Get navgrid surface height at a world position (for debug line) */
+  private getSurfaceAt(wx: number, wz: number): number {
+    const grid = this.navGrid.worldToGrid(wx, wz);
+    const cell = this.navGrid.getCell(grid.gx, grid.gz);
+    return cell ? cell.surfaceHeight + 0.05 : 0.05;
+  }
+
   private updatePathLine(): void {
     if (!this.debugPath || !this.scene) return;
     this.clearPathLine();
@@ -104,10 +115,13 @@ export class DummyCharacter {
     if (remaining.length < 1) return;
 
     const pos = this.root.position;
-    const positions: number[] = [pos.x, 0.05, pos.z];
+    const BIAS = 0.05;
+
+    // Build flat list of waypoints with final-goal radius trim
+    const waypoints: { x: number; z: number }[] = [{ x: pos.x, z: pos.z }];
     for (let i = 0; i < remaining.length; i++) {
       let wx = remaining[i].x, wz = remaining[i].z;
-      if (i === remaining.length - 1 && this.goalRadius > 0 && remaining.length >= 1) {
+      if (i === remaining.length - 1 && this.goalRadius > 0) {
         const prevX = i > 0 ? remaining[i - 1].x : pos.x;
         const prevZ = i > 0 ? remaining[i - 1].z : pos.z;
         const dx = wx - prevX;
@@ -118,7 +132,32 @@ export class DummyCharacter {
           wz -= (dz / len) * this.goalRadius;
         }
       }
-      positions.push(wx, 0.05, wz);
+      waypoints.push({ x: wx, z: wz });
+    }
+
+    // Build positions with step-up/step-down at cell edges
+    const positions: number[] = [];
+    let prevH = this.getSurfaceAt(waypoints[0].x, waypoints[0].z);
+    positions.push(waypoints[0].x, prevH, waypoints[0].z);
+
+    for (let i = 1; i < waypoints.length; i++) {
+      const wp = waypoints[i];
+      const curH = this.getSurfaceAt(wp.x, wp.z);
+
+      if (Math.abs(curH - prevH) > 0.01) {
+        // Height change: insert step at the edge between cells
+        const prev = waypoints[i - 1];
+        const midX = (prev.x + wp.x) * 0.5;
+        const midZ = (prev.z + wp.z) * 0.5;
+        // Flat to edge at previous height
+        positions.push(midX, prevH, midZ);
+        // Vertical step to new height
+        positions.push(midX, curH, midZ);
+      }
+
+      // Continue flat at current height
+      positions.push(wp.x, curH, wp.z);
+      prevH = curH;
     }
 
     this.pathLineGeo = new LineGeometry();
@@ -207,13 +246,21 @@ export class DummyCharacter {
     this.root.rotation.y = this.facingAngle;
   }
 
-  /** Click-to-move: find A* path and follow it. */
-  goTo(worldX: number, worldZ: number, speed: number, markerRadius = 0): boolean {
+  private autoMove = true;
+  private pathPaused = false;
+  private clickCount = 0;
+
+  setAutoMove(v: boolean): void { this.autoMove = v; }
+
+  isPathPaused(): boolean { return this.pathPaused; }
+
+  /** Click-to-move. Tracks click count per goal — first click generates path, second starts movement.
+   *  isDrag=true means this came from a continuous drag — never resumes a paused path. */
+  goTo(worldX: number, worldZ: number, speed: number, markerRadius = 0, isDrag = false): boolean {
     const pos = this.root.position;
     const isGrid = this.snapMode === '4dir' || this.snapMode === '8dir';
     const cardinalOnly = this.snapMode === '4dir';
 
-    // In grid modes, snap goal to cell center
     let gx = worldX, gz = worldZ;
     if (isGrid) {
       const snapped = this.navGrid.snapToGrid(worldX, worldZ);
@@ -221,13 +268,44 @@ export class DummyCharacter {
       gz = snapped.z;
     }
 
+    // Check if clicking on the same goal cell as existing paused path
+    if (this.pathPaused && this.path.length > 0) {
+      const goal = this.path[this.path.length - 1];
+      const cs = this.navGrid.cellSize;
+      const sameGoal = Math.abs(gx - goal.x) < cs * 0.5 && Math.abs(gz - goal.z) < cs * 0.5;
+
+      if (sameGoal) {
+        if (!isDrag) {
+          this.clickCount++;
+          if (this.clickCount >= 2) {
+            // Second click on same goal — start moving
+            this.pathPaused = false;
+            this.moveSpeed = speed;
+            this.clickCount = 0;
+            return true;
+          }
+        }
+        return true; // same goal — already showing path (drag or first click)
+      }
+      // Different cell — fall through to generate new path
+    }
+
+    // Generate new path
     const result = findPath(this.navGrid, pos.x, pos.z, gx, gz, 10000, cardinalOnly, this.stringPull);
     if (!result.found || result.path.length < 2) return false;
     this.path = result.path;
     this.pathIndex = 1;
-    this.moveSpeed = speed;
     this.settleTarget = null;
     this.goalRadius = markerRadius;
+    this.clickCount = 1;
+
+    if (this.autoMove) {
+      this.moveSpeed = speed;
+      this.pathPaused = false;
+    } else {
+      this.moveSpeed = 0;
+      this.pathPaused = true;
+    }
 
     this.updatePathLine();
     return true;
@@ -262,7 +340,7 @@ export class DummyCharacter {
     }
 
     // ── A* path following: continuous waypoint movement (all modes) ──
-    if (this.path.length > 0 && this.pathIndex < this.path.length) {
+    if (this.path.length > 0 && this.pathIndex < this.path.length && !this.pathPaused) {
       const target = this.path[this.pathIndex];
       const pdx = target.x - pos.x;
       const pdz = target.z - pos.z;
@@ -337,14 +415,31 @@ export class DummyCharacter {
     pos.x = Math.max(-half, Math.min(half, pos.x));
     pos.z = Math.max(-half, Math.min(half, pos.z));
 
-    // ── Hop ──
+    // ── Hop + step SFX ──
+    this.footSfxTimer += dt;
     if (this.hopEnabled && this.moveSpeed > 0) {
       this.hopPhase += dt * this.moveSpeed * 2;
       const hop = Math.abs(Math.sin(this.hopPhase)) * HOP_HEIGHT;
       pos.y = this.groundY + hop;
+
+      // Play step SFX each time sin crosses zero (foot landing)
+      const currentHopHalf = Math.floor(this.hopPhase / Math.PI) % 2;
+      if (currentHopHalf !== this.lastHopHalf) {
+        this.lastHopHalf = currentHopHalf;
+        if (this.footSfxTimer >= FOOT_SFX_COOLDOWN) {
+          this.footSfxTimer = 0;
+          audioSystem.playStep(0.7);
+        }
+      }
     } else {
+      // Play arrival step when stopping, if cooldown allows
+      if (this.hopPhase > 0 && this.footSfxTimer >= FOOT_SFX_COOLDOWN) {
+        this.footSfxTimer = 0;
+        audioSystem.playStep(0.7);
+      }
       pos.y = this.groundY;
       this.hopPhase = 0;
+      this.lastHopHalf = 0;
     }
   }
 
@@ -352,6 +447,7 @@ export class DummyCharacter {
   isPathActive(): boolean {
     return this.path.length > 0;
   }
+
 
   getPosition(): THREE.Vector3 {
     return this.root.position;

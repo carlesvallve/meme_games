@@ -110,7 +110,13 @@ export function SettingsWindow({ children }: { children: React.ReactNode }) {
   useEffect(() => { injectRangeStyles(); }, []);
   return (
     <div
-      style={{ ...panelStyle, marginBottom: 8, touchAction: 'pan-y' }}
+      style={{
+        ...panelStyle,
+        marginBottom: 8,
+        touchAction: 'pan-y',
+        maxHeight: 'calc(100dvh - 80px)',
+        overflowY: 'auto',
+      }}
       onPointerDown={(e) => e.stopPropagation()}
       onPointerMove={(e) => e.stopPropagation()}
       onTouchMove={(e) => e.stopPropagation()}
