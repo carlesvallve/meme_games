@@ -25,6 +25,7 @@ import {
 import type { GameInstance, ParticleSystem } from '../types';
 import { createDustMotes, createRainEffect, createDebrisEffect } from '../utils/particles';
 import { NavGrid } from './pathfinding/NavGrid';
+import type { AABBBox } from './pathfinding/NavGrid';
 import { DummyCharacter } from './DummyCharacter';
 
 // ── Particle helpers ─────────────────────────────────────────────────
@@ -124,7 +125,8 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   const input = new Input();
 
   // ── Ground plane ────────────────────────────────────────────────────
-  const groundGeo = new THREE.PlaneGeometry(40, 40);
+  const WORLD_SIZE = 41; // odd so there's always a center cell
+  const groundGeo = new THREE.PlaneGeometry(WORLD_SIZE, WORLD_SIZE);
   groundGeo.rotateX(-Math.PI / 2);
   const groundMat = new THREE.MeshStandardMaterial({
     color: 0x556655,
@@ -135,19 +137,155 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   ground.receiveShadow = true;
   scene.add(ground);
 
-  // Grid overlay
-  const gridHelper = new THREE.GridHelper(40, 40, 0x888888, 0x444444);
+  // Grid overlay + NavGrid (rebuilt when cellSize changes)
+  let gridCellSize = useGameStore.getState().gridCellSize;
+  let gridDivisions = Math.round(WORLD_SIZE / gridCellSize);
+  let gridHelper = new THREE.GridHelper(WORLD_SIZE, gridDivisions, 0x888888, 0x444444);
   (gridHelper.material as THREE.Material).opacity = useGameStore.getState().gridOpacity;
   (gridHelper.material as THREE.Material).transparent = true;
   gridHelper.position.y = 0.01;
   scene.add(gridHelper);
 
-  // ── NavGrid + Character ────────────────────────────────────────────
-  const navGrid = new NavGrid(40, 40, 0.5);
-  navGrid.build([], 1, 0.25); // flat ground, all walkable
+  let navGrid = new NavGrid(WORLD_SIZE, WORLD_SIZE, gridCellSize);
+  navGrid.build([], useGameStore.getState().charStepHeight, 0.25);
 
   const character = new DummyCharacter(navGrid);
+  // Snap initial position to grid center (0,0 is always a cell center with odd world size)
+  const initSnap = navGrid.snapToGrid(0, 0);
+  character.root.position.set(initSnap.x, 0, initSnap.z);
   scene.add(character.root);
+  character.setScene(scene);
+
+  // ── Obstacles ──────────────────────────────────────────────────────
+  let obstacles: AABBBox[] = [];
+  let obstacleMeshes: THREE.Mesh[] = [];
+
+  const EARTHY_COLORS = [0x8B7355, 0x6B5B45, 0x7A6B55, 0x9B8B75, 0x5C4D3C, 0x8B8070, 0x6E6355];
+
+  function generateObstacles(): void {
+    clearObstacles();
+
+    const store = useGameStore.getState();
+    const snap = store.obstacleSnap;
+    const stepH = store.charStepHeight;
+    const cs = gridCellSize;
+    const wallCount = 10 + Math.floor(Math.random() * 11); // 10-20 walls
+    const debrisCount = 8 + Math.floor(Math.random() * 8); // 8-15 debris
+
+    for (let i = 0; i < wallCount + debrisCount; i++) {
+      const isDebris = i >= wallCount;
+      let halfW: number, halfD: number, height: number, x: number, z: number;
+
+      if (isDebris) {
+        // Mix: ~60% steppable (below stepHeight), ~40% blocking (above)
+        height = Math.random() < 0.6
+          ? 0.05 + Math.random() * stepH * 0.9   // steppable
+          : stepH + 0.1 + Math.random() * 0.3;   // just above stepHeight
+
+        if (snap) {
+          // Snap debris to cell bounds (1 cell each axis)
+          halfW = cs * 0.5;
+          halfD = cs * 0.5;
+          const gx = Math.floor((Math.random() - 0.5) * (WORLD_SIZE / cs - 4));
+          const gz = Math.floor((Math.random() - 0.5) * (WORLD_SIZE / cs - 4));
+          x = gx * cs + cs * 0.5;
+          z = gz * cs + cs * 0.5;
+        } else {
+          halfW = 0.2 + Math.random() * 0.4;
+          halfD = 0.2 + Math.random() * 0.4;
+          x = (Math.random() - 0.5) * (WORLD_SIZE - 4);
+          z = (Math.random() - 0.5) * (WORLD_SIZE - 4);
+        }
+        // Debris can be near center — skip avoidance
+      } else if (snap) {
+        // Snap dimensions to whole cell multiples (1-3 cells per half-extent)
+        const cellsW = 1 + Math.floor(Math.random() * 3);
+        const cellsD = 1 + Math.floor(Math.random() * 3);
+        halfW = cellsW * cs * 0.5;
+        halfD = cellsD * cs * 0.5;
+        height = 1 + Math.random() * 2;
+
+        // Snap position to grid cell edges so box bounds align with grid lines
+        do {
+          const gx = Math.floor((Math.random() - 0.5) * (WORLD_SIZE / cs - 4));
+          const gz = Math.floor((Math.random() - 0.5) * (WORLD_SIZE / cs - 4));
+          x = gx * cs + (cellsW % 2 === 0 ? 0 : cs * 0.5);
+          z = gz * cs + (cellsD % 2 === 0 ? 0 : cs * 0.5);
+        } while (Math.abs(x) < cs * 2 && Math.abs(z) < cs * 2);
+      } else {
+        halfW = 0.5 + Math.random() * 1.5;
+        halfD = 0.5 + Math.random() * 1.5;
+        height = 1 + Math.random() * 2;
+
+        do {
+          x = (Math.random() - 0.5) * (WORLD_SIZE - 4);
+          z = (Math.random() - 0.5) * (WORLD_SIZE - 4);
+        } while (Math.abs(x) < 1.5 && Math.abs(z) < 1.5);
+      }
+
+      const box: AABBBox = { x, z, halfW, halfD, height };
+      obstacles.push(box);
+
+      const geo = new THREE.BoxGeometry(halfW * 2, height, halfD * 2);
+      geo.translate(0, height / 2, 0);
+      const color = EARTHY_COLORS[Math.floor(Math.random() * EARTHY_COLORS.length)];
+      const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.85, metalness: 0.05 });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.set(x, 0, z);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      scene.add(mesh);
+      obstacleMeshes.push(mesh);
+    }
+
+    // Rebuild navGrid with obstacles (stepHeight determines which are blocking)
+    const stepHeight = useGameStore.getState().charStepHeight;
+    navGrid.build(obstacles, stepHeight, 0.25);
+    character.setObstacles(obstacles);
+  }
+
+  function clearObstacles(): void {
+    for (const mesh of obstacleMeshes) {
+      scene.remove(mesh);
+      mesh.geometry.dispose();
+      (mesh.material as THREE.Material).dispose();
+    }
+    obstacleMeshes = [];
+    obstacles = [];
+
+    const stepHeight = useGameStore.getState().charStepHeight;
+    navGrid.build([], stepHeight, 0.25);
+    character.setObstacles([]);
+  }
+
+  function rebuildGrid(newCellSize: number): void {
+    // Remove old grid
+    scene.remove(gridHelper);
+    gridHelper.geometry.dispose();
+    (gridHelper.material as THREE.Material).dispose();
+
+    // Create new grid
+    gridCellSize = newCellSize;
+    gridDivisions = Math.round(WORLD_SIZE / gridCellSize);
+    gridHelper = new THREE.GridHelper(WORLD_SIZE, gridDivisions, 0x888888, 0x444444);
+    (gridHelper.material as THREE.Material).opacity = useGameStore.getState().gridOpacity;
+    (gridHelper.material as THREE.Material).transparent = true;
+    gridHelper.position.y = 0.01;
+    scene.add(gridHelper);
+
+    // Rebuild navGrid (preserve current obstacles)
+    navGrid = new NavGrid(WORLD_SIZE, WORLD_SIZE, gridCellSize);
+    navGrid.build(obstacles, useGameStore.getState().charStepHeight, 0.25);
+    character.setNavGrid(navGrid);
+
+    // Rebuild click marker to match new cell size
+    if (gridCellSize !== markerCellSize) {
+      clickMarker.geometry.dispose();
+      markerGeo = createMarkerGeo(gridCellSize);
+      clickMarker.geometry = markerGeo;
+      markerCellSize = gridCellSize;
+    }
+  }
 
   // ── Torch light ──────────────────────────────────────────────────────
   const torchLight = new THREE.PointLight(0xffaa44, 0, 10);
@@ -155,9 +293,17 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   torchLight.visible = false;
   scene.add(torchLight);
 
-  // Click marker ring
-  const markerGeo = new THREE.RingGeometry(0.3, 0.45, 24);
-  markerGeo.rotateX(-Math.PI / 2);
+  // Click marker ring — sized to match grid cell, stroke matches debug line width
+  const RING_STROKE = 0.05;
+  let markerCellSize = gridCellSize;
+  function createMarkerGeo(cellSize: number): THREE.RingGeometry {
+    const outer = cellSize * 0.45;
+    const inner = outer - RING_STROKE;
+    const geo = new THREE.RingGeometry(inner, outer, 32);
+    geo.rotateX(-Math.PI / 2);
+    return geo;
+  }
+  let markerGeo = createMarkerGeo(gridCellSize);
   const markerMat = new THREE.MeshBasicMaterial({ color: 0xffff44, transparent: true, opacity: 0 });
   const clickMarker = new THREE.Mesh(markerGeo, markerMat);
   clickMarker.position.y = 0.02;
@@ -177,10 +323,19 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     const hits = groundRaycaster.intersectObject(ground);
     if (hits.length > 0) {
       const hit = hits[0].point;
-      if (character.goTo(hit.x, hit.z, useGameStore.getState().charMoveSpeed)) {
-        clickMarker.position.set(hit.x, 0.02, hit.z);
+      const snapMode = useGameStore.getState().charSnapMode;
+      // Snap marker position to grid in grid modes
+      let mx = hit.x, mz = hit.z;
+      if (snapMode === '4dir' || snapMode === '8dir') {
+        const snapped = character.getSnappedGoal(hit.x, hit.z);
+        mx = snapped.x;
+        mz = snapped.z;
+      }
+      const outerRadius = gridCellSize * 0.45 + RING_STROKE * 0.5;
+      if (character.goTo(hit.x, hit.z, useGameStore.getState().charMoveSpeed, outerRadius)) {
+        clickMarker.position.set(mx, 0.02, mz);
         markerMat.opacity = 1;
-        markerFade = 0.5;
+        markerFade = -1; // -1 = waiting for path arrival
       }
     }
   };
@@ -221,6 +376,8 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       });
       applyLightPreset(sceneLights, DEFAULT_LIGHT_PRESET, true);
     },
+    onGenerateObstacles: () => generateObstacles(),
+    onClearObstacles: () => clearObstacles(),
   });
 
   // ── Game loop ───────────────────────────────────────────────────────
@@ -277,7 +434,10 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     // Sync post-processing
     postProcess.sync(store.postProcess);
 
-    // Sync grid opacity
+    // Sync grid
+    if (store.gridCellSize !== gridCellSize) {
+      rebuildGrid(store.gridCellSize);
+    }
     (gridHelper.material as THREE.Material).opacity = store.gridOpacity;
 
     // Sync particles
@@ -292,6 +452,10 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     if (particles.debris) particles.debris.update(dt);
 
     // ── Character input + update ──────────────────────────────────────
+    character.setDebugPath(store.charDebugPath);
+    character.setStringPull(store.charStringPull);
+    character.setStepHeight(store.charStepHeight);
+    character.setSnapMode(store.charSnapMode);
     const moveSpeed = store.charMoveSpeed;
 
     const inp = input.update();
@@ -326,10 +490,13 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       torchLight.visible = false;
     }
 
-    // Click marker fade
+    // Click marker fade — start fading when path completes
+    if (markerFade === -1 && !character.isPathActive()) {
+      markerFade = 0.4; // start fade-out
+    }
     if (markerFade > 0) {
       markerFade -= dt;
-      markerMat.opacity = Math.max(0, markerFade / 0.5);
+      markerMat.opacity = Math.max(0, markerFade / 0.4);
     }
 
     // Update camera
@@ -383,6 +550,9 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       scene.remove(clickMarker);
       markerGeo.dispose();
       markerMat.dispose();
+
+      // Obstacles
+      clearObstacles();
 
       // Ground
       scene.remove(ground);

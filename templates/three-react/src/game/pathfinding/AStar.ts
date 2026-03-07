@@ -117,6 +117,8 @@ export function findPath(
   goalX: number,
   goalZ: number,
   maxIterations = 10000,
+  cardinalOnly = false,
+  useStringPull = true,
 ): PathResult {
   const start = grid.worldToGrid(startX, startZ);
   const goal = grid.worldToGrid(goalX, goalZ);
@@ -155,7 +157,9 @@ export function findPath(
   const goalIdx = goal.gz * w + goal.gx;
 
   gScore[startIdx] = 0;
-  fScore[startIdx] = heuristic(start.gx, start.gz, goal.gx, goal.gz);
+  fScore[startIdx] = cardinalOnly
+    ? Math.abs(start.gx - goal.gx) + Math.abs(start.gz - goal.gz)
+    : heuristic(start.gx, start.gz, goal.gx, goal.gz);
 
   const open = new BinaryHeap(fScore);
   open.push(startIdx);
@@ -171,22 +175,14 @@ export function findPath(
     closed[currentIdx] = 1;
 
     if (currentIdx === goalIdx) {
-      // Reconstruct path — use the full grid path (no string-pulling)
-      // so characters follow every cell and navigate terrain correctly
       const gridPath = reconstructPath(cameFrom, currentIdx, w);
       const worldPath = gridPathToWorld(grid, gridPath, startX, startZ, goalX, goalZ);
       const meta = reconstructMeta(cameFrom, cameViaLink, currentIdx, w, grid, gridPath);
 
-      // Debug: log if path uses any ladders
-      const ladderSteps = meta.filter(m => m.ladderIndex !== null);
-      if (ladderSteps.length > 0) {
-        // console.log(`[A*] Path uses ${ladderSteps.length} ladder(s):`, ladderSteps.map((m, i) => {
-        //   const idx = meta.indexOf(m);
-        //   return `wp${idx}: ladder${m.ladderIndex} ${m.climbDirection}`;
-        // }));
-      }
+      // String-pull: remove redundant waypoints where line-of-sight exists
+      const finalPath = useStringPull ? stringPull(grid, worldPath) : worldPath;
 
-      return { found: true, path: worldPath, rawPath: worldPath, meta };
+      return { found: true, path: finalPath, rawPath: worldPath, meta };
     }
 
     const cgx = currentIdx % w;
@@ -194,6 +190,7 @@ export function findPath(
     const currentG = gScore[currentIdx];
 
     for (let dir = 0; dir < 8; dir++) {
+      if (cardinalOnly && dir % 2 !== 0) continue; // skip diagonals (odd = NE,SE,SW,NW)
       if (!grid.canPass(cgx, cgz, dir)) continue;
 
       const ngx = cgx + DIR_DGX[dir];
@@ -216,7 +213,9 @@ export function findPath(
         cameFrom[nIdx] = currentIdx;
         cameViaLink[nIdx] = -1;
         gScore[nIdx] = tentativeG;
-        fScore[nIdx] = tentativeG + heuristic(ngx, ngz, goal.gx, goal.gz);
+        fScore[nIdx] = tentativeG + (cardinalOnly
+          ? Math.abs(ngx - goal.gx) + Math.abs(ngz - goal.gz)
+          : heuristic(ngx, ngz, goal.gx, goal.gz));
         open.push(nIdx); // May add duplicates; lazy deletion handles it
       }
     }
