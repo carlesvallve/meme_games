@@ -21,6 +21,7 @@ import {
   createSunDebugHelper,
   updateSunDebug,
   disposeSunDebugHelper,
+  WorldRevealFX,
 } from './rendering';
 import type { GameInstance, ParticleSystem } from '../types';
 import {
@@ -138,6 +139,10 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   const postProcess = new PostProcessStack(renderer, scene, cam.camera);
   postProcess.sync(useGameStore.getState().postProcess);
 
+  // ── World reveal FX ──────────────────────────────────────────────────
+  const worldReveal = new WorldRevealFX();
+  worldReveal.init(cam, postProcess);
+
   // ── Input ───────────────────────────────────────────────────────────
   const input = new Input();
 
@@ -174,6 +179,10 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   character.root.position.set(initSnap.x, 0, initSnap.z);
   scene.add(character.root);
   character.setScene(scene);
+  character.onLandingImpact = (fallHeight: number) => {
+    const cells = fallHeight / gridCellSize;
+    cam.shake(Math.min(cells * 0.04, 0.25), Math.min(cells * 0.06, 0.3));
+  };
 
   // ── Obstacles & Ladders ────────────────────────────────────────────
   const obstacleGen = new ObstacleGenerator(scene);
@@ -519,6 +528,10 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
         else generateTerrain();
       }
       generateLadders();
+      if (useGameStore.getState().worldRevealEnabled) {
+        const maxH = obstacleGen.obstacles.reduce((m, o) => Math.max(m, o.height), 0);
+        worldReveal.start(maxH);
+      }
     },
   });
 
@@ -709,6 +722,9 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       markerFade -= dt;
       markerMat.opacity = Math.max(0, markerFade / MARKER_FADE_DURATION);
     }
+
+    // World reveal animation
+    worldReveal.update(dt);
 
     // Update camera
     cam.updatePosition(dt);

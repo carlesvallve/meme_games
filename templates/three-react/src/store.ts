@@ -248,6 +248,10 @@ interface GameStore {
   setDebugNavGrid: (v: boolean) => void;
   obstacleSnap: boolean;
   setObstacleSnap: (v: boolean) => void;
+  worldRevealEnabled: boolean;
+  setWorldRevealEnabled: (v: boolean) => void;
+  ladderDensity: number;
+  setLadderDensity: (v: number) => void;
   onGenerateObstacles: (() => void) | null;
   onGenerateTerrain: (() => void) | null;
   onGenerateLadders: (() => void) | null;
@@ -341,6 +345,10 @@ export const useGameStore = create<GameStore>((set) => ({
   setDebugNavGrid: (debugNavGrid) => set({ debugNavGrid }),
   obstacleSnap: (saved.obstacleSnap as boolean) ?? true,
   setObstacleSnap: (obstacleSnap) => set({ obstacleSnap }),
+  worldRevealEnabled: (saved.worldRevealEnabled as boolean) ?? true,
+  setWorldRevealEnabled: (worldRevealEnabled) => set({ worldRevealEnabled }),
+  ladderDensity: (saved.ladderDensity as number) ?? 0.5,
+  setLadderDensity: (ladderDensity) => set({ ladderDensity }),
   onStartGame: null,
   onPauseToggle: null,
   onResetCameraParams: null,

@@ -9,19 +9,27 @@ import {
   LADDER_WALL_OFFSET,
   LADDER_COST,
 } from './GameConstants';
+import { patchWorldRevealMaterial } from './shaders/WorldReveal';
 
 export interface LadderDef {
   /** Ladder mesh midpoint */
-  bottomX: number; bottomZ: number; bottomY: number;
+  bottomX: number;
+  bottomZ: number;
+  bottomY: number;
   topY: number;
   /** Unit normal: cliff face toward low side */
-  facingDX: number; facingDZ: number;
+  facingDX: number;
+  facingDZ: number;
   /** World positions of low/high cells */
-  lowWorldX: number; lowWorldZ: number;
-  highWorldX: number; highWorldZ: number;
+  lowWorldX: number;
+  lowWorldZ: number;
+  highWorldX: number;
+  highWorldZ: number;
   /** Nav-grid cell coordinates */
-  lowCellGX: number; lowCellGZ: number;
-  highCellGX: number; highCellGZ: number;
+  lowCellGX: number;
+  lowCellGZ: number;
+  highCellGX: number;
+  highCellGZ: number;
 }
 
 /**
@@ -41,14 +49,23 @@ export class LadderSystem {
       roughness: 0.8,
       metalness: 0.1,
     });
+    patchWorldRevealMaterial(this.mat);
   }
 
   /** Place a ladder between a low cell and a high cell.
    *  Creates the mesh, registers a bidirectional nav-link, and stores the LadderDef. */
   placeLadder(
     navGrid: NavGrid,
-    lowGX: number, lowGZ: number, lowWorldX: number, lowWorldZ: number, lowH: number,
-    highGX: number, highGZ: number, highWorldX: number, highWorldZ: number, highH: number,
+    lowGX: number,
+    lowGZ: number,
+    lowWorldX: number,
+    lowWorldZ: number,
+    lowH: number,
+    highGX: number,
+    highGZ: number,
+    highWorldX: number,
+    highWorldZ: number,
+    highH: number,
   ): LadderDef {
     this.cellSize = navGrid.cellSize;
 
@@ -65,10 +82,14 @@ export class LadderSystem {
       topY: highH,
       facingDX: nfdx,
       facingDZ: nfdz,
-      lowWorldX, lowWorldZ,
-      highWorldX, highWorldZ,
-      lowCellGX: lowGX, lowCellGZ: lowGZ,
-      highCellGX: highGX, highCellGZ: highGZ,
+      lowWorldX,
+      lowWorldZ,
+      highWorldX,
+      highWorldZ,
+      lowCellGX: lowGX,
+      lowCellGZ: lowGZ,
+      highCellGX: highGX,
+      highCellGZ: highGZ,
     };
 
     const ladderIndex = this.ladders.length;
@@ -86,7 +107,8 @@ export class LadderSystem {
     const group = new THREE.Group();
     const dy = ladder.topY - ladder.bottomY;
     const ladderLength = dy;
-    const rungCount = Math.max(1, Math.floor(ladderLength / LADDER_RUNG_SPACING)) * 2;
+    const rungCount =
+      Math.max(1, Math.floor(ladderLength / LADDER_RUNG_SPACING)) * 2;
     const cellSize = this.cellSize;
 
     // Yaw: ladder faces INTO the wall (toward high cell)
@@ -98,8 +120,10 @@ export class LadderSystem {
 
     // Ladder stands on the LOW (walkable) cell, flush against the wall of the high cell.
     const halfCell = cellSize * 0.5;
-    const baseX = ladder.lowWorldX + ladder.facingDX * (halfCell - LADDER_WALL_OFFSET);
-    const baseZ = ladder.lowWorldZ + ladder.facingDZ * (halfCell - LADDER_WALL_OFFSET);
+    const baseX =
+      ladder.lowWorldX + ladder.facingDX * (halfCell - LADDER_WALL_OFFSET);
+    const baseZ =
+      ladder.lowWorldZ + ladder.facingDZ * (halfCell - LADDER_WALL_OFFSET);
     const baseY = ladder.bottomY;
 
     // Rails

@@ -40,8 +40,9 @@ class AudioSystem {
     return this.ctx;
   }
 
-  /** Play a random grass step WAV with slight pitch variation */
-  playStep(volume = 0.7): void {
+  /** Play a random grass step WAV with slight pitch variation.
+   *  pitch: base playback rate (default 1.0, lower = deeper thud) */
+  playStep(volume = 0.7, pitch = 1.0): void {
     if (this.muted) return;
     const ctx = this.ensureContext();
     if (!ctx) return;
@@ -52,7 +53,7 @@ class AudioSystem {
     const buffer = grassBuffers[Math.floor(Math.random() * grassBuffers.length)];
     const source = ctx.createBufferSource();
     source.buffer = buffer;
-    source.playbackRate.value = 0.85 + Math.random() * 0.3;
+    source.playbackRate.value = (0.85 + Math.random() * 0.3) * pitch;
 
     if (volume < 0.99) {
       const gain = ctx.createGain();

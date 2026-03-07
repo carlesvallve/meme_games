@@ -29,6 +29,10 @@ export function WorldPanel() {
   const setDebugNavGrid = useGameStore((s) => s.setDebugNavGrid);
   const obstacleSnap = useGameStore((s) => s.obstacleSnap);
   const setObstacleSnap = useGameStore((s) => s.setObstacleSnap);
+  const worldRevealEnabled = useGameStore((s) => s.worldRevealEnabled);
+  const setWorldRevealEnabled = useGameStore((s) => s.setWorldRevealEnabled);
+  const ladderDensity = useGameStore((s) => s.ladderDensity);
+  const setLadderDensity = useGameStore((s) => s.setLadderDensity);
 
   return (
     <SettingsWindow>
@@ -55,6 +59,16 @@ export function WorldPanel() {
       <Section label='Obstacles' accent='#8f8'>
         <Toggle label='Debug NavGrid' value={debugNavGrid} onChange={setDebugNavGrid} />
         <Toggle label='Snap to Grid' value={obstacleSnap} onChange={setObstacleSnap} />
+        <Toggle label='Build Effects' value={worldRevealEnabled} onChange={setWorldRevealEnabled} />
+        <Slider
+          label='Ladder Density'
+          value={ladderDensity}
+          min={0}
+          max={1}
+          step={0.1}
+          accent='#8f8'
+          onChange={setLadderDensity}
+        />
         <div style={{ display: 'flex', gap: 6 }}>
           <button
             onClick={() => useGameStore.getState().onGenerateWorld?.()}

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { AABBBox } from './pathfinding/NavGrid';
 import { WORLD_SIZE, EARTHY_COLORS } from './GameConstants';
+import { patchWorldRevealMaterial } from './shaders/WorldReveal';
 import { useGameStore } from '../store';
 
 export class ObstacleGenerator {
@@ -15,8 +16,10 @@ export class ObstacleGenerator {
     const EPS = 0.01;
     let h = 0;
     for (const box of this.obstacles) {
-      if (Math.abs(wx - box.x) < box.halfW + EPS &&
-          Math.abs(wz - box.z) < box.halfD + EPS) {
+      if (
+        Math.abs(wx - box.x) < box.halfW + EPS &&
+        Math.abs(wz - box.z) < box.halfD + EPS
+      ) {
         h = Math.max(h, box.height);
       }
     }
@@ -25,7 +28,14 @@ export class ObstacleGenerator {
 
   /** Place a box that stacks on existing geometry (Tetris/Lego style).
    *  The mesh only covers the new portion; the AABBBox height is the full column. */
-  placeBox(x: number, z: number, halfW: number, halfD: number, height: number, color: number): void {
+  placeBox(
+    x: number,
+    z: number,
+    halfW: number,
+    halfD: number,
+    height: number,
+    color: number,
+  ): void {
     const baseY = this.getSurfaceAt(x, z);
     const totalH = baseY + height;
     const box: AABBBox = { x, z, halfW, halfD, height: totalH };
@@ -34,7 +44,12 @@ export class ObstacleGenerator {
     // Mesh covers only the new portion (sits on top of existing)
     const geo = new THREE.BoxGeometry(halfW * 2, height, halfD * 2);
     geo.translate(0, baseY + height / 2, 0);
-    const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.85, metalness: 0.05 });
+    const mat = new THREE.MeshStandardMaterial({
+      color,
+      roughness: 0.85,
+      metalness: 0.05,
+    });
+    patchWorldRevealMaterial(mat);
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.set(x, 0, z);
     mesh.castShadow = true;
@@ -44,13 +59,19 @@ export class ObstacleGenerator {
   }
 
   /** Random grid position avoiding center clear zone */
-  private randGridPos(cs: number, clearRadius: number): { gx: number; gz: number } {
+  private randGridPos(
+    cs: number,
+    clearRadius: number,
+  ): { gx: number; gz: number } {
     const gridHalf = Math.floor(WORLD_SIZE / cs / 2) - 2;
     let gx: number, gz: number;
     do {
       gx = Math.floor((Math.random() - 0.5) * gridHalf * 2);
       gz = Math.floor((Math.random() - 0.5) * gridHalf * 2);
-    } while (Math.abs(gx * cs) < clearRadius && Math.abs(gz * cs) < clearRadius);
+    } while (
+      Math.abs(gx * cs) < clearRadius &&
+      Math.abs(gz * cs) < clearRadius
+    );
     return { gx, gz };
   }
 
@@ -64,7 +85,8 @@ export class ObstacleGenerator {
     // ── Compound shapes: L, U, T, +, corridors ──
     const shapeCount = 4 + Math.floor(Math.random() * 4); // 4-7 compound shapes
     for (let s = 0; s < shapeCount; s++) {
-      const color = EARTHY_COLORS[Math.floor(Math.random() * EARTHY_COLORS.length)];
+      const color =
+        EARTHY_COLORS[Math.floor(Math.random() * EARTHY_COLORS.length)];
       const height = 1.2 + Math.random() * 1.5;
       const shape = Math.floor(Math.random() * 5); // 0=L, 1=U, 2=T, 3=+, 4=corridor
       const { gx: ox, gz: oz } = this.randGridPos(cs, clearRadius);
@@ -78,8 +100,12 @@ export class ObstacleGenerator {
         for (let i = 0; i < armLen; i++) cells.push({ dx: i, dz: 0 });
         for (let i = 1; i < armLen2; i++) cells.push({ dx: 0, dz: i });
       } else if (shape === 1) {
-        for (let i = 0; i < armLen; i++) { cells.push({ dx: 0, dz: i }); cells.push({ dx: 3, dz: i }); }
-        cells.push({ dx: 1, dz: 0 }); cells.push({ dx: 2, dz: 0 });
+        for (let i = 0; i < armLen; i++) {
+          cells.push({ dx: 0, dz: i });
+          cells.push({ dx: 3, dz: i });
+        }
+        cells.push({ dx: 1, dz: 0 });
+        cells.push({ dx: 2, dz: 0 });
       } else if (shape === 2) {
         const barLen = 3 + Math.floor(Math.random() * 3);
         for (let i = 0; i < barLen; i++) cells.push({ dx: i, dz: 0 });
@@ -87,7 +113,10 @@ export class ObstacleGenerator {
         for (let i = 1; i < armLen; i++) cells.push({ dx: mid, dz: i });
       } else if (shape === 3) {
         const arm = 2 + Math.floor(Math.random() * 2);
-        for (let i = -arm; i <= arm; i++) { cells.push({ dx: i, dz: 0 }); if (i !== 0) cells.push({ dx: 0, dz: i }); }
+        for (let i = -arm; i <= arm; i++) {
+          cells.push({ dx: i, dz: 0 });
+          if (i !== 0) cells.push({ dx: 0, dz: i });
+        }
       } else {
         const wallLen = 5 + Math.floor(Math.random() * 6);
         for (let i = 0; i < wallLen; i++) cells.push({ dx: i, dz: 0 });
@@ -111,7 +140,8 @@ export class ObstacleGenerator {
     // ── Large solid blocks (rooms/pillars) ──
     const blockCount = 2 + Math.floor(Math.random() * 3);
     for (let i = 0; i < blockCount; i++) {
-      const color = EARTHY_COLORS[Math.floor(Math.random() * EARTHY_COLORS.length)];
+      const color =
+        EARTHY_COLORS[Math.floor(Math.random() * EARTHY_COLORS.length)];
       const height = 1 + Math.random() * 2;
       const cellsW = 2 + Math.floor(Math.random() * 4);
       const cellsD = 2 + Math.floor(Math.random() * 4);
@@ -124,8 +154,8 @@ export class ObstacleGenerator {
         const z = gz * cs + (cellsD % 2 === 0 ? 0 : cs * 0.5);
         this.placeBox(x, z, halfW, halfD, height, color);
       } else {
-        const halfW = (1 + Math.random() * 3);
-        const halfD = (1 + Math.random() * 3);
+        const halfW = 1 + Math.random() * 3;
+        const halfD = 1 + Math.random() * 3;
         const x = gx * cs;
         const z = gz * cs;
         this.placeBox(x, z, halfW, halfD, height, color);
@@ -136,7 +166,8 @@ export class ObstacleGenerator {
     const stairCells = new Set<string>();
     const stairCount = 3 + Math.floor(Math.random() * 4);
     for (let s = 0; s < stairCount; s++) {
-      const color = EARTHY_COLORS[Math.floor(Math.random() * EARTHY_COLORS.length)];
+      const color =
+        EARTHY_COLORS[Math.floor(Math.random() * EARTHY_COLORS.length)];
       const stairSteps = 3 + Math.floor(Math.random() * 4);
       const { gx: ox, gz: oz } = this.randGridPos(cs, clearRadius);
       const rot = Math.floor(Math.random() * 4);
@@ -147,9 +178,18 @@ export class ObstacleGenerator {
         for (let col = 0; col < width; col++) {
           let dx = col - Math.floor(width / 2);
           let dz = row;
-          if (rot === 1) { const tmp = dx; dx = -dz; dz = tmp; }
-          else if (rot === 2) { dx = -dx; dz = -dz; }
-          else if (rot === 3) { const tmp = dx; dx = dz; dz = -tmp; }
+          if (rot === 1) {
+            const tmp = dx;
+            dx = -dz;
+            dz = tmp;
+          } else if (rot === 2) {
+            dx = -dx;
+            dz = -dz;
+          } else if (rot === 3) {
+            const tmp = dx;
+            dx = dz;
+            dz = -tmp;
+          }
 
           const cx = (ox + dx) * cs + cs * 0.5;
           const cz = (oz + dz) * cs + cs * 0.5;
@@ -166,10 +206,12 @@ export class ObstacleGenerator {
     // ── Scattered debris (steppable + some blocking) ──
     const debrisCount = 8 + Math.floor(Math.random() * 8);
     for (let i = 0; i < debrisCount; i++) {
-      const height = Math.random() < 0.6
-        ? 0.05 + Math.random() * stepH * 0.9
-        : stepH + 0.1 + Math.random() * 0.3;
-      const color = EARTHY_COLORS[Math.floor(Math.random() * EARTHY_COLORS.length)];
+      const height =
+        Math.random() < 0.6
+          ? 0.05 + Math.random() * stepH * 0.9
+          : stepH + 0.1 + Math.random() * 0.3;
+      const color =
+        EARTHY_COLORS[Math.floor(Math.random() * EARTHY_COLORS.length)];
 
       if (snap) {
         let gx: number, gz: number;
@@ -180,11 +222,25 @@ export class ObstacleGenerator {
           attempts++;
         } while (stairCells.has(`${gx},${gz}`) && attempts < 20);
         if (attempts >= 20) continue;
-        this.placeBox(gx * cs + cs * 0.5, gz * cs + cs * 0.5, cs * 0.5, cs * 0.5, height, color);
+        this.placeBox(
+          gx * cs + cs * 0.5,
+          gz * cs + cs * 0.5,
+          cs * 0.5,
+          cs * 0.5,
+          height,
+          color,
+        );
       } else {
         const x = (Math.random() - 0.5) * (WORLD_SIZE - 4);
         const z = (Math.random() - 0.5) * (WORLD_SIZE - 4);
-        this.placeBox(x, z, 0.2 + Math.random() * 0.4, 0.2 + Math.random() * 0.4, height, color);
+        this.placeBox(
+          x,
+          z,
+          0.2 + Math.random() * 0.4,
+          0.2 + Math.random() * 0.4,
+          height,
+          color,
+        );
       }
     }
   }
@@ -208,7 +264,13 @@ export class ObstacleGenerator {
 
     // ── 1. Generate platforms at various elevations (additive — on top of existing) ──
     const platformCount = 5 + Math.floor(Math.random() * 5);
-    interface Platform { cx: number; cz: number; w: number; d: number; h: number }
+    interface Platform {
+      cx: number;
+      cz: number;
+      w: number;
+      d: number;
+      h: number;
+    }
     const platforms: Platform[] = [];
 
     for (let i = 0; i < platformCount; i++) {
@@ -249,10 +311,13 @@ export class ObstacleGenerator {
         if (i === j) continue;
         const b = platforms[j];
         if (Math.abs(a.h - b.h) < 0.01) continue;
-        const dx = (a.cx + a.w / 2) - (b.cx + b.w / 2);
-        const dz = (a.cz + a.d / 2) - (b.cz + b.d / 2);
+        const dx = a.cx + a.w / 2 - (b.cx + b.w / 2);
+        const dz = a.cz + a.d / 2 - (b.cz + b.d / 2);
         const dist = Math.sqrt(dx * dx + dz * dz);
-        if (dist < bestDist) { bestDist = dist; bestJ = j; }
+        if (dist < bestDist) {
+          bestDist = dist;
+          bestJ = j;
+        }
       }
       if (bestJ < 0) continue;
 
@@ -295,17 +360,25 @@ export class ObstacleGenerator {
       const side = Math.floor(Math.random() * 4);
       let startGX: number, startGZ: number, dirGX: number, dirGZ: number;
       if (side === 0) {
-        startGX = plat.cx + Math.floor(plat.w / 2); startGZ = plat.cz - 1;
-        dirGX = 0; dirGZ = -1;
+        startGX = plat.cx + Math.floor(plat.w / 2);
+        startGZ = plat.cz - 1;
+        dirGX = 0;
+        dirGZ = -1;
       } else if (side === 1) {
-        startGX = plat.cx + Math.floor(plat.w / 2); startGZ = plat.cz + plat.d;
-        dirGX = 0; dirGZ = 1;
+        startGX = plat.cx + Math.floor(plat.w / 2);
+        startGZ = plat.cz + plat.d;
+        dirGX = 0;
+        dirGZ = 1;
       } else if (side === 2) {
-        startGX = plat.cx - 1; startGZ = plat.cz + Math.floor(plat.d / 2);
-        dirGX = -1; dirGZ = 0;
+        startGX = plat.cx - 1;
+        startGZ = plat.cz + Math.floor(plat.d / 2);
+        dirGX = -1;
+        dirGZ = 0;
       } else {
-        startGX = plat.cx + plat.w; startGZ = plat.cz + Math.floor(plat.d / 2);
-        dirGX = 1; dirGZ = 0;
+        startGX = plat.cx + plat.w;
+        startGZ = plat.cz + Math.floor(plat.d / 2);
+        dirGX = 1;
+        dirGZ = 0;
       }
 
       const stepsDown = Math.round(plat.h / stepH);
@@ -326,10 +399,19 @@ export class ObstacleGenerator {
       for (let d = 0; d < debrisCount; d++) {
         const side = Math.floor(Math.random() * 4);
         let gx: number, gz: number;
-        if (side === 0) { gx = plat.cx - 1 - Math.floor(Math.random() * 2); gz = plat.cz + Math.floor(Math.random() * plat.d); }
-        else if (side === 1) { gx = plat.cx + plat.w + Math.floor(Math.random() * 2); gz = plat.cz + Math.floor(Math.random() * plat.d); }
-        else if (side === 2) { gx = plat.cx + Math.floor(Math.random() * plat.w); gz = plat.cz - 1 - Math.floor(Math.random() * 2); }
-        else { gx = plat.cx + Math.floor(Math.random() * plat.w); gz = plat.cz + plat.d + Math.floor(Math.random() * 2); }
+        if (side === 0) {
+          gx = plat.cx - 1 - Math.floor(Math.random() * 2);
+          gz = plat.cz + Math.floor(Math.random() * plat.d);
+        } else if (side === 1) {
+          gx = plat.cx + plat.w + Math.floor(Math.random() * 2);
+          gz = plat.cz + Math.floor(Math.random() * plat.d);
+        } else if (side === 2) {
+          gx = plat.cx + Math.floor(Math.random() * plat.w);
+          gz = plat.cz - 1 - Math.floor(Math.random() * 2);
+        } else {
+          gx = plat.cx + Math.floor(Math.random() * plat.w);
+          gz = plat.cz + plat.d + Math.floor(Math.random() * 2);
+        }
         if (Math.abs(gx) > gridHalf || Math.abs(gz) > gridHalf) continue;
         const dh = stepH * (1 + Math.floor(Math.random() * 2));
         const h = Math.min(dh, plat.h);
@@ -366,12 +448,23 @@ export class ObstacleGenerator {
       const baseY = existH;
       const deltaH = h - baseY;
       if (deltaH < 0.01) continue;
-      const box: AABBBox = { x: wx, z: wz, halfW: cs * 0.5, halfD: cs * 0.5, height: h };
+      const box: AABBBox = {
+        x: wx,
+        z: wz,
+        halfW: cs * 0.5,
+        halfD: cs * 0.5,
+        height: h,
+      };
       this.obstacles.push(box);
       this.colors.push(color);
       const geo = new THREE.BoxGeometry(cs, deltaH, cs);
       geo.translate(0, baseY + deltaH / 2, 0);
-      const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.85, metalness: 0.05 });
+      const mat = new THREE.MeshStandardMaterial({
+        color,
+        roughness: 0.85,
+        metalness: 0.05,
+      });
+      patchWorldRevealMaterial(mat);
       const mesh = new THREE.Mesh(geo, mat);
       mesh.position.set(wx, 0, wz);
       mesh.castShadow = true;

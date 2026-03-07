@@ -83,6 +83,10 @@ export class CharacterController {
   private groundY = 0;
   private visualGroundY = 0; // smoothed render height (lerp up, gravity down)
   private velocityY = 0; // fall velocity for gravity-based descent
+  private fallStartY = 0; // Y when fall began (for impact detection)
+  private isFalling = false;
+  private landingStun = 0; // seconds of movement pause after hard landing
+  onLandingImpact: ((fallHeight: number) => void) | null = null; // set by Game.ts for camera shake
   private pathNavHeights: number[] = []; // NavGrid heights per waypoint (for groundY interpolation)
   private prevWaypointNavH = 0; // NavGrid height of the waypoint we just left
 
@@ -394,8 +398,9 @@ export class CharacterController {
     dt: number,
     speed: number,
   ): void {
-    // Don't allow movement while climbing
+    // Don't allow movement while climbing or stunned from landing
     if (this.climbState) return;
+    if (this.landingStun > 0) return;
 
     if (dx === 0 && dz === 0) {
       if (this.moveSpeed > 0 && this.path.length === 0) {
@@ -669,7 +674,8 @@ export class CharacterController {
     if (
       this.path.length > 0 &&
       this.pathIndex < this.path.length &&
-      !this.pathPaused
+      !this.pathPaused &&
+      this.landingStun <= 0
     ) {
       const target = this.path[this.pathIndex];
       const pdx = target.x - pos.x;
@@ -813,6 +819,11 @@ export class CharacterController {
     pos.x = Math.max(-half, Math.min(half, pos.x));
     pos.z = Math.max(-half, Math.min(half, pos.z));
 
+    // ── Landing stun (pause after hard drop) ──
+    if (this.landingStun > 0) {
+      this.landingStun -= dt;
+    }
+
     // ── Smooth visual Y (lerp up, gravity down — matches voxel-engine) ──
     if (this.groundY > this.visualGroundY) {
       // Stepping up: exponential lerp
@@ -821,7 +832,13 @@ export class CharacterController {
         (this.groundY - this.visualGroundY) *
           (1 - Math.exp(-STEP_UP_RATE * dt));
       this.velocityY = 0;
+      this.isFalling = false;
     } else if (this.groundY < this.visualGroundY) {
+      // Track fall start
+      if (!this.isFalling) {
+        this.isFalling = true;
+        this.fallStartY = this.visualGroundY;
+      }
       // Stepping down: gravity-based fall
       this.velocityY = Math.min(
         this.velocityY + this.gravity * dt,
@@ -830,15 +847,26 @@ export class CharacterController {
       this.visualGroundY -= this.velocityY * dt;
       if (this.visualGroundY <= this.groundY) {
         this.visualGroundY = this.groundY;
+        // Landing impact
+        const fallHeight = this.fallStartY - this.groundY;
+        const cellSize = this.navGrid.cellSize;
+        if (fallHeight > cellSize * 1.5) {
+          const cells = fallHeight / cellSize;
+          this.landingStun = Math.min(0.05 + cells * 0.03, 0.2);
+          audioSystem.playStep(Math.min(0.5 + cells * 0.1, 1.0), 0.6);
+          this.onLandingImpact?.(fallHeight);
+        }
         this.velocityY = 0;
+        this.isFalling = false;
       }
     } else {
       this.velocityY = 0;
+      this.isFalling = false;
     }
 
     // ── Hop + step SFX ──
     this.footSfxTimer += dt;
-    if (this.hopEnabled && this.moveSpeed > 0) {
+    if (this.hopEnabled && this.moveSpeed > 0 && this.landingStun <= 0) {
       this.hopPhase += dt * this.moveSpeed * 4;
       const hop = Math.abs(Math.sin(this.hopPhase)) * HOP_HEIGHT;
       pos.y = this.visualGroundY + hop;

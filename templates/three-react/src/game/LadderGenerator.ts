@@ -6,6 +6,7 @@
 
 import type { NavGrid } from './pathfinding/NavGrid';
 import type { LadderSystem } from './LadderSystem';
+import { useGameStore } from '../store';
 
 interface Candidate {
   gx: number; gz: number;       // walkable (low) cell
@@ -32,8 +33,9 @@ export class LadderGenerator {
     const h = navGrid.height;
     const totalCells = w * h;
 
-    // Minimum distance between ladders (in world units) to avoid clusters
-    const MIN_LADDER_DIST = cs * 5;
+    // Density slider: 0→sparse (large spacing), 1→dense (small spacing)
+    const density = useGameStore.getState().ladderDensity;
+    const MIN_LADDER_DIST = cs * (8 - density * 5); // range: cs*8 (density=0) to cs*3 (density=1)
     const MIN_LADDER_DIST_SQ = MIN_LADDER_DIST * MIN_LADDER_DIST;
     const placed: { x: number; z: number; highH: number }[] = [];
 
@@ -169,7 +171,7 @@ export class LadderGenerator {
     }
 
     // ── Phase 2: Shortcut ladders on already-walkable cliff edges ──
-    const SHORTCUT_CHANCE = 0.08;
+    const SHORTCUT_CHANCE = 0.02 + density * 0.1; // 2% (density=0) to 12% (density=1)
     for (let gz = 0; gz < h; gz++) {
       for (let gx = 0; gx < w; gx++) {
         const cell = navGrid.getCell(gx, gz);
@@ -193,11 +195,12 @@ export class LadderGenerator {
       }
     }
 
+    console.warn(`[LadderGenerator] Placed ${ladderSystem.ladders.length} ladders`);
+
     // Unblock terraces reachable via newly-placed ladders
     if (ladderSystem.ladders.length > 0) {
       navGrid.recomputeReachability();
     }
 
-    console.log(`[LadderGenerator] Placed ${ladderSystem.ladders.length} ladders`);
   }
 }
