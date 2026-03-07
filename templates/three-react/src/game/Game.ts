@@ -383,6 +383,9 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   clickMarker.position.y = 0.02;
   scene.add(clickMarker);
   let markerFade = 0;
+  // Smooth snap: marker lerps to snapped grid position on mouse release
+  let markerSnapTarget: { x: number; z: number } | null = null;
+  const MARKER_SNAP_SPEED = 16;
 
   // Raycaster for click-to-move
   const groundRaycaster = new THREE.Raycaster();
@@ -403,15 +406,24 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     if (hits.length > 0) {
       const hit = hits[0].point;
       const snapMode = useGameStore.getState().charSnapMode;
+      const isGrid = snapMode === '4dir' || snapMode === '8dir';
+      // Snapped position for pathfinding
       let mx = hit.x, mz = hit.z;
-      if (snapMode === '4dir' || snapMode === '8dir') {
+      if (isGrid) {
         const snapped = character.getSnappedGoal(hit.x, hit.z);
         mx = snapped.x;
         mz = snapped.z;
       }
       const outerRadius = gridCellSize * 0.45 + RING_STROKE * 0.5;
       if (character.goTo(hit.x, hit.z, useGameStore.getState().charMoveSpeed, outerRadius, isDrag)) {
-        clickMarker.position.set(mx, 0.02, mz);
+        // During drag in grid modes: show marker at raw mouse pos, snap on release
+        if (isDrag && isGrid && goalPointerDown) {
+          clickMarker.position.set(hit.x, 0.02, hit.z);
+          markerSnapTarget = { x: mx, z: mz };
+        } else {
+          clickMarker.position.set(mx, 0.02, mz);
+          markerSnapTarget = null;
+        }
         markerMat.opacity = 1;
         markerFade = -1;
       }
@@ -461,6 +473,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     if (!goalPointerMoved && !goalFiredOnDown) {
       tryGoTo(e.clientX, e.clientY);
     }
+    // markerSnapTarget was set during drag — tick loop will lerp it
     goalPointerDown = false;
     goalPointerId = -1;
   };
@@ -632,6 +645,26 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       );
     } else {
       torchLight.visible = false;
+    }
+
+    // Smooth-snap marker to grid position after drag release
+    if (markerSnapTarget && !goalPointerDown) {
+      const dx = markerSnapTarget.x - clickMarker.position.x;
+      const dz = markerSnapTarget.z - clickMarker.position.z;
+      const dist = Math.sqrt(dx * dx + dz * dz);
+      if (dist < 0.01) {
+        clickMarker.position.x = markerSnapTarget.x;
+        clickMarker.position.z = markerSnapTarget.z;
+        markerSnapTarget = null;
+      } else {
+        const t = 1 - Math.exp(-MARKER_SNAP_SPEED * dt);
+        clickMarker.position.x += dx * t;
+        clickMarker.position.z += dz * t;
+      }
+    }
+    // Path line endpoint tracks marker position (smooth during drag + snap)
+    if (markerSnapTarget || goalPointerDown) {
+      character.setPathLineEndpoint(clickMarker.position.x, clickMarker.position.z);
     }
 
     // Click marker fade — start fading when path completes
