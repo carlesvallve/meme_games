@@ -177,10 +177,8 @@ export class DummyCharacter {
 
     const mountDist = Math.sqrt((climbX - pos.x) ** 2 + (climbZ - pos.z) ** 2);
 
-    // Face the wall when climbing up, face away when climbing down
-    const targetFacing = direction === 'up'
-      ? Math.atan2(ladder.facingDX, ladder.facingDZ)   // face into wall
-      : Math.atan2(-ladder.facingDX, -ladder.facingDZ); // face away from wall
+    // Always face the wall (into the ladder) while climbing — both up and down
+    const targetFacing = Math.atan2(ladder.facingDX, ladder.facingDZ);
 
     const dy = ladder.topY - ladder.bottomY;
     const rungCount = Math.max(1, Math.floor(dy / LADDER_RUNG_SPACING));
@@ -310,6 +308,8 @@ export class DummyCharacter {
           cs.phaseTime = 0;
           cs.startX = pos.x;
           cs.startZ = pos.z;
+          // Turn 180 on dismount: face away from wall when stepping off
+          cs.targetFacing = Math.atan2(-ladder.facingDX, -ladder.facingDZ);
         }
       } else {
         // Move toward target rung
