@@ -25,6 +25,8 @@ export function WorldPanel() {
   const setGridOpacity = useGameStore((s) => s.setGridOpacity);
   const gridCellSize = useGameStore((s) => s.gridCellSize);
   const setGridCellSize = useGameStore((s) => s.setGridCellSize);
+  const debugNavGrid = useGameStore((s) => s.debugNavGrid);
+  const setDebugNavGrid = useGameStore((s) => s.setDebugNavGrid);
   const obstacleSnap = useGameStore((s) => s.obstacleSnap);
   const setObstacleSnap = useGameStore((s) => s.setObstacleSnap);
 
@@ -51,6 +53,7 @@ export function WorldPanel() {
         />
       </Section>
       <Section label='Obstacles' accent='#8f8'>
+        <Toggle label='Debug NavGrid' value={debugNavGrid} onChange={setDebugNavGrid} />
         <Toggle label='Snap to Grid' value={obstacleSnap} onChange={setObstacleSnap} />
         <div style={{ display: 'flex', gap: 6 }}>
           <button

@@ -14,6 +14,10 @@ export function CharacterPanel() {
   const debugPath = useGameStore((s) => s.charDebugPath);
   const stringPull = useGameStore((s) => s.charStringPull);
   const snapMode = useGameStore((s) => s.charSnapMode);
+  const autoMove = useGameStore((s) => s.charAutoMove);
+  const setAutoMove = useGameStore((s) => s.setCharAutoMove);
+  const continuousPath = useGameStore((s) => s.charContinuousPath);
+  const setContinuousPath = useGameStore((s) => s.setCharContinuousPath);
   const setAnimation = useGameStore((s) => s.setCharAnimation);
   const setSpeed = useGameStore((s) => s.setCharSpeed);
   const setMoveSpeed = useGameStore((s) => s.setCharMoveSpeed);
@@ -78,6 +82,16 @@ export function CharacterPanel() {
           value={stringPull}
           onChange={setStringPull}
         />
+        <Toggle
+          label='Auto Move'
+          value={autoMove}
+          onChange={setAutoMove}
+        />
+        <Toggle
+          label='Continuous Path'
+          value={continuousPath}
+          onChange={setContinuousPath}
+        />
         <div style={rowStyle}>
           <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>
             Movement
@@ -107,7 +121,9 @@ export function CharacterPanel() {
           charHop: true,
           charDebugPath: false,
           charStringPull: true,
-          charSnapMode: 'free' as 'free' | '4dir' | '8dir',
+          charAutoMove: true,
+          charContinuousPath: true,
+          charSnapMode: '8dir' as 'free' | '4dir' | '8dir',
         })}
         style={resetBtnStyle}
       >

@@ -86,7 +86,11 @@ export class Camera {
   private onPointerDown: (e: PointerEvent) => void;
   private onPointerMove: (e: PointerEvent) => void;
   private onPointerUp: (e: PointerEvent) => void;
+  private onMouseDown: (e: MouseEvent) => void;
+  private onMouseMove: (e: MouseEvent) => void;
+  private onMouseUp: (e: MouseEvent) => void;
   private onWheel: (e: WheelEvent) => void;
+  private onContextMenu: (e: Event) => void;
   private onTouchStart: (e: TouchEvent) => void;
   private onTouchMove: (e: TouchEvent) => void;
   private onTouchEnd: () => void;
@@ -115,42 +119,43 @@ export class Camera {
     // Prevent browser from hijacking touch for scroll/zoom
     canvas.style.touchAction = 'none';
 
-    // Pointer down on canvas — start drag tracking
+    // Pointer down — only right mouse button (2) starts camera rotation.
+    // Touch rotation is handled by two-finger touch events below.
     this.onPointerDown = (e: PointerEvent) => {
       this.activePointers++;
-      if (this.activePointers === 1) {
-        this.isDragging = true;
-        this.dragConfirmed = false;
-        this.pointerDownPos = { x: e.clientX, y: e.clientY };
-        this.lastPointerX = e.clientX;
-        this.lastPointerY = e.clientY;
-      } else {
-        this.isDragging = false; // multi-touch — stop rotation
+      if (e.button === 2) {
+        this.startDrag(e.clientX, e.clientY);
       }
     };
 
-    // Pointer move on window — track even if finger moves off canvas
-    this.onPointerMove = (e: PointerEvent) => {
-      if (!this.isDragging || this.activePointers !== 1) return;
+    // Mousedown fallback for right-click — some browsers/simulators don't fire
+    // pointerdown for button 2 reliably (e.g. Chrome mobile simulator).
+    this.onMouseDown = (e: MouseEvent) => {
+      if (e.button === 2 && !this.isDragging) {
+        this.startDrag(e.clientX, e.clientY);
+      }
+    };
 
-      // Check drag threshold before considering it a real drag
+    // Shared drag logic for both pointer and mouse move events
+    const applyDrag = (clientX: number, clientY: number) => {
+      if (!this.isDragging) return;
+
       if (!this.dragConfirmed) {
-        const distX = e.clientX - this.pointerDownPos.x;
-        const distY = e.clientY - this.pointerDownPos.y;
+        const distX = clientX - this.pointerDownPos.x;
+        const distY = clientY - this.pointerDownPos.y;
         const dist = Math.sqrt(distX * distX + distY * distY);
         if (dist < DRAG_THRESHOLD) return;
         this.dragConfirmed = true;
-        // Update last position to prevent a "jump"
-        this.lastPointerX = e.clientX;
-        this.lastPointerY = e.clientY;
+        this.lastPointerX = clientX;
+        this.lastPointerY = clientY;
       }
 
-      const dx = e.clientX - this.lastPointerX;
-      const dy = e.clientY - this.lastPointerY;
-      this.lastPointerX = e.clientX;
-      this.lastPointerY = e.clientY;
+      const dx = clientX - this.lastPointerX;
+      const dy = clientY - this.lastPointerY;
+      this.lastPointerX = clientX;
+      this.lastPointerY = clientY;
 
-      this.snapAngleY = null; // cancel snap on manual drag
+      this.snapAngleY = null;
       this.angleY -= dx * this.rotationSpeed;
       this.angleX = Math.max(
         this.pitchMin,
@@ -158,9 +163,22 @@ export class Camera {
       );
     };
 
-    this.onPointerUp = () => {
+    const endDrag = () => {
       this.activePointers = Math.max(0, this.activePointers - 1);
       if (this.activePointers === 0) {
+        if (this.dragConfirmed) onPointerUpAfterDrag?.();
+        this.isDragging = false;
+        this.dragConfirmed = false;
+      }
+    };
+
+    this.onPointerMove = (e: PointerEvent) => { applyDrag(e.clientX, e.clientY); };
+    this.onPointerUp = () => { endDrag(); };
+
+    // Mouse fallbacks for environments where pointer events don't work for button 2
+    this.onMouseMove = (e: MouseEvent) => { applyDrag(e.clientX, e.clientY); };
+    this.onMouseUp = (e: MouseEvent) => {
+      if (e.button === 2) {
         if (this.dragConfirmed) onPointerUpAfterDrag?.();
         this.isDragging = false;
         this.dragConfirmed = false;
@@ -175,42 +193,56 @@ export class Camera {
       this.onDistanceChange?.(this.distance);
     };
 
-    // Touch pinch zoom (two-finger only)
+    // Two-finger touch: rotate camera + pinch zoom
     this.onTouchStart = (e: TouchEvent) => {
       if (e.touches.length === 2) {
-        this.isDragging = false;
         const dx = e.touches[0].clientX - e.touches[1].clientX;
         const dy = e.touches[0].clientY - e.touches[1].clientY;
         this.lastPinchDist = Math.sqrt(dx * dx + dy * dy);
-        this.lastTwoFingerY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+        // Store midpoint for rotation tracking
+        this.lastPointerX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+        this.lastPointerY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+        this.lastTwoFingerY = this.lastPointerY;
       }
     };
 
     this.onTouchMove = (e: TouchEvent) => {
       if (e.touches.length === 2) {
-        this.isDragging = false;
-
         const dx = e.touches[0].clientX - e.touches[1].clientX;
         const dy = e.touches[0].clientY - e.touches[1].clientY;
         const pinchDist = Math.sqrt(dx * dx + dy * dy);
-        const avgY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+        const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+        const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
 
-        // Pinch zoom
-        if (this.lastPinchDist !== null) {
+        const pinchDelta = this.lastPinchDist !== null ? Math.abs(pinchDist - this.lastPinchDist) : 0;
+        const panDx = midX - this.lastPointerX;
+        const panDy = midY - this.lastPointerY;
+        const panDelta = Math.sqrt(panDx * panDx + panDy * panDy);
+
+        // Distinguish pinch from pan: if finger-distance change is large relative
+        // to midpoint movement, it's a pinch. Otherwise it's a camera rotate.
+        const isPinch = pinchDelta > panDelta * 0.8;
+
+        if (isPinch && this.lastPinchDist !== null) {
+          // Pinch zoom
           const delta = this.lastPinchDist - pinchDist;
           this.distance += delta * 0.1;
-        }
-
-        // Two-finger vertical drag zoom
-        if (this.lastTwoFingerY !== null) {
-          const dyAvg = avgY - this.lastTwoFingerY;
-          this.distance += dyAvg * 0.06;
+        } else {
+          // Two-finger drag: rotate camera
+          this.snapAngleY = null;
+          this.angleY -= panDx * this.rotationSpeed;
+          this.angleX = Math.max(
+            this.pitchMin,
+            Math.min(this.pitchMax, this.angleX - panDy * this.rotationSpeed),
+          );
         }
 
         this.distance = Math.max(this.minDistance, Math.min(this.maxDistance, this.distance));
         this.onDistanceChange?.(this.distance);
         this.lastPinchDist = pinchDist;
-        this.lastTwoFingerY = avgY;
+        this.lastPointerX = midX;
+        this.lastPointerY = midY;
+        this.lastTwoFingerY = midY;
       }
     };
 
@@ -219,17 +251,32 @@ export class Camera {
       this.lastTwoFingerY = null;
     };
 
+    // Prevent context menu on right-click (canvas uses right-click for camera rotation)
+    this.onContextMenu = (e: Event) => { e.preventDefault(); };
+
     // Down on canvas, move/up on window (so we track even outside canvas)
+    canvas.addEventListener('contextmenu', this.onContextMenu);
     canvas.addEventListener('pointerdown', this.onPointerDown);
+    canvas.addEventListener('mousedown', this.onMouseDown);
     window.addEventListener('pointermove', this.onPointerMove);
     window.addEventListener('pointerup', this.onPointerUp);
     window.addEventListener('pointercancel', this.onPointerUp);
+    window.addEventListener('mousemove', this.onMouseMove);
+    window.addEventListener('mouseup', this.onMouseUp);
     canvas.addEventListener('wheel', this.onWheel, { passive: true });
     canvas.addEventListener('touchstart', this.onTouchStart, { passive: true });
     canvas.addEventListener('touchmove', this.onTouchMove, { passive: true });
     canvas.addEventListener('touchend', this.onTouchEnd);
 
     this.updatePosition(1000); // snap to initial position
+  }
+
+  private startDrag(clientX: number, clientY: number): void {
+    this.isDragging = true;
+    this.dragConfirmed = false;
+    this.pointerDownPos = { x: clientX, y: clientY };
+    this.lastPointerX = clientX;
+    this.lastPointerY = clientY;
   }
 
   getAngleX(): number { return this.angleX; }
@@ -505,10 +552,14 @@ export class Camera {
   }
 
   destroy(): void {
+    this.canvas.removeEventListener('contextmenu', this.onContextMenu);
     this.canvas.removeEventListener('pointerdown', this.onPointerDown);
+    this.canvas.removeEventListener('mousedown', this.onMouseDown);
     window.removeEventListener('pointermove', this.onPointerMove);
     window.removeEventListener('pointerup', this.onPointerUp);
     window.removeEventListener('pointercancel', this.onPointerUp);
+    window.removeEventListener('mousemove', this.onMouseMove);
+    window.removeEventListener('mouseup', this.onMouseUp);
     this.canvas.removeEventListener('wheel', this.onWheel);
     this.canvas.removeEventListener('touchstart', this.onTouchStart);
     this.canvas.removeEventListener('touchmove', this.onTouchMove);

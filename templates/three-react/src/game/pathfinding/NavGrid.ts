@@ -453,6 +453,11 @@ export class NavGrid {
     return this.width * this.cellSize / 2;
   }
 
+  /** Read-only access to cells for debug visualization */
+  getCells(): ReadonlyArray<NavCell> {
+    return this.cells;
+  }
+
   /** Check if any cardinal neighbor of a cell is blocked or out of bounds. */
   hasBlockedNeighbor(gx: number, gz: number): boolean {
     for (let dir = 0; dir < 8; dir += 2) { // cardinals only: 0(N), 2(E), 4(S), 6(W)
@@ -849,8 +854,8 @@ export class NavGrid {
       const cell = this.getCell(x0, z0);
       if (!cell || cell.blocked) return false;
 
-      // Check consecutive height difference — must be within slope tolerance
-      if (Math.abs(cell.surfaceHeight - prevCell.surfaceHeight) > this.slopeHeight) return false;
+      // Check consecutive height difference — must be within step height
+      if (Math.abs(cell.surfaceHeight - prevCell.surfaceHeight) > this.stepHeight) return false;
 
       prevCell = cell;
     }
