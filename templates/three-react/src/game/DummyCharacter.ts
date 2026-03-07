@@ -443,6 +443,22 @@ export class DummyCharacter {
     }
   }
 
+  /** Update the path line's last vertex to a custom world position (for smooth marker tracking) */
+  setPathLineEndpoint(x: number, z: number): void {
+    if (!this.pathLine || !this.pathLineGeo) return;
+    const attr = this.pathLineGeo.getAttribute('instanceEnd') as THREE.InterleavedBufferAttribute;
+    if (!attr || !attr.data) return;
+    const arr = attr.data.array as Float32Array;
+    const numSegments = arr.length / 6;
+    if (numSegments < 1) return;
+    const si = (numSegments - 1) * 6;
+    arr[si + 3] = x;
+    arr[si + 4] = this.getSurfaceAt(x, z);
+    arr[si + 5] = z;
+    attr.data.needsUpdate = true;
+    this.pathLine.computeLineDistances();
+  }
+
   /** True while following an A* click-to-move path */
   isPathActive(): boolean {
     return this.path.length > 0;
