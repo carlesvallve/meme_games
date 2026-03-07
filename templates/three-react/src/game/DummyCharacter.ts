@@ -21,6 +21,7 @@ import {
   MOUNT_SPEED,
   DISMOUNT_SPEED,
   CLIMB_WALL_OFFSET,
+  LADDER_WALL_OFFSET,
   RUNG_PAUSE,
   DISMOUNT_DIST,
   LADDER_RUNG_SPACING,
@@ -40,6 +41,8 @@ interface ClimbState {
   rungCount: number;
   currentRung: number;
   rungPauseTimer: number;
+  /** Index of the ladder waypoint in path[] (for path line rendering) */
+  ladderWpIndex: number;
 }
 
 export class DummyCharacter {
@@ -68,6 +71,8 @@ export class DummyCharacter {
   private pathLine: Line2 | null = null;
   private pathLineGeo: LineGeometry | null = null;
   private pathLineMat: LineMaterial | null = null;
+  /** Cached perfect path line positions — reused during climbing instead of rebuilding */
+  private frozenPathPositions: number[] | null = null;
   private scene: THREE.Scene | null = null;
   private goalRadius = 0;
   private obstacles: ReadonlyArray<AABBBox> = [];
@@ -196,6 +201,7 @@ export class DummyCharacter {
       rungCount,
       currentRung: direction === 'up' ? 0 : rungCount,
       rungPauseTimer: 0,
+      ladderWpIndex: -1, // set by caller
     };
 
     this.moveSpeed = 0;
@@ -335,6 +341,8 @@ export class DummyCharacter {
         this.visualGroundY = this.groundY;
         this.velocityY = 0;
         this.climbState = null;
+        this.frozenPathPositions = null;
+        this.clearPathLine();
         return false;
       }
     }
@@ -354,21 +362,50 @@ export class DummyCharacter {
     if (!this.debugPath || !this.scene) return;
     this.clearPathLine();
 
+    // During climbing, use the frozen positions from before climbing started
+    if (this.climbState && this.frozenPathPositions && this.frozenPathPositions.length >= 6) {
+      const positions = [...this.frozenPathPositions];
+      // Trim vertices from the front that are above/below the current groundY
+      // (remove segments the character has already climbed past)
+      while (positions.length >= 9) {
+        const nextY = positions[4]; // Y of second vertex
+        const charY = this.groundY + 0.05;
+        const climbing = this.climbState.direction === 'up';
+        // Remove first vertex if we've climbed past it or it's at the same height (horizontal approach)
+        const pastIt = climbing ? charY > nextY - 0.01 : charY < nextY + 0.01;
+        if (pastIt) {
+          positions.splice(0, 3);
+        } else {
+          break;
+        }
+      }
+      // Update first vertex Y to track climb progress
+      if (positions.length >= 3) {
+        positions[1] = this.groundY + 0.05;
+      }
+
+      this.pathLineGeo = new LineGeometry();
+      this.pathLineGeo.setPositions(positions);
+      this.pathLineMat = new LineMaterial({
+        color: 0xffff00,
+        linewidth: 3,
+        transparent: true,
+        opacity: 0.8,
+        resolution: new THREE.Vector2(window.innerWidth, window.innerHeight),
+      });
+      this.pathLine = new Line2(this.pathLineGeo, this.pathLineMat);
+      this.pathLine.computeLineDistances();
+      this.scene.add(this.pathLine);
+      return;
+    }
+
     const remaining = this.path.slice(this.pathIndex);
     if (remaining.length < 1) return;
 
     const pos = this.root.position;
     const BIAS = 0.05;
 
-    // Build untrimmed waypoints (goal radius trim applied to final line, not waypoints)
     const waypoints: { x: number; z: number }[] = [{ x: pos.x, z: pos.z }];
-    // During climbing, pathIndex was incremented past the ladder waypoint.
-    // Re-include it so the line still goes through the ladder cell (just like
-    // it did before movement started, when pathIndex hadn't been incremented yet).
-    if (this.climbState && this.pathIndex >= 2 && this.pathIndex - 1 < this.path.length) {
-      const ladderWp = this.path[this.pathIndex - 1];
-      waypoints.push({ x: ladderWp.x, z: ladderWp.z });
-    }
     for (const wp of remaining) {
       waypoints.push({ x: wp.x, z: wp.z });
     }
@@ -413,6 +450,12 @@ export class DummyCharacter {
         positions[n - 3] = ex - (dx / len) * this.goalRadius;
         positions[n - 1] = ez - (dz / len) * this.goalRadius;
       }
+    }
+
+    // Cache positions so climbing can reuse the perfect line.
+    // Only cache when NOT climbing — we want the pre-climb line.
+    if (!this.climbState) {
+      this.frozenPathPositions = [...positions];
     }
 
     this.pathLineGeo = new LineGeometry();
@@ -567,8 +610,10 @@ export class DummyCharacter {
             if (meta && meta.ladderIndex != null && meta.ladderIndex >= 0 && meta.ladderIndex < this.ladderDefs.length) {
               const ladder = this.ladderDefs[meta.ladderIndex];
               const dir = meta.climbDirection ?? 'up';
+              const wpIdx = this.pathIndex;
               this.pathIndex++;
               this.startClimb(ladder, dir);
+              this.climbState!.ladderWpIndex = wpIdx;
               this.updatePathLine();
             }
             return true;
@@ -603,6 +648,7 @@ export class DummyCharacter {
       console.log(`[CLIMB] Immediate climb from start: ladder#${firstMeta.ladderIndex}, dir=${dir}`);
       this.pathIndex = 2; // skip past ladder waypoint
       this.startClimb(ladder, dir);
+      this.climbState!.ladderWpIndex = 1;
       this.updatePathLine();
       return true;
     }
@@ -641,7 +687,7 @@ export class DummyCharacter {
       console.log(`[CLIMB] phase=${this.climbState.phase}, groundY=${this.groundY.toFixed(2)}, visualY=${this.visualGroundY.toFixed(2)}, posY=${this.root.position.y.toFixed(2)}, rung=${this.climbState.currentRung}/${this.climbState.rungCount}`);
     }
     if (this.updateClimb(dt)) {
-      if (this.debugPath && this.path.length > 0 && this.pathIndex < this.path.length) {
+      if (this.debugPath && (this.frozenPathPositions || (this.path.length > 0 && this.pathIndex < this.path.length))) {
         this.updatePathLine();
       }
       return;
@@ -706,6 +752,7 @@ export class DummyCharacter {
             const dir = meta.climbDirection ?? 'up';
             console.log(`[CLIMB] Starting climb: ladder#${meta.ladderIndex}, dir=${dir}, bottomY=${ladder.bottomY}, topY=${ladder.topY}`);
             this.startClimb(ladder, dir);
+            this.climbState!.ladderWpIndex = this.pathIndex;
             return; // climbing takes over
           }
           this.updatePathLine();

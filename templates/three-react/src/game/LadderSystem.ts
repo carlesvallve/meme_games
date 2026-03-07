@@ -82,7 +82,7 @@ export class LadderSystem {
     const group = new THREE.Group();
     const dy = ladder.topY - ladder.bottomY;
     const ladderLength = dy;
-    const rungCount = Math.max(1, Math.floor(ladderLength / LADDER_RUNG_SPACING));
+    const rungCount = Math.max(1, Math.floor(ladderLength / LADDER_RUNG_SPACING)) * 2;
     const cellSize = this.cellSize;
 
     // Yaw: ladder faces INTO the wall (toward high cell)
