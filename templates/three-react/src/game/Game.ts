@@ -23,9 +23,13 @@ import {
   disposeSunDebugHelper,
 } from './rendering';
 import type { GameInstance, ParticleSystem } from '../types';
-import { createDustMotes, createRainEffect, createDebrisEffect } from '../utils/particles';
+import {
+  createDustMotes,
+  createRainEffect,
+  createDebrisEffect,
+} from '../utils/particles';
 import { NavGrid } from './pathfinding/NavGrid';
-import { DummyCharacter } from './DummyCharacter';
+import { CharacterController } from './CharacterController';
 import { GridOverlay } from './GridOverlay';
 import { ObstacleGenerator } from './ObstacleGenerator';
 import { LadderSystem } from './LadderSystem';
@@ -157,9 +161,14 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   scene.add(gridOverlay.group);
 
   let navGrid = new NavGrid(WORLD_SIZE, WORLD_SIZE, gridCellSize);
-  navGrid.build([], useGameStore.getState().charStepUp, useGameStore.getState().charStepDown, CAPSULE_RADIUS);
+  navGrid.build(
+    [],
+    useGameStore.getState().charStepUp,
+    useGameStore.getState().charStepDown,
+    CAPSULE_RADIUS,
+  );
 
-  const character = new DummyCharacter(navGrid);
+  const character = new CharacterController(navGrid);
   // Snap initial position to grid center (0,0 is always a cell center with odd world size)
   const initSnap = navGrid.snapToGrid(0, 0);
   character.root.position.set(initSnap.x, 0, initSnap.z);
@@ -173,20 +182,42 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
 
   function rebuildAfterGeneration(): void {
     const { charStepUp, charStepDown } = useGameStore.getState();
-    navGrid.build(obstacleGen.obstacles, charStepUp, charStepDown, CAPSULE_RADIUS);
+    navGrid.build(
+      obstacleGen.obstacles,
+      charStepUp,
+      charStepDown,
+      CAPSULE_RADIUS,
+    );
     character.setObstacles(obstacleGen.obstacles);
-    gridOverlay.rebuild(WORLD_SIZE, gridCellSize, GROUND_COLOR, obstacleGen.obstacles, obstacleGen.colors);
+    gridOverlay.rebuild(
+      WORLD_SIZE,
+      gridCellSize,
+      GROUND_COLOR,
+      obstacleGen.obstacles,
+      obstacleGen.colors,
+    );
     refreshDebugNav();
   }
 
   function generateLadders(): void {
     // Clear previous ladders, rebuild navGrid fresh, then place ladders
     const { charStepUp, charStepDown } = useGameStore.getState();
-    navGrid.build(obstacleGen.obstacles, charStepUp, charStepDown, CAPSULE_RADIUS);
+    navGrid.build(
+      obstacleGen.obstacles,
+      charStepUp,
+      charStepDown,
+      CAPSULE_RADIUS,
+    );
     ladderGenerator.generate(navGrid, ladderSystem);
     character.setLadderDefs(ladderSystem.ladders);
     // Rebuild overlay after ladders unblocked cells and added nav-links
-    gridOverlay.rebuild(WORLD_SIZE, gridCellSize, GROUND_COLOR, obstacleGen.obstacles, obstacleGen.colors);
+    gridOverlay.rebuild(
+      WORLD_SIZE,
+      gridCellSize,
+      GROUND_COLOR,
+      obstacleGen.obstacles,
+      obstacleGen.colors,
+    );
     refreshDebugNav();
   }
 
@@ -224,11 +255,22 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     gridCellSize = newCellSize;
 
     // Rebuild grid overlay with current obstacles
-    gridOverlay.rebuild(WORLD_SIZE, gridCellSize, GROUND_COLOR, obstacleGen.obstacles, obstacleGen.colors);
+    gridOverlay.rebuild(
+      WORLD_SIZE,
+      gridCellSize,
+      GROUND_COLOR,
+      obstacleGen.obstacles,
+      obstacleGen.colors,
+    );
 
     // Rebuild navGrid (preserve current obstacles)
     navGrid = new NavGrid(WORLD_SIZE, WORLD_SIZE, gridCellSize);
-    navGrid.build(obstacleGen.obstacles, useGameStore.getState().charStepUp, useGameStore.getState().charStepDown, CAPSULE_RADIUS);
+    navGrid.build(
+      obstacleGen.obstacles,
+      useGameStore.getState().charStepUp,
+      useGameStore.getState().charStepDown,
+      CAPSULE_RADIUS,
+    );
     ladderSystem.clear();
     character.setNavGrid(navGrid);
     character.setLadderDefs([]);
@@ -259,7 +301,11 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     return geo;
   }
   let markerGeo = createMarkerGeo(gridCellSize);
-  const markerMat = new THREE.MeshBasicMaterial({ color: 0xffff44, transparent: true, opacity: 0 });
+  const markerMat = new THREE.MeshBasicMaterial({
+    color: 0xffff44,
+    transparent: true,
+    opacity: 0,
+  });
   const clickMarker = new THREE.Mesh(markerGeo, markerMat);
   clickMarker.position.y = 0.05;
   scene.add(clickMarker);
@@ -277,7 +323,10 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   let goalFiredOnDown = false;
 
   /** Raycast XZ from screen coords, then look up NavGrid surface height */
-  function raycastGoalPos(clientX: number, clientY: number): { x: number; z: number; y: number } | null {
+  function raycastGoalPos(
+    clientX: number,
+    clientY: number,
+  ): { x: number; z: number; y: number } | null {
     const rect = canvas.getBoundingClientRect();
     pointerNDC.x = ((clientX - rect.left) / rect.width) * 2 - 1;
     pointerNDC.y = -((clientY - rect.top) / rect.height) * 2 + 1;
@@ -295,7 +344,10 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     if (!hitPoint) return null;
     // Use XZ from hit, but Y from NavGrid surface (like voxel-engine)
     const cell = navGrid.getCell(
-      ...Object.values(navGrid.worldToGrid(hitPoint.x, hitPoint.z)) as [number, number],
+      ...(Object.values(navGrid.worldToGrid(hitPoint.x, hitPoint.z)) as [
+        number,
+        number,
+      ]),
     );
     const surfaceY = cell ? cell.surfaceHeight : 0;
     return { x: hitPoint.x, z: hitPoint.z, y: surfaceY };
@@ -308,14 +360,23 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       const hit = goalPos;
       const snapMode = useGameStore.getState().charSnapMode;
       const isGrid = snapMode === '4dir' || snapMode === '8dir';
-      let mx = hit.x, mz = hit.z;
+      let mx = hit.x,
+        mz = hit.z;
       if (isGrid) {
         const snapped = character.getSnappedGoal(hit.x, hit.z);
         mx = snapped.x;
         mz = snapped.z;
       }
       const outerRadius = gridCellSize * 0.45 - RING_STROKE * 0.5;
-      if (character.goTo(hit.x, hit.z, useGameStore.getState().charMoveSpeed, outerRadius, isDrag)) {
+      if (
+        character.goTo(
+          hit.x,
+          hit.z,
+          useGameStore.getState().charMoveSpeed,
+          outerRadius,
+          isDrag,
+        )
+      ) {
         const markerY = hit.y + 0.05;
         // During drag in grid modes: show marker at raw mouse pos, snap on release
         if (isDrag && isGrid && goalPointerDown) {
@@ -359,7 +420,10 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       if (Math.sqrt(dx * dx + dy * dy) < GOAL_DRAG_THRESHOLD) return;
       goalPointerMoved = true;
       // Touch continuous path: fire on first confirmed drag
-      if (goalPointerType === 'touch' && useGameStore.getState().charContinuousPath) {
+      if (
+        goalPointerType === 'touch' &&
+        useGameStore.getState().charContinuousPath
+      ) {
         tryGoTo(e.clientX, e.clientY, true);
       }
     }
@@ -394,10 +458,25 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   // Context menu prevention handled by Camera
 
   // ── Particle systems ────────────────────────────────────────────────
-  const particles: ParticleSystems = { dust: null, lightRain: null, rain: null, debris: null };
-  let prevToggles: ParticleToggles = { dust: false, lightRain: false, rain: false, debris: false };
+  const particles: ParticleSystems = {
+    dust: null,
+    lightRain: null,
+    rain: null,
+    debris: null,
+  };
+  let prevToggles: ParticleToggles = {
+    dust: false,
+    lightRain: false,
+    rain: false,
+    debris: false,
+  };
   // Initial sync
-  syncParticles(scene, useGameStore.getState().particleToggles, prevToggles, particles);
+  syncParticles(
+    scene,
+    useGameStore.getState().particleToggles,
+    prevToggles,
+    particles,
+  );
   prevToggles = { ...useGameStore.getState().particleToggles };
 
   // ── Sun debug helper ────────────────────────────────────────────────
@@ -491,7 +570,11 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       sunDebugHelper = null;
     }
     if (sunDebugHelper) {
-      updateSunDebug(sunDebugHelper, computeSunDirection(store.timeOfDay), cam.camera.position);
+      updateSunDebug(
+        sunDebugHelper,
+        computeSunDirection(store.timeOfDay),
+        cam.camera.position,
+      );
     }
 
     // Sync post-processing
@@ -502,13 +585,27 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       rebuildGrid(store.gridCellSize);
     }
     // Rebuild navGrid when step heights change (affects passability)
-    if (store.charStepUp !== prevStepUp || store.charStepDown !== prevStepDown) {
+    if (
+      store.charStepUp !== prevStepUp ||
+      store.charStepDown !== prevStepDown
+    ) {
       prevStepUp = store.charStepUp;
       prevStepDown = store.charStepDown;
-      navGrid.build(obstacleGen.obstacles, store.charStepUp, store.charStepDown, CAPSULE_RADIUS);
+      navGrid.build(
+        obstacleGen.obstacles,
+        store.charStepUp,
+        store.charStepDown,
+        CAPSULE_RADIUS,
+      );
       ladderSystem.clear();
       character.setLadderDefs([]);
-      gridOverlay.rebuild(WORLD_SIZE, gridCellSize, GROUND_COLOR, obstacleGen.obstacles, obstacleGen.colors);
+      gridOverlay.rebuild(
+        WORLD_SIZE,
+        gridCellSize,
+        GROUND_COLOR,
+        obstacleGen.obstacles,
+        obstacleGen.colors,
+      );
       refreshDebugNav();
     }
     gridOverlay.setOpacity(store.gridOpacity);
@@ -541,7 +638,8 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     const moveSpeed = store.charMoveSpeed;
 
     const inp = input.update();
-    let dx = 0, dz = 0;
+    let dx = 0,
+      dz = 0;
     if (inp.left) dx -= 1;
     if (inp.right) dx += 1;
     if (inp.forward) dz -= 1;
@@ -563,7 +661,9 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       const tp = store.torchParams;
       torchLight.visible = true;
       torchLight.color.set(tp.color);
-      torchLight.intensity = tp.intensity + (tp.flicker > 0 ? (Math.random() - 0.5) * tp.flicker * 2 : 0);
+      torchLight.intensity =
+        tp.intensity +
+        (tp.flicker > 0 ? (Math.random() - 0.5) * tp.flicker * 2 : 0);
       torchLight.distance = tp.distance;
       // Position relative to character
       const cPos = character.getPosition();
@@ -571,7 +671,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       const side = Math.cos(character.root.rotation.y);
       torchLight.position.set(
         cPos.x + fwd * (tp.offsetForward ?? 0.5) + side * (tp.offsetRight ?? 0),
-        (tp.offsetUp ?? 1.5),
+        tp.offsetUp ?? 1.5,
         cPos.z + side * (tp.offsetForward ?? 0.5) - fwd * (tp.offsetRight ?? 0),
       );
     } else {
@@ -595,7 +695,10 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     }
     // Path line endpoint tracks marker position (smooth during drag + snap)
     if (markerSnapTarget || goalPointerDown) {
-      character.setPathLineEndpoint(clickMarker.position.x, clickMarker.position.z);
+      character.setPathLineEndpoint(
+        clickMarker.position.x,
+        clickMarker.position.z,
+      );
     }
 
     // Click marker fade — start fading when path completes

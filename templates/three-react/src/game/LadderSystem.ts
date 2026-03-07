@@ -73,7 +73,11 @@ export class LadderSystem {
 
     const ladderIndex = this.ladders.length;
     this.ladders.push(ladderDef);
-    navGrid.addNavLink(lowGX, lowGZ, highGX, highGZ, LADDER_COST, ladderIndex);
+    // Cost scales with height: vertical cells * slight penalty + 1 for entry.
+    // Slightly more expensive per cell than stairs so A* prefers stairs when both exist.
+    const verticalCells = Math.abs(highH - lowH) / navGrid.cellSize;
+    const cost = verticalCells * LADDER_COST + 1;
+    navGrid.addNavLink(lowGX, lowGZ, highGX, highGZ, cost, ladderIndex);
     this.createLadderMesh(ladderDef);
     return ladderDef;
   }

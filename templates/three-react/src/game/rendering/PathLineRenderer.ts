@@ -9,6 +9,7 @@ export interface PathLineUpdateOpts {
   groundY: number;
   path: { x: number; z: number }[];
   pathIndex: number;
+  pathMeta: { ladderIndex: number | null }[];
   goalRadius: number;
   cellSize: number;
   climbState: { direction: 'up' | 'down' } | null;
@@ -65,7 +66,7 @@ export class PathLineRenderer {
     const { charPos, groundY, path, pathIndex, goalRadius, climbState, getSurfaceAt } = opts;
 
     // Update distance label — walk remaining path segments and sum world distance, then convert to cells
-    const cellDist = this.computeCellDistance(charPos, path, pathIndex, opts.cellSize);
+    const cellDist = this.computeCellDistance(charPos, groundY, path, pathIndex, opts.pathMeta, opts.cellSize, getSurfaceAt);
     this.updateDistLabel(cellDist, path, getSurfaceAt);
 
     // During climbing, use the frozen positions from before climbing started
@@ -224,23 +225,48 @@ export class PathLineRenderer {
     this.scene.add(this.line);
   }
 
-  private computeCellDistance(charPos: THREE.Vector3, path: { x: number; z: number }[], pathIndex: number, cellSize: number): number {
+  private computeCellDistance(
+    charPos: THREE.Vector3, groundY: number,
+    path: { x: number; z: number }[], pathIndex: number,
+    pathMeta: { ladderIndex: number | null }[],
+    cellSize: number, getSurfaceAt: (x: number, z: number) => number,
+  ): number {
     if (path.length === 0 || pathIndex >= path.length) return 0;
-    let totalDist = 0;
-    // From character to first remaining waypoint
+    let totalCells = 0;
+    let ladderCount = 0;
     const first = path[pathIndex];
     let px = charPos.x, pz = charPos.z;
-    const dx0 = first.x - px, dz0 = first.z - pz;
-    totalDist += Math.sqrt(dx0 * dx0 + dz0 * dz0);
-    px = first.x; pz = first.z;
-    // Walk remaining waypoints
+    let prevH = groundY;
+    const firstH = getSurfaceAt(first.x, first.z);
+    const firstIsLadder = pathMeta[pathIndex]?.ladderIndex != null && pathMeta[pathIndex].ladderIndex! >= 0;
+    totalCells += this.segmentCost(px, pz, prevH, first.x, first.z, firstH, cellSize, firstIsLadder);
+    if (firstIsLadder) ladderCount++;
+    prevH = firstH; px = first.x; pz = first.z;
     for (let i = pathIndex + 1; i < path.length; i++) {
       const wp = path[i];
-      const dx = wp.x - px, dz = wp.z - pz;
-      totalDist += Math.sqrt(dx * dx + dz * dz);
-      px = wp.x; pz = wp.z;
+      const h = getSurfaceAt(wp.x, wp.z);
+      const isLadder = pathMeta[i]?.ladderIndex != null && pathMeta[i].ladderIndex! >= 0;
+      totalCells += this.segmentCost(px, pz, prevH, wp.x, wp.z, h, cellSize, isLadder);
+      if (isLadder) ladderCount++;
+      px = wp.x; pz = wp.z; prevH = h;
     }
-    return Math.round(totalDist / cellSize);
+    // +1 per ladder for mount/dismount overhead
+    return Math.round(totalCells) + ladderCount;
+  }
+
+  /** Cost of one path segment in cell units. */
+  private segmentCost(
+    fx: number, fz: number, fh: number,
+    tx: number, tz: number, th: number,
+    cellSize: number, isLadder: boolean,
+  ): number {
+    const horzCells = Math.max(Math.abs(tx - fx), Math.abs(tz - fz)) / cellSize;
+    // Ladders: count vertical cells. Everything else: horizontal only (drops are free).
+    if (isLadder) {
+      const vertCells = Math.abs(th - fh) / cellSize;
+      return Math.max(horzCells, vertCells);
+    }
+    return horzCells;
   }
 
   private updateDistLabel(remaining: number, path: { x: number; z: number }[], getSurfaceAt: (x: number, z: number) => number): void {

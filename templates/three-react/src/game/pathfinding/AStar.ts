@@ -1,6 +1,15 @@
 /**
  * A* pathfinder with binary heap and string-pulling smoothing.
  * Pure TypeScript, depends only on NavGrid types.
+ *
+ * TODO: Multi-layer NavGrid support
+ * Currently NavGrid is a 2D heightmap — each cell has one surfaceHeight.
+ * This means overlapping walkable surfaces (e.g. ground floor under a bridge/box)
+ * are invisible to pathfinding. To fix:
+ * - NavCell gets `layers: { height, passable, blocked }[]` instead of single surfaceHeight
+ * - A* indices become (gx, gz, layerIndex) triples
+ * - Nav-links (ladders) connect across layers
+ * - Collision system needs layer-awareness
  */
 
 import type { NavGrid } from './NavGrid';
@@ -230,12 +239,10 @@ export function findPath(
         const targetCell = grid.getCell(link.toGX, link.toGZ);
         if (closed[nIdx]) continue;
         if (targetCell?.blocked) {
-          console.log(`[A*] Nav-link from (${cgx},${cgz}) to (${link.toGX},${link.toGZ}) BLOCKED — skipping`);
           continue;
         }
         const tentativeG = currentG + link.cost;
         if (tentativeG < gScore[nIdx]) {
-          console.log(`[A*] Using nav-link ladder#${link.ladderIndex} from (${cgx},${cgz}) to (${link.toGX},${link.toGZ}), cost=${tentativeG.toFixed(1)}`);
           cameFrom[nIdx] = currentIdx;
           cameViaLink[nIdx] = link.ladderIndex;
           gScore[nIdx] = tentativeG;
