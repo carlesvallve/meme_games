@@ -658,6 +658,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       prevStepUp = store.charStepUp;
       prevStepDown = store.charStepDown;
       navGrid.build(obstacles, store.charStepUp, store.charStepDown, 0.25);
+      gridOverlay.rebuild(WORLD_SIZE, gridCellSize, GROUND_COLOR, obstacles, obstacleColors);
       refreshDebugNav();
     }
     gridOverlay.setOpacity(store.gridOpacity);
