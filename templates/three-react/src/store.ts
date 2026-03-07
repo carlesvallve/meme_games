@@ -182,6 +182,10 @@ interface GameStore {
   charDebugPath: boolean;
   charStringPull: boolean;
   charStepHeight: number;
+  charRotSpeed: number;
+  setCharRotSpeed: (v: number) => void;
+  charGravity: number;
+  setCharGravity: (v: number) => void;
   charSnapMode: 'free' | '4dir' | '8dir';
   charAutoMove: boolean;
   setCharAutoMove: (v: boolean) => void;
@@ -270,6 +274,10 @@ export const useGameStore = create<GameStore>((set) => ({
   charDebugPath: (saved.charDebugPath as boolean) ?? false,
   charStringPull: (saved.charStringPull as boolean) ?? true,
   charStepHeight: (saved.charStepHeight as number) ?? 0.5,
+  charRotSpeed: (saved.charRotSpeed as number) ?? 12,
+  setCharRotSpeed: (charRotSpeed) => set({ charRotSpeed }),
+  charGravity: (saved.charGravity as number) ?? 60,
+  setCharGravity: (charGravity) => set({ charGravity }),
   charSnapMode: ((saved.charSnapMode as string) ?? '8dir') as 'free' | '4dir' | '8dir',
   charAutoMove: (saved.charAutoMove as boolean) ?? true,
   setCharAutoMove: (charAutoMove) => set({ charAutoMove }),
