@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { smoothLerpVec3 } from '../../utils/cameraUtils';
-import type { CameraParams } from '../../store';
+import type { CameraParams, CameraMode } from '../../store';
 import { entityRegistry, Layer } from '../core/Entity';
 import { lerpAngle } from '../../utils/math';
 
@@ -71,6 +71,13 @@ export class Camera {
   // Snap-behind
   private snapAngleY: number | null = null;
   private readonly snapSpeed = 12; // exponential lerp speed
+
+  // Third-person lazy follow
+  private cameraMode: CameraMode = 'topdown';
+  private followLaziness = 0.8;
+  private targetOffset: [number, number, number] = [0, 0.8, 0];
+  private charFacing = 0;
+  private charMoving = false;
 
   // Target Y override (for death transitions — camera drifts upward)
   private targetYOverride: number | null = null;
@@ -312,6 +319,12 @@ export class Camera {
     }
   }
 
+  /** Update character state for third-person lazy follow */
+  setCharacterState(facingAngle: number, isMoving: boolean): void {
+    this.charFacing = facingAngle;
+    this.charMoving = isMoving;
+  }
+
   /** Instantly snap camera to current target — no lerp/smoothing/collision. */
   snapToTarget(): void {
     this.smoothedTarget.copy(this.target);
@@ -320,18 +333,26 @@ export class Camera {
     this.collisionDist = 0;
     this.collisionCooldown = 0;
 
+    // Apply target offset
+    const [offR, offU, offF] = this.targetOffset;
+    const sinY = Math.sin(this.angleY);
+    const cosY = Math.cos(this.angleY);
+    const ocX = this.smoothedTarget.x + offR * cosY + offF * sinY;
+    const ocY = this.smoothedTarget.y + offU;
+    const ocZ = this.smoothedTarget.z - offR * sinY + offF * cosY;
+
     // Compute orbit position directly — bypass collision raycasts
     const cosAx = Math.cos(this.angleX);
     const sinAx = Math.sin(-this.angleX);
     const sinAy = Math.sin(this.angleY);
     const cosAy = Math.cos(this.angleY);
     this.currentPos.set(
-      this.smoothedTarget.x + this.distance * cosAx * sinAy,
-      this.smoothedTarget.y + this.distance * sinAx,
-      this.smoothedTarget.z + this.distance * cosAx * cosAy,
+      ocX + this.distance * cosAx * sinAy,
+      ocY + this.distance * sinAx,
+      ocZ + this.distance * cosAx * cosAy,
     );
     this.camera.position.copy(this.currentPos);
-    this.camera.lookAt(this.smoothedTarget);
+    this.camera.lookAt(ocX, ocY, ocZ);
   }
 
   resize(aspect: number): void {
@@ -356,6 +377,24 @@ export class Camera {
       }
     }
 
+    // Third-person lazy follow: auto-rotate yaw behind character
+    // followLaziness 0 = snappy (speed ~6), 1 = very lazy (speed ~0.4)
+    // Fade out rotation when character faces toward camera to avoid 180° flip
+    if (this.cameraMode === 'thirdperson' && this.charMoving && !this.isDragging) {
+      const behindAngle = this.charFacing + Math.PI;
+      let diff = behindAngle - this.angleY;
+      while (diff > Math.PI) diff -= Math.PI * 2;
+      while (diff < -Math.PI) diff += Math.PI * 2;
+      const absDiff = Math.abs(diff);
+      // Full speed when moving away/sideways (< 90°), zero when toward camera (> 150°)
+      const fadeOut = Math.max(0, Math.min(1, (2.6 - absDiff) / 1.0));
+      if (fadeOut > 0.001) {
+        const baseSpeed = 0.4 + (1 - this.followLaziness) * 5.6;
+        const t = 1 - Math.exp(-baseSpeed * fadeOut * dt);
+        this.angleY = lerpAngle(this.angleY, behindAngle, t);
+      }
+    }
+
     // Apply target Y override (death transition camera drift)
     if (this.targetYOverride !== null) {
       this.target.y = this.targetYOverride;
@@ -364,14 +403,24 @@ export class Camera {
     // Smooth the orbit center (follow target), not the camera — so we can lookAt it without tilt
     smoothLerpVec3(this.smoothedTarget, this.target, this.followSpeed, dt);
 
+    // Apply target offset (camera-relative: X=right, Y=up, Z=forward toward camera)
+    const [offR, offU, offF] = this.targetOffset;
+    const sinY = Math.sin(this.angleY);
+    const cosY = Math.cos(this.angleY);
+    const orbitCenter = new THREE.Vector3(
+      this.smoothedTarget.x + offR * cosY + offF * sinY,
+      this.smoothedTarget.y + offU,
+      this.smoothedTarget.z - offR * sinY + offF * cosY,
+    );
+
     const cosAx = Math.cos(this.angleX);
     const sinAx = Math.sin(-this.angleX);
     const sinAy = Math.sin(this.angleY);
     const cosAy = Math.cos(this.angleY);
 
-    const desiredX = this.smoothedTarget.x + this.distance * cosAx * sinAy;
-    const desiredY = this.smoothedTarget.y + this.distance * sinAx;
-    const desiredZ = this.smoothedTarget.z + this.distance * cosAx * cosAy;
+    const desiredX = orbitCenter.x + this.distance * cosAx * sinAy;
+    const desiredY = orbitCenter.y + this.distance * sinAx;
+    const desiredZ = orbitCenter.z + this.distance * cosAx * cosAy;
     const desired = new THREE.Vector3(desiredX, desiredY, desiredZ);
 
     // --- Collision: raycast from orbit center toward camera ---
@@ -379,8 +428,8 @@ export class Camera {
     let occluded = false;
 
     if (this.collisionLayers !== 0) {
-      this._dir.copy(desired).sub(this.smoothedTarget).normalize();
-      this.raycaster.set(this.smoothedTarget, this._dir);
+      this._dir.copy(desired).sub(orbitCenter).normalize();
+      this.raycaster.set(orbitCenter, this._dir);
       this.raycaster.near = 0.1;
       this.raycaster.far = this.distance;
 
@@ -400,8 +449,8 @@ export class Camera {
 
     // Terrain cliff collision: separate raycast with larger near to skip ground at feet
     if (!occluded && this.terrainMesh) {
-      this._dir.copy(desired).sub(this.smoothedTarget).normalize();
-      this.raycaster.set(this.smoothedTarget, this._dir);
+      this._dir.copy(desired).sub(orbitCenter).normalize();
+      this.raycaster.set(orbitCenter, this._dir);
       this.raycaster.near = 0.5;
       this.raycaster.far = this.distance;
 
@@ -420,7 +469,7 @@ export class Camera {
 
     // Terrain height: pull camera forward until above ground (Unity-style)
     if (!occluded && this.terrainHeightAt) {
-      const dir = new THREE.Vector3().subVectors(desired, this.smoothedTarget);
+      const dir = new THREE.Vector3().subVectors(desired, orbitCenter);
       const fullDist = dir.length();
       dir.normalize();
 
@@ -432,7 +481,7 @@ export class Camera {
         for (let i = steps; i >= 0; i--) {
           const t = i / steps;
           const d = fullDist * t;
-          const p = this.smoothedTarget.clone().addScaledVector(dir, d);
+          const p = orbitCenter.clone().addScaledVector(dir, d);
           const gy = this.terrainHeightAt(p.x, p.z) + this.collisionSkin;
           if (p.y >= gy) {
             safeDist = d;
@@ -440,14 +489,14 @@ export class Camera {
           }
           safeDist = d;
         }
-        finalDesired = this.smoothedTarget.clone().addScaledVector(dir, safeDist);
+        finalDesired = orbitCenter.clone().addScaledVector(dir, safeDist);
         occluded = true;
       }
     }
 
     // Visibility check: is terrain between camera and player?
     if (!occluded && this.terrainMesh) {
-      const camToTarget = new THREE.Vector3().subVectors(this.smoothedTarget, this.currentPos);
+      const camToTarget = new THREE.Vector3().subVectors(orbitCenter, this.currentPos);
       const viewDist = camToTarget.length();
       if (viewDist > 0.5) {
         camToTarget.normalize();
@@ -458,9 +507,9 @@ export class Camera {
         if (hits.length > 0) {
           // Terrain blocks the view — pull camera to just before the hit
           const hitDist = hits[0].distance;
-          const orbitDir = new THREE.Vector3().subVectors(desired, this.smoothedTarget).normalize();
+          const orbitDir = new THREE.Vector3().subVectors(desired, orbitCenter).normalize();
           const safeDist = Math.max(1.5, viewDist - hitDist);
-          finalDesired = this.smoothedTarget.clone().addScaledVector(orbitDir, safeDist);
+          finalDesired = orbitCenter.clone().addScaledVector(orbitDir, safeDist);
           occluded = true;
         }
       }
@@ -470,7 +519,7 @@ export class Camera {
     smoothLerpVec3(this.currentPos, desired, this.followSpeed * POSITION_FOLLOW_SPEED_MULT, dt);
 
     // --- Collision distance: independent from orbit speed ---
-    const hitDist = occluded ? finalDesired.distanceTo(this.smoothedTarget) : this.distance;
+    const hitDist = occluded ? finalDesired.distanceTo(orbitCenter) : this.distance;
 
     const MIN_COLLISION_DIST = 1.5;
 
@@ -491,11 +540,11 @@ export class Camera {
 
     // Clamp camera to collision distance (post-process, doesn't affect orbit)
     if (this.collisionDist > 0) {
-      const fromTarget = new THREE.Vector3().subVectors(this.currentPos, this.smoothedTarget);
+      const fromTarget = new THREE.Vector3().subVectors(this.currentPos, orbitCenter);
       const currentDist = fromTarget.length();
       if (currentDist > this.collisionDist) {
         fromTarget.multiplyScalar(this.collisionDist / currentDist);
-        this.currentPos.copy(this.smoothedTarget).add(fromTarget);
+        this.currentPos.copy(orbitCenter).add(fromTarget);
       }
     }
 
@@ -518,7 +567,7 @@ export class Camera {
       this.shakeIntensity = Math.max(0, this.shakeIntensity - this.shakeDecay * dt);
     }
 
-    this.camera.lookAt(this.smoothedTarget);
+    this.camera.lookAt(orbitCenter);
   }
 
   /** Trigger a screen shake. dirX/dirZ is the hit direction (normalized). */
@@ -533,6 +582,9 @@ export class Camera {
   }
 
   setParams(p: CameraParams): void {
+    this.cameraMode = p.cameraMode ?? 'topdown';
+    this.followLaziness = p.followLaziness ?? 0.8;
+    this.targetOffset = p.targetOffset ?? [0, 0.8, 0];
     if (p.fov != null) {
       this.camera.fov = p.fov;
       this.camera.updateProjectionMatrix();

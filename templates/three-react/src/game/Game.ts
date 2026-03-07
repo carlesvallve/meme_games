@@ -701,6 +701,12 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
 
     const pos = character.getPosition();
     cam.setTarget(pos.x, pos.y, pos.z);
+    cam.setCharacterState(character.getFacingAngle(), character.getIsMoving());
+
+    // TAB: snap camera behind character
+    if (inp.cameraSnap) {
+      cam.snapBehind(character.getFacingAngle() + Math.PI);
+    }
 
     // ── Torch ─────────────────────────────────────────────────────────
     if (store.torchEnabled) {

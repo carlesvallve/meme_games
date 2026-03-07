@@ -548,6 +548,14 @@ export class DummyCharacter {
   }
 
 
+  getFacingAngle(): number {
+    return this.facingAngle;
+  }
+
+  getIsMoving(): boolean {
+    return this.moveSpeed > 0;
+  }
+
   getPosition(): THREE.Vector3 {
     return this.root.position;
   }

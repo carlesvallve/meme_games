@@ -1,12 +1,15 @@
-import { useGameStore, type CameraParams } from '../../../store';
+import { useGameStore, type CameraParams, type CameraMode } from '../../../store';
 import {
   SettingsWindow,
   Section,
   Slider,
+  Select,
   CollisionLayerSelect,
   type SliderDef,
   resetBtnStyle,
 } from './shared';
+
+const CAMERA_MODES: string[] = ['topdown', 'thirdperson'];
 
 const CAMERA_PARAMS: SliderDef<keyof CameraParams>[] = [
   { key: 'fov', label: 'FOV', min: 30, max: 90, step: 5 },
@@ -33,6 +36,46 @@ export function CameraPanel() {
   return (
     <SettingsWindow>
       <Section label='Camera' first>
+        <Select
+          label='Mode'
+          value={cameraParams.cameraMode}
+          options={CAMERA_MODES}
+          onChange={(v) => setCameraParam('cameraMode', v as CameraMode)}
+        />
+        {cameraParams.cameraMode === 'thirdperson' && (
+          <Slider
+            label='Laziness'
+            value={cameraParams.followLaziness}
+            min={0}
+            max={1}
+            step={0.05}
+            onChange={(v) => setCameraParam('followLaziness', v)}
+          />
+        )}
+        <Slider
+          label='Offset X'
+          value={cameraParams.targetOffset[0]}
+          min={-3}
+          max={3}
+          step={0.1}
+          onChange={(v) => setCameraParam('targetOffset', [v, cameraParams.targetOffset[1], cameraParams.targetOffset[2]])}
+        />
+        <Slider
+          label='Offset Y'
+          value={cameraParams.targetOffset[1]}
+          min={0}
+          max={3}
+          step={0.1}
+          onChange={(v) => setCameraParam('targetOffset', [cameraParams.targetOffset[0], v, cameraParams.targetOffset[2]])}
+        />
+        <Slider
+          label='Offset Z'
+          value={cameraParams.targetOffset[2]}
+          min={-3}
+          max={3}
+          step={0.1}
+          onChange={(v) => setCameraParam('targetOffset', [cameraParams.targetOffset[0], cameraParams.targetOffset[1], v])}
+        />
         {CAMERA_PARAMS.map(({ key, label, min, max, step }) => (
           <Slider
             key={key}

@@ -20,7 +20,12 @@ export interface TorchParams {
   flicker: number;
 }
 
+export type CameraMode = 'topdown' | 'thirdperson';
+
 export interface CameraParams {
+  cameraMode: CameraMode;
+  followLaziness: number;
+  targetOffset: [number, number, number];
   fov: number;
   minDistance: number;
   maxDistance: number;
@@ -59,6 +64,9 @@ export interface PostProcessSettings {
 // ── Defaults ──────────────────────────────────────────────────────────
 
 export const DEFAULT_CAMERA_PARAMS: CameraParams = {
+  cameraMode: 'topdown',
+  followLaziness: 0.8,
+  targetOffset: [0, 0.8, 0],
   fov: 60,
   minDistance: 5,
   maxDistance: 25,
