@@ -5,6 +5,8 @@
 
 import type { NavGrid } from './NavGrid';
 
+console.log('[AStar] === MODULE LOADED ===');
+
 export interface WaypointMeta {
   ladderIndex: number | null;
   climbDirection?: 'up' | 'down';
@@ -105,8 +107,10 @@ function heuristic(ax: number, az: number, bx: number, bz: number): number {
     : dx * SQRT2 + (dz - dx);
 }
 
-/** Cost multiplier for each unit of height change on an edge. Makes NPCs prefer flat routes. */
-const ELEVATION_PENALTY = 3;
+/** Cost multiplier for each unit of height change on an edge.
+ *  Makes A* prefer completing stair descent before going sideways,
+ *  since diagonal shortcuts across elevation changes incur extra cost. */
+const ELEVATION_PENALTY = 2;
 /** Base cost for traversing a ladder nav-link. Strongly prefers ramps/flat but uses ladders when needed. */
 const LADDER_COST = 8;
 
@@ -131,10 +135,9 @@ export function findPath(
     return { found: false, path: [], rawPath: [], meta: [] };
   }
 
-  // Reject goal cells at cliff edges — too few passable directions to be a
-  // meaningful destination. The character would reach the cell but get stuck.
+  // Reject goal cells with no passable edges (completely isolated)
   const goalEdgeCount = popcount8(goalCell.passable);
-  if (goalEdgeCount < 3 && !grid.getNavLinks(goal.gx, goal.gz)) {
+  if (goalEdgeCount === 0 && !grid.getNavLinks(goal.gx, goal.gz)) {
     return { found: false, path: [], rawPath: [], meta: [] };
   }
 
@@ -180,6 +183,7 @@ export function findPath(
       const meta = reconstructMeta(cameFrom, cameViaLink, currentIdx, w, grid, gridPath);
 
       // String-pull: remove redundant waypoints where line-of-sight exists
+      console.log(`[AStar] found path, useStringPull=${useStringPull}, worldPath.length=${worldPath.length}`);
       const finalPath = useStringPull ? stringPull(grid, worldPath) : worldPath;
 
       return { found: true, path: finalPath, rawPath: worldPath, meta };
@@ -203,9 +207,9 @@ export function findPath(
       const currentCell = grid.getCell(cgx, cgz)!;
       const neighborCell = grid.getCell(ngx, ngz)!;
       const heightDelta = Math.abs(currentCell.surfaceHeight - neighborCell.surfaceHeight);
-      // Penalize constrained cells (cliff/ramp edges) so A* routes around corners
+      // Light penalty for very constrained cells (dead ends) — don't penalize stairs
       const edgeCount = popcount8(neighborCell.passable);
-      const edgePenalty = edgeCount < 4 ? (4 - edgeCount) * 2 : 0;
+      const edgePenalty = edgeCount <= 1 ? 1 : 0;
       const cost = baseCost + heightDelta * ELEVATION_PENALTY + edgePenalty;
       const tentativeG = currentG + cost;
 
@@ -339,6 +343,14 @@ function reconstructMeta(
 function stringPull(grid: NavGrid, path: { x: number; z: number }[]): { x: number; z: number }[] {
   if (path.length <= 2) return path;
 
+  // Debug: log NavGrid cell heights for each waypoint
+  console.log('[stringPull] waypoint NavGrid heights:');
+  for (let i = 0; i < path.length; i++) {
+    const g = grid.worldToGrid(path[i].x, path[i].z);
+    const cell = grid.getCell(g.gx, g.gz);
+    console.log(`  wp[${i}] world=(${path[i].x.toFixed(2)},${path[i].z.toFixed(2)}) grid=(${g.gx},${g.gz}) navH=${cell ? cell.surfaceHeight.toFixed(3) : 'null'}`);
+  }
+
   const result: { x: number; z: number }[] = [path[0]];
   let current = 0;
 
@@ -349,11 +361,15 @@ function stringPull(grid: NavGrid, path: { x: number; z: number }[]): { x: numbe
     for (let i = current + 2; i < path.length; i++) {
       const fromG = grid.worldToGrid(path[current].x, path[current].z);
       const toG = grid.worldToGrid(path[i].x, path[i].z);
-      if (grid.hasLineOfSight(fromG.gx, fromG.gz, toG.gx, toG.gz)) {
+      const los = grid.hasLineOfSight(fromG.gx, fromG.gz, toG.gx, toG.gz);
+      if (los) {
         farthest = i;
       }
     }
 
+    if (farthest > current + 1) {
+      console.log(`[stringPull] collapsed wp[${current}] -> wp[${farthest}] (skipped ${farthest - current - 1})`);
+    }
     result.push(path[farthest]);
     current = farthest;
   }

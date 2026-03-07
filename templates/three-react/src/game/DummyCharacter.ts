@@ -8,10 +8,13 @@ import { findPath } from './pathfinding/AStar';
 import { resolveCollision, getSurfaceHeight } from './CollisionUtils';
 import { audioSystem } from './AudioSystem';
 
-const TURN_SPEED = 12;
+const DEFAULT_TURN_SPEED = 12;
 const WAYPOINT_THRESHOLD = 0.3;
 const HOP_HEIGHT = 0.06;
 const FOOT_SFX_COOLDOWN = 0.12;
+const STEP_UP_RATE = 20; // exponential lerp rate for stepping up
+const GRAVITY = 60; // fall acceleration
+const MAX_FALL_SPEED = 30; // terminal velocity
 
 export class DummyCharacter {
   readonly root: THREE.Group;
@@ -44,7 +47,14 @@ export class DummyCharacter {
   private obstacles: ReadonlyArray<AABBBox> = [];
   private collisionRadius = 0.25;
   private stepHeight = 0.5;
+  private turnSpeed = DEFAULT_TURN_SPEED;
+  private gravity = GRAVITY;
+  private maxFallSpeed = MAX_FALL_SPEED;
   private groundY = 0;
+  private visualGroundY = 0; // smoothed render height (lerp up, gravity down)
+  private velocityY = 0; // fall velocity for gravity-based descent
+  private pathNavHeights: number[] = []; // NavGrid heights per waypoint (for groundY interpolation)
+  private prevWaypointNavH = 0; // NavGrid height of the waypoint we just left
 
   constructor(navGrid: NavGrid) {
     this.navGrid = navGrid;
@@ -70,6 +80,13 @@ export class DummyCharacter {
 
   setStepHeight(v: number): void {
     this.stepHeight = v;
+  }
+  setTurnSpeed(v: number): void {
+    this.turnSpeed = v;
+  }
+  setGravity(v: number): void {
+    this.gravity = v;
+    this.maxFallSpeed = v * 0.5; // terminal velocity scales with gravity
   }
 
   setNavGrid(navGrid: NavGrid): void {
@@ -117,47 +134,52 @@ export class DummyCharacter {
     const pos = this.root.position;
     const BIAS = 0.05;
 
-    // Build flat list of waypoints with final-goal radius trim
+    // Build untrimmed waypoints (goal radius trim applied to final line, not waypoints)
     const waypoints: { x: number; z: number }[] = [{ x: pos.x, z: pos.z }];
-    for (let i = 0; i < remaining.length; i++) {
-      let wx = remaining[i].x, wz = remaining[i].z;
-      if (i === remaining.length - 1 && this.goalRadius > 0) {
-        const prevX = i > 0 ? remaining[i - 1].x : pos.x;
-        const prevZ = i > 0 ? remaining[i - 1].z : pos.z;
-        const dx = wx - prevX;
-        const dz = wz - prevZ;
-        const len = Math.sqrt(dx * dx + dz * dz);
-        if (len > this.goalRadius) {
-          wx -= (dx / len) * this.goalRadius;
-          wz -= (dz / len) * this.goalRadius;
-        }
-      }
-      waypoints.push({ x: wx, z: wz });
+    for (const wp of remaining) {
+      waypoints.push({ x: wp.x, z: wp.z });
     }
 
-    // Build positions with step-up/step-down at cell edges
+    // Build positions: for each segment, if waypoints have different heights,
+    // walk cell-by-cell to find precise transitions. If same height, draw flat.
+    const cs = this.navGrid.cellSize;
     const positions: number[] = [];
-    let prevH = this.getSurfaceAt(waypoints[0].x, waypoints[0].z);
+    let prevH = this.groundY + 0.05;
     positions.push(waypoints[0].x, prevH, waypoints[0].z);
 
     for (let i = 1; i < waypoints.length; i++) {
-      const wp = waypoints[i];
-      const curH = this.getSurfaceAt(wp.x, wp.z);
+      const from = waypoints[i - 1];
+      const to = waypoints[i];
+      const toH = this.getSurfaceAt(to.x, to.z);
+      const dx = to.x - from.x;
+      const dz = to.z - from.z;
+      const segLen = Math.sqrt(dx * dx + dz * dz);
 
-      if (Math.abs(curH - prevH) > 0.01) {
-        // Height change: insert step at the edge between cells
-        const prev = waypoints[i - 1];
-        const midX = (prev.x + wp.x) * 0.5;
-        const midZ = (prev.z + wp.z) * 0.5;
-        // Flat to edge at previous height
-        positions.push(midX, prevH, midZ);
-        // Vertical step to new height
-        positions.push(midX, curH, midZ);
+      if (segLen < 0.001) continue;
+
+      if (Math.abs(toH - prevH) > 0.01) {
+        // Height change: place step at midpoint between waypoints
+        const mx = (from.x + to.x) * 0.5;
+        const mz = (from.z + to.z) * 0.5;
+        positions.push(mx, prevH, mz);
+        positions.push(mx, toH, mz);
       }
 
-      // Continue flat at current height
-      positions.push(wp.x, curH, wp.z);
-      prevH = curH;
+      positions.push(to.x, toH, to.z);
+      prevH = toH;
+    }
+
+    // Trim final endpoint back by goalRadius (visual only — stop line at marker ring edge)
+    if (this.goalRadius > 0 && positions.length >= 6) {
+      const n = positions.length;
+      const ex = positions[n - 3], ez = positions[n - 1];
+      const px = positions[n - 6], pz = positions[n - 4];
+      const dx = ex - px, dz = ez - pz;
+      const len = Math.sqrt(dx * dx + dz * dz);
+      if (len > this.goalRadius) {
+        positions[n - 3] = ex - (dx / len) * this.goalRadius;
+        positions[n - 1] = ez - (dz / len) * this.goalRadius;
+      }
     }
 
     this.pathLineGeo = new LineGeometry();
@@ -242,7 +264,7 @@ export class DummyCharacter {
 
     // Smooth facing
     const targetAngle = Math.atan2(nx, nz);
-    this.facingAngle = lerpAngle(this.facingAngle, targetAngle, 1 - Math.exp(-TURN_SPEED * dt));
+    this.facingAngle = lerpAngle(this.facingAngle, targetAngle, 1 - Math.exp(-this.turnSpeed * dt));
     this.root.rotation.y = this.facingAngle;
   }
 
@@ -298,6 +320,36 @@ export class DummyCharacter {
     this.settleTarget = null;
     this.goalRadius = markerRadius;
     this.clickCount = 1;
+    // Pre-compute NavGrid heights for each waypoint (used for groundY interpolation)
+    this.pathNavHeights = result.path.map(wp => {
+      const g = this.navGrid.worldToGrid(wp.x, wp.z);
+      const cell = this.navGrid.getCell(g.gx, g.gz);
+      return cell ? cell.surfaceHeight : 0;
+    });
+    this.prevWaypointNavH = this.pathNavHeights[0];
+
+    // Log raw A* path (before string pull)
+    console.log(`[path] RAW path (${result.rawPath.length} waypoints):`);
+    for (let i = 0; i < result.rawPath.length; i++) {
+      const wp = result.rawPath[i];
+      const h = this.getSurfaceAt(wp.x, wp.z);
+      console.log(`  raw[${i}] (${wp.x.toFixed(2)}, ${wp.z.toFixed(2)}) surfH=${h.toFixed(2)}`);
+    }
+    // Log NavGrid cell heights for raw path waypoints
+    console.log(`[path] NavGrid cell heights for raw path:`);
+    for (let i = 0; i < result.rawPath.length; i++) {
+      const wp = result.rawPath[i];
+      const g = this.navGrid.worldToGrid(wp.x, wp.z);
+      const cell = this.navGrid.getCell(g.gx, g.gz);
+      console.log(`  nav[${i}] world=(${wp.x.toFixed(2)},${wp.z.toFixed(2)}) grid=(${g.gx},${g.gz}) navH=${cell ? cell.surfaceHeight.toFixed(3) : 'null'} blocked=${cell?.blocked}`);
+    }
+    // Log final path (after string pull)
+    console.log(`[path] FINAL path (${result.path.length} waypoints, stringPull=${this.stringPull}):`);
+    for (let i = 0; i < result.path.length; i++) {
+      const wp = result.path[i];
+      const h = this.getSurfaceAt(wp.x, wp.z);
+      console.log(`  fin[${i}] (${wp.x.toFixed(2)}, ${wp.z.toFixed(2)}) surfH=${h.toFixed(2)}`);
+    }
 
     if (this.autoMove) {
       this.moveSpeed = speed;
@@ -350,6 +402,12 @@ export class DummyCharacter {
       const reach = isLast ? 0.05 : WAYPOINT_THRESHOLD;
 
       if (dist < reach) {
+        const currentH = this.getSurfaceAt(target.x, target.z);
+        console.log(`[path] wp ${this.pathIndex}/${this.path.length - 1} pos=(${pos.x.toFixed(2)}, ${pos.z.toFixed(2)}) target=(${target.x.toFixed(2)}, ${target.z.toFixed(2)}) surfH=${currentH.toFixed(2)} groundY=${this.groundY.toFixed(2)}`);
+
+        // Set groundY to this waypoint's NavGrid height (stable, no collision artifacts)
+        this.prevWaypointNavH = this.pathNavHeights[this.pathIndex] ?? 0;
+        this.groundY = this.prevWaypointNavH;
         this.pathIndex++;
         if (this.pathIndex >= this.path.length) {
           // Snap to exact goal
@@ -357,14 +415,23 @@ export class DummyCharacter {
           pos.x = goal.x;
           pos.z = goal.z;
           this.path.length = 0;
+          this.pathNavHeights.length = 0;
           this.moveSpeed = 0;
           this.clearPathLine();
         } else {
           this.updatePathLine();
         }
       } else {
-        // Clamp speed on final approach to prevent overshoot (like voxel-engine)
+        // Slow down on stairs (elevation change between waypoints)
         let moveSpd = speed;
+        if (this.pathNavHeights.length > 0 && this.pathIndex > 0) {
+          const prevH = this.pathNavHeights[this.pathIndex - 1] ?? 0;
+          const curH = this.pathNavHeights[this.pathIndex] ?? 0;
+          if (Math.abs(curH - prevH) > 0.01) {
+            moveSpd *= 0.5; // half speed on stairs
+          }
+        }
+        // Clamp speed on final approach to prevent overshoot (like voxel-engine)
         if (isLast) {
           const maxStep = dist / dt;
           moveSpd = Math.min(speed, Math.max(0.5, maxStep));
@@ -374,26 +441,18 @@ export class DummyCharacter {
         pos.z += (pdz / dist) * step;
 
         const targetAngle = Math.atan2(pdx / dist, pdz / dist);
-        this.facingAngle = lerpAngle(this.facingAngle, targetAngle, 1 - Math.exp(-TURN_SPEED * dt));
+        this.facingAngle = lerpAngle(this.facingAngle, targetAngle, 1 - Math.exp(-this.turnSpeed * dt));
         this.root.rotation.y = this.facingAngle;
         this.moveSpeed = speed;
       }
     }
 
-    // ── Update debug path line start to track character ──
-    if (this.pathLine && this.pathLineGeo) {
-      const attr = this.pathLineGeo.getAttribute('instanceStart') as THREE.InterleavedBufferAttribute;
-      if (attr && attr.data) {
-        const arr = attr.data.array as Float32Array;
-        arr[0] = pos.x;
-        arr[1] = 0.05;
-        arr[2] = pos.z;
-        attr.data.needsUpdate = true;
-        this.pathLine.computeLineDistances();
-      }
+    // ── Rebuild debug path line each frame to track character smoothly ──
+    if (this.debugPath && this.path.length > 0 && this.pathIndex < this.path.length && !this.pathPaused) {
+      this.updatePathLine();
     }
 
-    // ── Collision: ALWAYS runs (like voxel-engine) ──
+    // ── Collision + ground height ──
     if (this.obstacles.length > 0) {
       const resolved = resolveCollision(
         pos.x, pos.z,
@@ -403,9 +462,27 @@ export class DummyCharacter {
       pos.x = resolved.x;
       pos.z = resolved.z;
 
-      // Step up/down onto surfaces
-      const surfaceY = getSurfaceHeight(pos.x, pos.z, this.obstacles, this.collisionRadius * 0.5);
-      this.groundY = surfaceY - this.groundY <= this.stepHeight ? surfaceY : this.groundY;
+      // During path following: track NavGrid cell height with stair-ascent protection
+      // Free movement: use collision-based surface detection
+      if (this.path.length > 0 && this.pathIndex > 0 && this.pathIndex < this.path.length && this.pathNavHeights.length > 0) {
+        const targetNavH = this.pathNavHeights[this.pathIndex] ?? 0;
+        const g = this.navGrid.worldToGrid(pos.x, pos.z);
+        const navCell = this.navGrid.getCell(g.gx, g.gz);
+        const cellH = navCell ? navCell.surfaceHeight : 0;
+        if (targetNavH > this.prevWaypointNavH) {
+          // Ascending: don't drop below prev waypoint height (protects diagonal stair traversal
+          // where ground cells between stair steps would cause groundY=0 → collision blocks next step)
+          this.groundY = Math.max(cellH, this.prevWaypointNavH);
+        } else {
+          // Descending/flat: follow NavGrid cell height directly
+          this.groundY = cellH;
+        }
+      } else {
+        const surfaceY = getSurfaceHeight(pos.x, pos.z, this.obstacles, this.collisionRadius * 0.5);
+        if (surfaceY - this.groundY <= this.stepHeight) {
+          this.groundY = surfaceY;
+        }
+      }
     } else {
       this.groundY = 0;
     }
@@ -415,12 +492,29 @@ export class DummyCharacter {
     pos.x = Math.max(-half, Math.min(half, pos.x));
     pos.z = Math.max(-half, Math.min(half, pos.z));
 
+    // ── Smooth visual Y (lerp up, gravity down — matches voxel-engine) ──
+    if (this.groundY > this.visualGroundY) {
+      // Stepping up: exponential lerp
+      this.visualGroundY = this.visualGroundY + (this.groundY - this.visualGroundY) * (1 - Math.exp(-STEP_UP_RATE * dt));
+      this.velocityY = 0;
+    } else if (this.groundY < this.visualGroundY) {
+      // Stepping down: gravity-based fall
+      this.velocityY = Math.min(this.velocityY + this.gravity * dt, this.maxFallSpeed);
+      this.visualGroundY -= this.velocityY * dt;
+      if (this.visualGroundY <= this.groundY) {
+        this.visualGroundY = this.groundY;
+        this.velocityY = 0;
+      }
+    } else {
+      this.velocityY = 0;
+    }
+
     // ── Hop + step SFX ──
     this.footSfxTimer += dt;
     if (this.hopEnabled && this.moveSpeed > 0) {
       this.hopPhase += dt * this.moveSpeed * 2;
       const hop = Math.abs(Math.sin(this.hopPhase)) * HOP_HEIGHT;
-      pos.y = this.groundY + hop;
+      pos.y = this.visualGroundY + hop;
 
       // Play step SFX each time sin crosses zero (foot landing)
       const currentHopHalf = Math.floor(this.hopPhase / Math.PI) % 2;
@@ -437,7 +531,7 @@ export class DummyCharacter {
         this.footSfxTimer = 0;
         audioSystem.playStep(0.7);
       }
-      pos.y = this.groundY;
+      pos.y = this.visualGroundY;
       this.hopPhase = 0;
       this.lastHopHalf = 0;
     }

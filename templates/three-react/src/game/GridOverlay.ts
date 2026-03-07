@@ -1,4 +1,7 @@
 import * as THREE from 'three';
+import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js';
+import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js';
+import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 import type { AABBBox } from './pathfinding/NavGrid';
 import type { NavGrid } from './pathfinding/NavGrid';
 
@@ -176,7 +179,7 @@ export class GridOverlay {
    * Show/hide NavGrid debug overlay: green = walkable, red = blocked.
    * Quads are placed at each cell's surface height + small bias.
    */
-  setDebugNav(navGrid: NavGrid | null, obstacles: ReadonlyArray<AABBBox> = []): void {
+  setDebugNav(navGrid: NavGrid | null, _obstacles: ReadonlyArray<AABBBox> = []): void {
     // Remove old
     if (this.debugMesh) {
       this.group.remove(this.debugMesh);
@@ -189,45 +192,43 @@ export class GridOverlay {
     const cells = navGrid.getCells();
     if (!cells || cells.length === 0) return;
     const cs = navGrid.cellSize;
-    const half = cs * 0.5;
 
     const positions: number[] = [];
-    const colors: number[] = [];
-
-    // Inset quads so individual cells have visible borders
-    const inset = cs * 0.1;
-    const qh = half - inset;
+    const inset = cs * 0.15;
+    const qh = cs * 0.5 - inset;
 
     for (const cell of cells) {
-      if (!cell.blocked) continue; // only show blocked cells
+      if (!cell.blocked) continue;
       const x = cell.worldX;
       const z = cell.worldZ;
-      const y = cell.surfaceHeight + 0.06;
+      const y = cell.surfaceHeight + 0.02;
 
-      const x0 = x - qh, x1 = x + qh;
-      const z0 = z - qh, z1 = z + qh;
-
+      // X shape: two diagonal line segments
       positions.push(
-        x0, y, z0,  x1, y, z0,  x0, y, z1,
-        x1, y, z0,  x1, y, z1,  x0, y, z1,
+        x - qh, y, z - qh,  x + qh, y, z + qh,
+        x + qh, y, z - qh,  x - qh, y, z + qh,
       );
     }
 
-    if (positions.length === 0) return; // no blocked cells
+    if (positions.length === 0) return;
 
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    const geo = new LineSegmentsGeometry();
+    geo.setPositions(positions);
 
-    const mat = new THREE.MeshBasicMaterial({
-      color: 0xff0000,
+    const mat = new LineMaterial({
+      color: 0xff3333,
+      linewidth: 2,
       transparent: true,
-      opacity: 0.6,
+      opacity: 0.7,
       depthWrite: false,
-      depthTest: false,
+      depthTest: true,
+      resolution: new THREE.Vector2(window.innerWidth, window.innerHeight),
     });
 
-    this.debugMesh = new THREE.Mesh(geo, mat);
-    this.debugMesh.renderOrder = 999;
+    const lines = new LineSegments2(geo, mat);
+    lines.computeLineDistances();
+    lines.renderOrder = 999;
+    this.debugMesh = lines as unknown as THREE.Mesh;
     this.group.add(this.debugMesh);
   }
 

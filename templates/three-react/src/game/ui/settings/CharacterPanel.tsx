@@ -11,6 +11,10 @@ export function CharacterPanel() {
   const hop = useGameStore((s) => s.charHop);
   const stepHeight = useGameStore((s) => s.charStepHeight);
   const setStepHeight = useGameStore((s) => s.setCharStepHeight);
+  const rotSpeed = useGameStore((s) => s.charRotSpeed);
+  const setRotSpeed = useGameStore((s) => s.setCharRotSpeed);
+  const gravity = useGameStore((s) => s.charGravity);
+  const setGravity = useGameStore((s) => s.setCharGravity);
   const debugPath = useGameStore((s) => s.charDebugPath);
   const stringPull = useGameStore((s) => s.charStringPull);
   const snapMode = useGameStore((s) => s.charSnapMode);
@@ -67,6 +71,24 @@ export function CharacterPanel() {
           accent='#af6'
           onChange={setStepHeight}
         />
+        <Slider
+          label='Rot Speed'
+          value={rotSpeed}
+          min={1}
+          max={50}
+          step={1}
+          accent='#af6'
+          onChange={setRotSpeed}
+        />
+        <Slider
+          label='Gravity'
+          value={gravity}
+          min={10}
+          max={200}
+          step={5}
+          accent='#af6'
+          onChange={setGravity}
+        />
         <Toggle
           label='Hop'
           value={hop}
@@ -118,6 +140,8 @@ export function CharacterPanel() {
           charSpeed: 1,
           charMoveSpeed: 5,
           charStepHeight: 0.5,
+          charRotSpeed: 12,
+          charGravity: 60,
           charHop: true,
           charDebugPath: false,
           charStringPull: true,

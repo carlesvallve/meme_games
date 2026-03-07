@@ -289,6 +289,40 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       }
     }
 
+    // ── Staircases (triangle shape, each row one stepHeight taller) ──
+    // Track stair cell positions so debris avoids them
+    const stairCells = new Set<string>();
+    const stairCount = 3 + Math.floor(Math.random() * 4); // 3-6 staircases
+    for (let s = 0; s < stairCount; s++) {
+      const color = EARTHY_COLORS[Math.floor(Math.random() * EARTHY_COLORS.length)];
+      const stairSteps = 3 + Math.floor(Math.random() * 4); // 3-6 steps tall
+      const { gx: ox, gz: oz } = randGridPos(cs, clearRadius);
+      const rot = Math.floor(Math.random() * 4);
+
+      for (let row = 0; row < stairSteps; row++) {
+        const h = (row + 1) * stepH;
+        const width = stairSteps - row; // bottom row widest
+        for (let col = 0; col < width; col++) {
+          let dx = col - Math.floor(width / 2);
+          let dz = row;
+          // Apply rotation
+          if (rot === 1) { const tmp = dx; dx = -dz; dz = tmp; }
+          else if (rot === 2) { dx = -dx; dz = -dz; }
+          else if (rot === 3) { const tmp = dx; dx = dz; dz = -tmp; }
+
+          const cx = (ox + dx) * cs + cs * 0.5;
+          const cz = (oz + dz) * cs + cs * 0.5;
+          placeBox(cx, cz, cs * 0.5, cs * 0.5, h, color);
+          // Mark stair cell + neighbors as protected from debris
+          for (let ddx = -2; ddx <= 2; ddx++) {
+            for (let ddz = -2; ddz <= 2; ddz++) {
+              stairCells.add(`${ox + dx + ddx},${oz + dz + ddz}`);
+            }
+          }
+        }
+      }
+    }
+
     // ── Scattered debris (steppable + some blocking) ──
     const debrisCount = 8 + Math.floor(Math.random() * 8);
     for (let i = 0; i < debrisCount; i++) {
@@ -298,8 +332,14 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       const color = EARTHY_COLORS[Math.floor(Math.random() * EARTHY_COLORS.length)];
 
       if (snap) {
-        const gx = Math.floor((Math.random() - 0.5) * (WORLD_SIZE / cs - 4));
-        const gz = Math.floor((Math.random() - 0.5) * (WORLD_SIZE / cs - 4));
+        let gx: number, gz: number;
+        let attempts = 0;
+        do {
+          gx = Math.floor((Math.random() - 0.5) * (WORLD_SIZE / cs - 4));
+          gz = Math.floor((Math.random() - 0.5) * (WORLD_SIZE / cs - 4));
+          attempts++;
+        } while (stairCells.has(`${gx},${gz}`) && attempts < 20);
+        if (attempts >= 20) continue; // skip if can't find a clear spot
         placeBox(gx * cs + cs * 0.5, gz * cs + cs * 0.5, cs * 0.5, cs * 0.5, height, color);
       } else {
         const x = (Math.random() - 0.5) * (WORLD_SIZE - 4);
@@ -397,17 +437,38 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   let goalFiredOnDown = false;
   const GOAL_DRAG_THRESHOLD = 8;
 
-  function tryGoTo(clientX: number, clientY: number, isDrag = false): void {
+  /** Raycast XZ from screen coords, then look up NavGrid surface height */
+  function raycastGoalPos(clientX: number, clientY: number): { x: number; z: number; y: number } | null {
     const rect = canvas.getBoundingClientRect();
     pointerNDC.x = ((clientX - rect.left) / rect.width) * 2 - 1;
     pointerNDC.y = -((clientY - rect.top) / rect.height) * 2 + 1;
     groundRaycaster.setFromCamera(pointerNDC, cam.camera);
-    const hits = groundRaycaster.intersectObject(ground);
-    if (hits.length > 0) {
-      const hit = hits[0].point;
+    // Raycast obstacles first (closest hit), then ground as fallback
+    let hitPoint: THREE.Vector3 | null = null;
+    if (obstacleMeshes.length > 0) {
+      const obsHits = groundRaycaster.intersectObjects(obstacleMeshes);
+      if (obsHits.length > 0) hitPoint = obsHits[0].point;
+    }
+    if (!hitPoint) {
+      const groundHits = groundRaycaster.intersectObject(ground);
+      if (groundHits.length > 0) hitPoint = groundHits[0].point;
+    }
+    if (!hitPoint) return null;
+    // Use XZ from hit, but Y from NavGrid surface (like voxel-engine)
+    const cell = navGrid.getCell(
+      ...Object.values(navGrid.worldToGrid(hitPoint.x, hitPoint.z)) as [number, number],
+    );
+    const surfaceY = cell ? cell.surfaceHeight : 0;
+    return { x: hitPoint.x, z: hitPoint.z, y: surfaceY };
+  }
+
+  function tryGoTo(clientX: number, clientY: number, isDrag = false): void {
+    const goalPos = raycastGoalPos(clientX, clientY);
+    if (!goalPos) return;
+    {
+      const hit = goalPos;
       const snapMode = useGameStore.getState().charSnapMode;
       const isGrid = snapMode === '4dir' || snapMode === '8dir';
-      // Snapped position for pathfinding
       let mx = hit.x, mz = hit.z;
       if (isGrid) {
         const snapped = character.getSnappedGoal(hit.x, hit.z);
@@ -416,12 +477,13 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       }
       const outerRadius = gridCellSize * 0.45 + RING_STROKE * 0.5;
       if (character.goTo(hit.x, hit.z, useGameStore.getState().charMoveSpeed, outerRadius, isDrag)) {
+        const markerY = hit.y + 0.02;
         // During drag in grid modes: show marker at raw mouse pos, snap on release
         if (isDrag && isGrid && goalPointerDown) {
-          clickMarker.position.set(hit.x, 0.02, hit.z);
+          clickMarker.position.set(hit.x, markerY, hit.z);
           markerSnapTarget = { x: mx, z: mz };
         } else {
-          clickMarker.position.set(mx, 0.02, mz);
+          clickMarker.position.set(mx, markerY, mz);
           markerSnapTarget = null;
         }
         markerMat.opacity = 1;
@@ -612,6 +674,8 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     character.setAutoMove(store.charAutoMove);
     character.setStringPull(store.charStringPull);
     character.setStepHeight(store.charStepHeight);
+    character.setTurnSpeed(store.charRotSpeed);
+    character.setGravity(store.charGravity);
     character.setSnapMode(store.charSnapMode);
     const moveSpeed = store.charMoveSpeed;
 

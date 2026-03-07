@@ -119,6 +119,7 @@ export class NavGrid {
     this.stepHeight = stepHeight;
     this.navLinks.clear();
     const { width, height, cellSize, originX, originZ } = this;
+    const EPS = 0.01; // small tolerance for floating-point boundary comparisons
     const totalCells = width * height;
     this.cells = new Array(totalCells);
 
@@ -144,7 +145,7 @@ export class NavGrid {
         let blocked = false;
         for (const box of boxes) {
           const effectiveH = getBoxHeightAt(box, worldX, worldZ);
-          if (effectiveH - surfaceHeight <= stepHeight) continue;
+          if (effectiveH - surfaceHeight <= stepHeight + EPS) continue;
           if (
             Math.abs(worldX - box.x) < box.halfW + capsuleRadius &&
             Math.abs(worldZ - box.z) < box.halfD + capsuleRadius
@@ -180,8 +181,8 @@ export class NavGrid {
           const neighbor = this.cells[ngz * width + ngx];
           if (neighbor.blocked) continue;
 
-          // Height check
-          if (Math.abs(cell.surfaceHeight - neighbor.surfaceHeight) > stepHeight) continue;
+          // Height check (with epsilon for floating-point boundary cases)
+          if (Math.abs(cell.surfaceHeight - neighbor.surfaceHeight) > stepHeight + EPS) continue;
 
           // Diagonal: both adjacent cardinals must also be passable
           if (dir % 2 === 1) {
@@ -197,8 +198,8 @@ export class NavGrid {
             const adj1 = this.cells[n1gz * width + n1gx];
             const adj2 = this.cells[n2gz * width + n2gx];
             if (adj1.blocked || adj2.blocked) continue;
-            if (Math.abs(cell.surfaceHeight - adj1.surfaceHeight) > stepHeight) continue;
-            if (Math.abs(cell.surfaceHeight - adj2.surfaceHeight) > stepHeight) continue;
+            if (Math.abs(cell.surfaceHeight - adj1.surfaceHeight) > stepHeight + EPS) continue;
+            if (Math.abs(cell.surfaceHeight - adj2.surfaceHeight) > stepHeight + EPS) continue;
           }
 
           mask |= 1 << dir;
@@ -206,6 +207,54 @@ export class NavGrid {
         cell.passable = mask;
       }
     }
+
+    // 3. Post-pass: flood-fill from ground-level cells to find reachable elevated cells.
+    //    Any elevated cell not reached by the flood is unreachable — mark blocked.
+    //    This correctly handles stairs (reachable) vs obstacle interiors (unreachable).
+    const reachable = new Uint8Array(totalCells);
+    const queue: number[] = [];
+
+    // Seed: all non-blocked cells at ground level or within stepHeight of ground
+    for (let i = 0; i < totalCells; i++) {
+      const cell = this.cells[i];
+      if (!cell.blocked && cell.surfaceHeight <= stepHeight) {
+        reachable[i] = 1;
+        if (cell.passable > 0) queue.push(i);
+      }
+    }
+
+    // BFS through passable edges
+    while (queue.length > 0) {
+      const idx = queue.shift()!;
+      const cgx = idx % width;
+      const cgz = (idx - cgx) / width;
+      const cell = this.cells[idx];
+
+      for (let dir = 0; dir < 8; dir++) {
+        if (!(cell.passable & (1 << dir))) continue;
+        const ngx = cgx + DIR_DGX[dir];
+        const ngz = cgz + DIR_DGZ[dir];
+        if (ngx < 0 || ngx >= width || ngz < 0 || ngz >= height) continue;
+        const nIdx = ngz * width + ngx;
+        if (reachable[nIdx]) continue;
+        const neighbor = this.cells[nIdx];
+        if (neighbor.blocked) continue;
+        reachable[nIdx] = 1;
+        if (neighbor.passable > 0) queue.push(nIdx);
+      }
+    }
+
+    // Block unreachable elevated cells
+    for (let i = 0; i < totalCells; i++) {
+      const cell = this.cells[i];
+      if (!cell.blocked && cell.surfaceHeight > stepHeight && !reachable[i]) {
+        cell.blocked = true;
+        cell.passable = 0;
+      }
+    }
+
+    // 4. Recompute passability after flood-fill may have blocked additional cells
+    this.recomputePassability();
   }
 
   getCell(gx: number, gz: number): NavCell | null {
@@ -796,6 +845,20 @@ export class NavGrid {
    *  so paths that climb gradually (0→0.5→1.0) are valid but
    *  direct jumps (0→1.0) are not. */
   hasLineOfSight(gx1: number, gz1: number, gx2: number, gz2: number): boolean {
+    // Reject if start and end cells have height difference >= stepHeight
+    // (prevents string-pull from collapsing stair-to-ground transitions)
+    const startC = this.getCell(gx1, gz1);
+    const endC = this.getCell(gx2, gz2);
+    if (startC && endC) {
+      const hDiff = Math.abs(startC.surfaceHeight - endC.surfaceHeight);
+      if (hDiff > 0.1) {
+        console.log(`[LOS] (${gx1},${gz1}) h=${startC.surfaceHeight.toFixed(3)} -> (${gx2},${gz2}) h=${endC.surfaceHeight.toFixed(3)} diff=${hDiff.toFixed(3)} step=${this.stepHeight} => ${hDiff >= this.stepHeight - 0.01 ? 'BLOCKED' : 'pass'}`);
+      }
+      if (hDiff >= this.stepHeight - 0.01) {
+        return false;
+      }
+    }
+
     let x0 = gx1, z0 = gz1;
     const x1 = gx2, z1 = gz2;
     const dx = Math.abs(x1 - x0);
@@ -854,8 +917,22 @@ export class NavGrid {
       const cell = this.getCell(x0, z0);
       if (!cell || cell.blocked) return false;
 
-      // Check consecutive height difference — must be within step height
-      if (Math.abs(cell.surfaceHeight - prevCell.surfaceHeight) > this.stepHeight) return false;
+      // Check consecutive height difference — must be strictly less than step height
+      const stepDiff = Math.abs(cell.surfaceHeight - prevCell!.surfaceHeight);
+      if (stepDiff > 0.1) {
+        console.log(`[LOS-walk] (${prevCell!.gx},${prevCell!.gz}) h=${prevCell!.surfaceHeight.toFixed(3)} -> (${cell.gx},${cell.gz}) h=${cell.surfaceHeight.toFixed(3)} diff=${stepDiff.toFixed(3)} step=${this.stepHeight} => ${stepDiff >= this.stepHeight - 0.01 ? 'BLOCKED' : 'pass'}`);
+      }
+      if (stepDiff >= this.stepHeight - 0.01) return false;
+
+      // Check that the edge between prevCell and cell is actually passable
+      // (prevents string-pull from cutting through stair sides)
+      const edgeDx = cell.gx - prevCell.gx;
+      const edgeDz = cell.gz - prevCell.gz;
+      let edgeDir = -1;
+      for (let d = 0; d < 8; d++) {
+        if (DIR_DGX[d] === edgeDx && DIR_DGZ[d] === edgeDz) { edgeDir = d; break; }
+      }
+      if (edgeDir >= 0 && !(prevCell.passable & (1 << edgeDir))) return false;
 
       prevCell = cell;
     }
