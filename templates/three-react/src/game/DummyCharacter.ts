@@ -328,29 +328,6 @@ export class DummyCharacter {
     });
     this.prevWaypointNavH = this.pathNavHeights[0];
 
-    // Log raw A* path (before string pull)
-    console.log(`[path] RAW path (${result.rawPath.length} waypoints):`);
-    for (let i = 0; i < result.rawPath.length; i++) {
-      const wp = result.rawPath[i];
-      const h = this.getSurfaceAt(wp.x, wp.z);
-      console.log(`  raw[${i}] (${wp.x.toFixed(2)}, ${wp.z.toFixed(2)}) surfH=${h.toFixed(2)}`);
-    }
-    // Log NavGrid cell heights for raw path waypoints
-    console.log(`[path] NavGrid cell heights for raw path:`);
-    for (let i = 0; i < result.rawPath.length; i++) {
-      const wp = result.rawPath[i];
-      const g = this.navGrid.worldToGrid(wp.x, wp.z);
-      const cell = this.navGrid.getCell(g.gx, g.gz);
-      console.log(`  nav[${i}] world=(${wp.x.toFixed(2)},${wp.z.toFixed(2)}) grid=(${g.gx},${g.gz}) navH=${cell ? cell.surfaceHeight.toFixed(3) : 'null'} blocked=${cell?.blocked}`);
-    }
-    // Log final path (after string pull)
-    console.log(`[path] FINAL path (${result.path.length} waypoints, stringPull=${this.stringPull}):`);
-    for (let i = 0; i < result.path.length; i++) {
-      const wp = result.path[i];
-      const h = this.getSurfaceAt(wp.x, wp.z);
-      console.log(`  fin[${i}] (${wp.x.toFixed(2)}, ${wp.z.toFixed(2)}) surfH=${h.toFixed(2)}`);
-    }
-
     if (this.autoMove) {
       this.moveSpeed = speed;
       this.pathPaused = false;
@@ -402,8 +379,6 @@ export class DummyCharacter {
       const reach = isLast ? 0.05 : WAYPOINT_THRESHOLD;
 
       if (dist < reach) {
-        const currentH = this.getSurfaceAt(target.x, target.z);
-        console.log(`[path] wp ${this.pathIndex}/${this.path.length - 1} pos=(${pos.x.toFixed(2)}, ${pos.z.toFixed(2)}) target=(${target.x.toFixed(2)}, ${target.z.toFixed(2)}) surfH=${currentH.toFixed(2)} groundY=${this.groundY.toFixed(2)}`);
 
         // Set groundY to this waypoint's NavGrid height (stable, no collision artifacts)
         this.prevWaypointNavH = this.pathNavHeights[this.pathIndex] ?? 0;

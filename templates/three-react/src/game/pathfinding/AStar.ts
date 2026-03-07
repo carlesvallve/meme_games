@@ -5,8 +5,6 @@
 
 import type { NavGrid } from './NavGrid';
 
-console.log('[AStar] === MODULE LOADED ===');
-
 export interface WaypointMeta {
   ladderIndex: number | null;
   climbDirection?: 'up' | 'down';
@@ -183,7 +181,6 @@ export function findPath(
       const meta = reconstructMeta(cameFrom, cameViaLink, currentIdx, w, grid, gridPath);
 
       // String-pull: remove redundant waypoints where line-of-sight exists
-      console.log(`[AStar] found path, useStringPull=${useStringPull}, worldPath.length=${worldPath.length}`);
       const finalPath = useStringPull ? stringPull(grid, worldPath) : worldPath;
 
       return { found: true, path: finalPath, rawPath: worldPath, meta };
@@ -343,14 +340,6 @@ function reconstructMeta(
 function stringPull(grid: NavGrid, path: { x: number; z: number }[]): { x: number; z: number }[] {
   if (path.length <= 2) return path;
 
-  // Debug: log NavGrid cell heights for each waypoint
-  console.log('[stringPull] waypoint NavGrid heights:');
-  for (let i = 0; i < path.length; i++) {
-    const g = grid.worldToGrid(path[i].x, path[i].z);
-    const cell = grid.getCell(g.gx, g.gz);
-    console.log(`  wp[${i}] world=(${path[i].x.toFixed(2)},${path[i].z.toFixed(2)}) grid=(${g.gx},${g.gz}) navH=${cell ? cell.surfaceHeight.toFixed(3) : 'null'}`);
-  }
-
   const result: { x: number; z: number }[] = [path[0]];
   let current = 0;
 
@@ -361,15 +350,11 @@ function stringPull(grid: NavGrid, path: { x: number; z: number }[]): { x: numbe
     for (let i = current + 2; i < path.length; i++) {
       const fromG = grid.worldToGrid(path[current].x, path[current].z);
       const toG = grid.worldToGrid(path[i].x, path[i].z);
-      const los = grid.hasLineOfSight(fromG.gx, fromG.gz, toG.gx, toG.gz);
-      if (los) {
+      if (grid.hasLineOfSight(fromG.gx, fromG.gz, toG.gx, toG.gz)) {
         farthest = i;
       }
     }
 
-    if (farthest > current + 1) {
-      console.log(`[stringPull] collapsed wp[${current}] -> wp[${farthest}] (skipped ${farthest - current - 1})`);
-    }
     result.push(path[farthest]);
     current = farthest;
   }

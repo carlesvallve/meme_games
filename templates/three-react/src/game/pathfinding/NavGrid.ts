@@ -849,14 +849,8 @@ export class NavGrid {
     // (prevents string-pull from collapsing stair-to-ground transitions)
     const startC = this.getCell(gx1, gz1);
     const endC = this.getCell(gx2, gz2);
-    if (startC && endC) {
-      const hDiff = Math.abs(startC.surfaceHeight - endC.surfaceHeight);
-      if (hDiff > 0.1) {
-        console.log(`[LOS] (${gx1},${gz1}) h=${startC.surfaceHeight.toFixed(3)} -> (${gx2},${gz2}) h=${endC.surfaceHeight.toFixed(3)} diff=${hDiff.toFixed(3)} step=${this.stepHeight} => ${hDiff >= this.stepHeight - 0.01 ? 'BLOCKED' : 'pass'}`);
-      }
-      if (hDiff >= this.stepHeight - 0.01) {
-        return false;
-      }
+    if (startC && endC && Math.abs(startC.surfaceHeight - endC.surfaceHeight) >= this.stepHeight - 0.01) {
+      return false;
     }
 
     let x0 = gx1, z0 = gz1;
@@ -918,11 +912,7 @@ export class NavGrid {
       if (!cell || cell.blocked) return false;
 
       // Check consecutive height difference — must be strictly less than step height
-      const stepDiff = Math.abs(cell.surfaceHeight - prevCell!.surfaceHeight);
-      if (stepDiff > 0.1) {
-        console.log(`[LOS-walk] (${prevCell!.gx},${prevCell!.gz}) h=${prevCell!.surfaceHeight.toFixed(3)} -> (${cell.gx},${cell.gz}) h=${cell.surfaceHeight.toFixed(3)} diff=${stepDiff.toFixed(3)} step=${this.stepHeight} => ${stepDiff >= this.stepHeight - 0.01 ? 'BLOCKED' : 'pass'}`);
-      }
-      if (stepDiff >= this.stepHeight - 0.01) return false;
+      if (Math.abs(cell.surfaceHeight - prevCell!.surfaceHeight) >= this.stepHeight - 0.01) return false;
 
       // Check that the edge between prevCell and cell is actually passable
       // (prevents string-pull from cutting through stair sides)
