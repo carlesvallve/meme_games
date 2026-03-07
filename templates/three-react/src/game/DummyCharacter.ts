@@ -7,14 +7,15 @@ import type { AABBBox } from './pathfinding/NavGrid';
 import { findPath } from './pathfinding/AStar';
 import { resolveCollision, getSurfaceHeight } from './CollisionUtils';
 import { audioSystem } from './AudioSystem';
-
-const DEFAULT_TURN_SPEED = 12;
-const WAYPOINT_THRESHOLD = 0.3;
-const HOP_HEIGHT = 0.06;
-const FOOT_SFX_COOLDOWN = 0.12;
-const STEP_UP_RATE = 20; // exponential lerp rate for stepping up
-const GRAVITY = 60; // fall acceleration
-const MAX_FALL_SPEED = 30; // terminal velocity
+import {
+  DEFAULT_TURN_SPEED,
+  WAYPOINT_THRESHOLD,
+  HOP_HEIGHT,
+  FOOT_SFX_COOLDOWN,
+  STEP_UP_RATE,
+  GRAVITY,
+  MAX_FALL_SPEED,
+} from './GameConstants';
 
 export class DummyCharacter {
   readonly root: THREE.Group;

@@ -105,12 +105,7 @@ function heuristic(ax: number, az: number, bx: number, bz: number): number {
     : dx * SQRT2 + (dz - dx);
 }
 
-/** Cost multiplier for climbing up (ascending stairs). */
-const CLIMB_PENALTY = 2;
-/** Cost multiplier for any descent — strongly discourages leaving elevated paths. */
-const DESCENT_PENALTY = 12;
-/** Base cost for traversing a ladder nav-link. Strongly prefers ramps/flat but uses ladders when needed. */
-const LADDER_COST = 8;
+import { CLIMB_PENALTY, DESCENT_PENALTY, LADDER_COST } from '../GameConstants';
 
 export function findPath(
   grid: NavGrid,

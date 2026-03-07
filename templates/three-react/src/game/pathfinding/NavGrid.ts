@@ -170,51 +170,7 @@ export class NavGrid {
     }
 
     // 2. Compute per-edge passability
-    for (let gz = 0; gz < height; gz++) {
-      for (let gx = 0; gx < width; gx++) {
-        const cell = this.cells[gz * width + gx];
-        if (cell.blocked) continue;
-
-        let mask = 0;
-        for (let dir = 0; dir < 8; dir++) {
-          const ngx = gx + DIR_DGX[dir];
-          const ngz = gz + DIR_DGZ[dir];
-
-          if (ngx < 0 || ngx >= width || ngz < 0 || ngz >= height) continue;
-          const neighbor = this.cells[ngz * width + ngx];
-          if (neighbor.blocked) continue;
-
-          // Directional height check: going up uses stepUp, going down uses stepDown
-          const heightDiff = neighbor.surfaceHeight - cell.surfaceHeight;
-          if (heightDiff > stepUp + EPS) continue;   // too high to climb
-          if (-heightDiff > stepDown + EPS) continue; // too far to drop
-
-          // Diagonal: both adjacent cardinal neighbors must be passable from current cell
-          // (prevents corner-cutting through diagonal walls)
-          if (dir % 2 === 1) {
-            const [c1, c2] = DIAGONAL_CARDINALS[dir];
-            const n1gx = gx + DIR_DGX[c1];
-            const n1gz = gz + DIR_DGZ[c1];
-            const n2gx = gx + DIR_DGX[c2];
-            const n2gz = gz + DIR_DGZ[c2];
-
-            if (n1gx < 0 || n1gx >= width || n1gz < 0 || n1gz >= height) continue;
-            if (n2gx < 0 || n2gx >= width || n2gz < 0 || n2gz >= height) continue;
-
-            const adj1 = this.cells[n1gz * width + n1gx];
-            const adj2 = this.cells[n2gz * width + n2gx];
-            if (adj1.blocked || adj2.blocked) continue;
-            // Block diagonal if a cardinal neighbor is a wall ABOVE us (can't cut through walls).
-            // Drops below are fine — we're walking over a ledge, not through a wall.
-            if (adj1.surfaceHeight - cell.surfaceHeight > stepUp + EPS) continue;
-            if (adj2.surfaceHeight - cell.surfaceHeight > stepUp + EPS) continue;
-          }
-
-          mask |= 1 << dir;
-        }
-        cell.passable = mask;
-      }
-    }
+    this.computePassability(stepUp, stepDown);
 
     // 3. Post-pass: flood-fill from ground-level cells to find reachable elevated cells.
     //    Any elevated cell not reached by the flood is unreachable — mark blocked.
@@ -417,34 +373,54 @@ export class NavGrid {
 
   /** Recompute per-edge passability for all non-blocked cells. */
   private recomputePassability(): void {
+    this.computePassability(this.stepUp, this.stepDown);
+  }
+
+  /** Shared passability computation used by both build() and recomputePassability().
+   *  EPS tolerance is always applied for consistent floating-point boundary handling. */
+  private computePassability(stepUp: number, stepDown: number): void {
+    const EPS = 0.01;
     const { width, height } = this;
     for (let gz = 0; gz < height; gz++) {
       for (let gx = 0; gx < width; gx++) {
         const cell = this.cells[gz * width + gx];
         if (cell.blocked) continue;
+
         let mask = 0;
         for (let dir = 0; dir < 8; dir++) {
           const ngx = gx + DIR_DGX[dir];
           const ngz = gz + DIR_DGZ[dir];
+
           if (ngx < 0 || ngx >= width || ngz < 0 || ngz >= height) continue;
           const neighbor = this.cells[ngz * width + ngx];
           if (neighbor.blocked) continue;
-          const hDiff = neighbor.surfaceHeight - cell.surfaceHeight;
-          if (hDiff > this.stepUp) continue;
-          if (-hDiff > this.stepDown) continue;
+
+          // Directional height check: going up uses stepUp, going down uses stepDown
+          const heightDiff = neighbor.surfaceHeight - cell.surfaceHeight;
+          if (heightDiff > stepUp + EPS) continue;   // too high to climb
+          if (-heightDiff > stepDown + EPS) continue; // too far to drop
+
+          // Diagonal: both adjacent cardinal neighbors must be passable from current cell
+          // (prevents corner-cutting through diagonal walls)
           if (dir % 2 === 1) {
             const [c1, c2] = DIAGONAL_CARDINALS[dir];
-            const n1gx = gx + DIR_DGX[c1], n1gz = gz + DIR_DGZ[c1];
-            const n2gx = gx + DIR_DGX[c2], n2gz = gz + DIR_DGZ[c2];
+            const n1gx = gx + DIR_DGX[c1];
+            const n1gz = gz + DIR_DGZ[c1];
+            const n2gx = gx + DIR_DGX[c2];
+            const n2gz = gz + DIR_DGZ[c2];
+
             if (n1gx < 0 || n1gx >= width || n1gz < 0 || n1gz >= height) continue;
             if (n2gx < 0 || n2gx >= width || n2gz < 0 || n2gz >= height) continue;
+
             const adj1 = this.cells[n1gz * width + n1gx];
             const adj2 = this.cells[n2gz * width + n2gx];
             if (adj1.blocked || adj2.blocked) continue;
-            // Block diagonal if a cardinal neighbor is a wall ABOVE us
-            if (adj1.surfaceHeight - cell.surfaceHeight > this.stepUp) continue;
-            if (adj2.surfaceHeight - cell.surfaceHeight > this.stepUp) continue;
+            // Block diagonal if a cardinal neighbor is a wall ABOVE us (can't cut through walls).
+            // Drops below are fine — we're walking over a ledge, not through a wall.
+            if (adj1.surfaceHeight - cell.surfaceHeight > stepUp + EPS) continue;
+            if (adj2.surfaceHeight - cell.surfaceHeight > stepUp + EPS) continue;
           }
+
           mask |= 1 << dir;
         }
         cell.passable = mask;
