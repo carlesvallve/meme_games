@@ -362,6 +362,13 @@ export class DummyCharacter {
 
     // Build untrimmed waypoints (goal radius trim applied to final line, not waypoints)
     const waypoints: { x: number; z: number }[] = [{ x: pos.x, z: pos.z }];
+    // During climbing, pathIndex was incremented past the ladder waypoint.
+    // Re-include it so the line still goes through the ladder cell (just like
+    // it did before movement started, when pathIndex hadn't been incremented yet).
+    if (this.climbState && this.pathIndex >= 2 && this.pathIndex - 1 < this.path.length) {
+      const ladderWp = this.path[this.pathIndex - 1];
+      waypoints.push({ x: ladderWp.x, z: ladderWp.z });
+    }
     for (const wp of remaining) {
       waypoints.push({ x: wp.x, z: wp.z });
     }
@@ -633,7 +640,12 @@ export class DummyCharacter {
     if (this.climbState) {
       console.log(`[CLIMB] phase=${this.climbState.phase}, groundY=${this.groundY.toFixed(2)}, visualY=${this.visualGroundY.toFixed(2)}, posY=${this.root.position.y.toFixed(2)}, rung=${this.climbState.currentRung}/${this.climbState.rungCount}`);
     }
-    if (this.updateClimb(dt)) return;
+    if (this.updateClimb(dt)) {
+      if (this.debugPath && this.path.length > 0 && this.pathIndex < this.path.length) {
+        this.updatePathLine();
+      }
+      return;
+    }
 
     const pos = this.root.position;
 
