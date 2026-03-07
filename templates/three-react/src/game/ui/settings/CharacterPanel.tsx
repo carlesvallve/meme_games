@@ -9,8 +9,10 @@ export function CharacterPanel() {
   const speed = useGameStore((s) => s.charSpeed);
   const moveSpeed = useGameStore((s) => s.charMoveSpeed);
   const hop = useGameStore((s) => s.charHop);
-  const stepHeight = useGameStore((s) => s.charStepHeight);
-  const setStepHeight = useGameStore((s) => s.setCharStepHeight);
+  const stepUp = useGameStore((s) => s.charStepUp);
+  const setStepUp = useGameStore((s) => s.setCharStepUp);
+  const stepDown = useGameStore((s) => s.charStepDown);
+  const setStepDown = useGameStore((s) => s.setCharStepDown);
   const rotSpeed = useGameStore((s) => s.charRotSpeed);
   const setRotSpeed = useGameStore((s) => s.setCharRotSpeed);
   const gravity = useGameStore((s) => s.charGravity);
@@ -63,13 +65,22 @@ export function CharacterPanel() {
           onChange={setMoveSpeed}
         />
         <Slider
-          label='Step Height'
-          value={stepHeight}
+          label='Step Up'
+          value={stepUp}
           min={0}
           max={1.5}
           step={0.05}
           accent='#af6'
-          onChange={setStepHeight}
+          onChange={setStepUp}
+        />
+        <Slider
+          label='Step Down'
+          value={stepDown}
+          min={0}
+          max={3}
+          step={0.05}
+          accent='#af6'
+          onChange={setStepDown}
         />
         <Slider
           label='Rot Speed'
@@ -139,7 +150,8 @@ export function CharacterPanel() {
           charAnimation: 'Idle',
           charSpeed: 1,
           charMoveSpeed: 5,
-          charStepHeight: 0.5,
+          charStepUp: 0.5,
+          charStepDown: 1.0,
           charRotSpeed: 12,
           charGravity: 60,
           charHop: true,
