@@ -763,7 +763,11 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
           const runAnim = resolveAnim(model, 'Run') ?? resolveAnim(model, 'Walk');
           if (runAnim && model.getCurrentClip() !== runAnim) model.play(runAnim);
           model.setTimeScale(anim.moveSpeed);
-        } else if (anim.state === 'jump' || anim.state === 'climb') {
+        } else if (anim.state === 'climb') {
+          const idleAnim = resolveAnim(model, 'Idle') ?? 'Idle';
+          if (model.getCurrentClip() !== idleAnim) model.play(idleAnim, 0.1);
+          model.setRawTimeScale(store.charSpeed);
+        } else if (anim.state === 'jump') {
           const jumpAnim = resolveAnim(model, 'Jump');
           if (jumpAnim && model.getCurrentClip() !== jumpAnim) model.play(jumpAnim, 0.1);
           model.setTimeScale(anim.moveSpeed || moveSpeed);

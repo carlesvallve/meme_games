@@ -497,7 +497,7 @@ export class CharacterController {
             this.root.position.x,
             this.root.position.z,
           );
-          this.settleSpeed = speed;
+          this.settleSpeed = baseSpeed;
         }
         this.moveSpeed = 0;
         this.wasMoving = false;
@@ -556,7 +556,22 @@ export class CharacterController {
     {
       const oldG = this.navGrid.worldToGrid(oldX, oldZ);
       const newG = this.navGrid.worldToGrid(pos.x, pos.z);
-      if (oldG.gx !== newG.gx || oldG.gz !== newG.gz) {
+      const cellChanged = oldG.gx !== newG.gx || oldG.gz !== newG.gz;
+      // If blocked by wall (same cell), check for ladders in movement direction
+      if (!cellChanged && this.moveSpeed > 0 && !this.climbState) {
+        // Check the adjacent cell in movement direction for a wall
+        const adjGX = oldG.gx + Math.round(nx);
+        const adjGZ = oldG.gz + Math.round(nz);
+        const adjCell = this.navGrid.getCell(adjGX, adjGZ);
+        const oldCell = this.navGrid.getCell(oldG.gx, oldG.gz);
+        const oldH = oldCell ? oldCell.surfaceHeight : 0;
+        const adjH = adjCell ? adjCell.surfaceHeight : 0;
+        // Only try ladder if the adjacent cell is actually a wall (too high to step up)
+        if (adjH - oldH > this.stepUp) {
+          this.tryAutoLadder(nx, nz, oldG.gx, oldG.gz);
+        }
+      }
+      if (cellChanged) {
         const oldCell = this.navGrid.getCell(oldG.gx, oldG.gz);
         const newCell = this.navGrid.getCell(newG.gx, newG.gz);
         const oldH = oldCell ? oldCell.surfaceHeight : 0;
@@ -785,7 +800,7 @@ export class CharacterController {
 
       const isLast = this.pathIndex >= this.path.length - 1;
       // Tighter threshold at waypoints with significant height drops to avoid skipping
-      let reach = isLast ? 0.05 : WAYPOINT_THRESHOLD;
+      let reach = isLast ? 0.15 : WAYPOINT_THRESHOLD;
       if (!isLast && this.pathNavHeights.length > 0) {
         const curH = this.pathNavHeights[this.pathIndex] ?? 0;
         const prevH = this.pathNavHeights[this.pathIndex - 1] ?? curH;
@@ -890,33 +905,17 @@ export class CharacterController {
         // toward the waypoint. This prevents groundY from jumping when the grid cell
         // changes, keeping it in sync with visual movement (like free movement does).
         // For drops and flat segments, use the cell-based approach.
-        if (Math.abs(heightDiff) <= this.stepUp) {
-          const target = this.path[this.pathIndex];
-          const prevWp = this.pathIndex > 1 ? this.path[this.pathIndex - 1] : null;
-          if (prevWp) {
-            const totalDx = target.x - prevWp.x;
-            const totalDz = target.z - prevWp.z;
-            const totalDist = Math.sqrt(totalDx * totalDx + totalDz * totalDz);
-            const currDx = pos.x - prevWp.x;
-            const currDz = pos.z - prevWp.z;
-            const currDist = Math.sqrt(currDx * currDx + currDz * currDz);
-            const rawT = totalDist > 0.001 ? Math.min(currDist / totalDist, 1) : 0;
-            // Start rising when close enough that we'll arrive within ~0.15s
-            // at current speed. This works for any speed.
-            const riseDistance = speed * 0.15;
-            const remaining = totalDist * (1 - rawT);
-            const t = remaining > riseDistance ? 0 : 1 - remaining / riseDistance;
-            this.groundY = this.prevWaypointNavH + heightDiff * t;
-          } else {
-            this.groundY = this.prevWaypointNavH;
-          }
+        const g = this.navGrid.worldToGrid(pos.x, pos.z);
+        const navCell = this.navGrid.getCell(g.gx, g.gz);
+        const cellH = navCell ? navCell.surfaceHeight : 0;
+        // Floor: never drop below the minimum of prev/target waypoint heights.
+        const minWaypointH = Math.min(this.prevWaypointNavH, targetNavH);
+        // Ceiling: only cap when heading DOWN — prevents groundY from rising
+        // back above the terrace we just left. Don't cap when heading up.
+        if (targetNavH < this.prevWaypointNavH) {
+          this.groundY = Math.min(Math.max(cellH, minWaypointH), this.prevWaypointNavH);
         } else {
-          const g = this.navGrid.worldToGrid(pos.x, pos.z);
-          const navCell = this.navGrid.getCell(g.gx, g.gz);
-          const cellH = navCell ? navCell.surfaceHeight : 0;
-          const minWaypointH = Math.min(this.prevWaypointNavH, targetNavH);
-          const maxWaypointH = this.prevWaypointNavH;
-          this.groundY = Math.min(Math.max(cellH, minWaypointH), maxWaypointH);
+          this.groundY = Math.max(cellH, minWaypointH);
         }
       } else {
         const surfaceY = getSurfaceHeight(
