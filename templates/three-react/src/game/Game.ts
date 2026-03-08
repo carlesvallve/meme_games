@@ -28,9 +28,8 @@ import {
   createDustMotes,
   createRainEffect,
   createDebrisEffect,
-  createFireworkBurst,
 } from '../utils/particles';
-import { createTextLabel } from './rendering/TextLabel';
+import { DestructionSystem } from './DestructionSystem';
 import { NavGrid } from './pathfinding/NavGrid';
 import { CharacterController } from './CharacterController';
 import { GridOverlay } from './GridOverlay';
@@ -38,6 +37,7 @@ import { ObstacleGenerator } from './ObstacleGenerator';
 import { LadderSystem } from './LadderSystem';
 import { LadderGenerator } from './LadderGenerator';
 import { audioSystem } from './AudioSystem';
+import { audioSystem as sfxAudio } from '../utils/AudioSystem';
 import {
   WORLD_SIZE,
   GROUND_COLOR,
@@ -244,8 +244,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   }
 
   function clearObstacles(): void {
-    clearDestroyTarget();
-    if (destroyBurst) { scene.remove(destroyBurst.group); destroyBurst.dispose(); destroyBurst = null; }
+    destruction.cancelTarget();
     obstacleGen.clear();
     ladderSystem.clear();
     const { charStepUp, charStepDown } = useGameStore.getState();
@@ -498,27 +497,8 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   );
   prevToggles = { ...useGameStore.getState().particleToggles };
 
-  // ── Obstacle destruction state ──────────────────────────────────────
-  let destroyTargetIdx = -1;
-  let destroyHighlight: THREE.LineSegments | null = null;
-  let destroyLabel: THREE.Sprite | null = null;
-  let destroyBurst: ReturnType<typeof createFireworkBurst> | null = null;
-
-  function clearDestroyTarget(): void {
-    destroyTargetIdx = -1;
-    if (destroyHighlight) {
-      scene.remove(destroyHighlight);
-      destroyHighlight.geometry.dispose();
-      (destroyHighlight.material as THREE.Material).dispose();
-      destroyHighlight = null;
-    }
-    if (destroyLabel) {
-      scene.remove(destroyLabel);
-      (destroyLabel.material as THREE.SpriteMaterial).map?.dispose();
-      destroyLabel.material.dispose();
-      destroyLabel = null;
-    }
-  }
+  // ── Obstacle destruction ────────────────────────────────────────────
+  const destruction = new DestructionSystem(scene);
 
   // ── Sun debug helper ────────────────────────────────────────────────
   let sunDebugHelper: THREE.Group | null = null;
@@ -699,6 +679,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     const pos = character.getPosition();
     cam.setTarget(pos.x, pos.y, pos.z);
     cam.setCharacterState(character.getFacingAngle(), character.getIsMoving());
+    sfxAudio.setPlayerPosition(pos.x, pos.z);
 
     // TAB: snap camera behind character
     if (inp.cameraSnap) {
@@ -707,80 +688,26 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
 
     // ── SPACE: obstacle destruction ────────────────────────────────────
     if (inp.attack && obstacleGen.isMerged) {
-      if (destroyTargetIdx >= 0) {
-        // Second press: destroy the targeted obstacle
-        const info = obstacleGen.destroyObstacle(destroyTargetIdx);
-        if (info) {
-          // Particle burst at obstacle center
-          const burstY = info.height * 0.5;
-          destroyBurst = createFireworkBurst({
-            origin: new THREE.Vector3(info.x, burstY, info.z),
-            count: 40,
-            speed: 4,
-            size: 0.08,
-            color: obstacleGen.colors[destroyTargetIdx] ?? 0xffaa00,
-          });
-          scene.add(destroyBurst.group);
-          cam.shake(0.15, 0.2);
-
-          // Replace obstacle with zero-height copy so navGrid treats it as passable
-          const old = obstacleGen.obstacles[destroyTargetIdx];
-          obstacleGen.obstacles[destroyTargetIdx] = { ...old, height: 0 };
+      if (destruction.hasTarget) {
+        if (destruction.confirmDestroy(obstacleGen, ladderSystem, cam)) {
           rebuildAfterGeneration();
         }
-        clearDestroyTarget();
       } else {
-        // First press: find obstacle in front of character and highlight it
         const cPos = character.getPosition();
         const angle = character.getFacingAngle();
         const probeX = cPos.x + Math.sin(angle) * gridCellSize;
         const probeZ = cPos.z + Math.cos(angle) * gridCellSize;
-        const idx = obstacleGen.getObstacleAt(probeX, probeZ);
-        if (idx >= 0) {
-          destroyTargetIdx = idx;
-          const obs = obstacleGen.obstacles[idx];
-
-          // Wireframe highlight box
-          const hw = obs.halfW + 0.02;
-          const hd = obs.halfD + 0.02;
-          const h = obs.height + 0.02;
-          const hlGeo = new THREE.BoxGeometry(hw * 2, h, hd * 2);
-          const hlMat = new THREE.LineBasicMaterial({ color: 0xff4444, linewidth: 2, transparent: true, opacity: 0.9 });
-          const edges = new THREE.EdgesGeometry(hlGeo);
-          hlGeo.dispose();
-          destroyHighlight = new THREE.LineSegments(edges, hlMat);
-          destroyHighlight.position.set(obs.x, h / 2, obs.z);
-          scene.add(destroyHighlight);
-
-          // Floating label
-          destroyLabel = createTextLabel('DESTROY', {
-            color: '#ff4444',
-            outlineColor: 'rgba(0,0,0,0.9)',
-            outlineWidth: 4,
-            fontSize: 36,
-            height: 0.35,
-          });
-          destroyLabel.position.set(obs.x, obs.height + 0.5, obs.z);
-          scene.add(destroyLabel);
-        }
+        destruction.tryTarget(obstacleGen, probeX, probeZ);
       }
     }
 
     // Clear destroy target if character moves
-    if (destroyTargetIdx >= 0 && (dx !== 0 || dz !== 0)) {
-      clearDestroyTarget();
+    if (destruction.hasTarget && (dx !== 0 || dz !== 0)) {
+      destruction.cancelTarget();
     }
 
-    // Update destroy burst particles
-    if (destroyBurst) {
-      destroyBurst.update(dt);
-    }
-
-    // Animate destroy highlight (pulse)
-    if (destroyHighlight) {
-      const pulse = 0.7 + Math.sin(performance.now() * 0.008) * 0.3;
-      (destroyHighlight.material as THREE.LineBasicMaterial).opacity = pulse;
-    }
+    // Update destruction (debris physics, highlight pulse, label bob)
+    destruction.update(dt);
 
     // ── Torch ─────────────────────────────────────────────────────────
     if (store.torchEnabled) {
@@ -905,6 +832,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       // Obstacles & ladders
       clearObstacles();
       ladderSystem.dispose();
+      destruction.dispose();
 
       // Ground
       scene.remove(ground);

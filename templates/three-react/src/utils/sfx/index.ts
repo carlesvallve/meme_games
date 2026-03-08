@@ -9,3 +9,4 @@ export { sfxPickup } from './pickup';
 export { sfxCoin } from './coin';
 export { sfxChest } from './chest';
 export { sfxThud } from './thud';
+export { sfxStoneBreak } from './stoneBreak';

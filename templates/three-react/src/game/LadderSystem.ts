@@ -10,6 +10,7 @@ import {
   LADDER_COST,
 } from './GameConstants';
 import { patchWorldRevealMaterial } from './shaders/WorldReveal';
+import { MergedMesh } from './MergedMesh';
 
 export interface LadderDef {
   /** Ladder mesh midpoint */
@@ -42,6 +43,7 @@ export class LadderSystem {
   private meshes: THREE.Group[] = [];
   private mat: THREE.MeshStandardMaterial;
   private cellSize = 0.5;
+  private merged = new MergedMesh();
 
   constructor(private scene: THREE.Scene) {
     this.mat = new THREE.MeshStandardMaterial({
@@ -163,73 +165,41 @@ export class LadderSystem {
     this.meshes.push(group);
   }
 
+  get isMerged(): boolean { return this.merged.isMerged; }
+
   /** Merge all ladder groups into a single mesh with vertex colors. */
   mergeMeshes(): void {
-    const allMeshes: THREE.Mesh[] = [];
-    for (const group of this.meshes) {
-      group.updateMatrixWorld(true);
-      group.traverse((child) => {
-        if ((child as THREE.Mesh).isMesh) allMeshes.push(child as THREE.Mesh);
-      });
-    }
-    if (allMeshes.length < 2) return;
-
-    const positions: number[] = [];
-    const normals: number[] = [];
-    const colors: number[] = [];
-
-    for (const mesh of allMeshes) {
-      let geo = mesh.geometry.index ? mesh.geometry.toNonIndexed() : mesh.geometry.clone();
-      geo.applyMatrix4(mesh.matrixWorld);
-
-      const pos = geo.getAttribute('position') as THREE.BufferAttribute;
-      const nrm = geo.getAttribute('normal') as THREE.BufferAttribute;
-      const mat = mesh.material as THREE.MeshStandardMaterial;
-      const c = mat.color;
-
-      for (let i = 0; i < pos.count; i++) {
-        positions.push(pos.getX(i), pos.getY(i), pos.getZ(i));
-        normals.push(nrm.getX(i), nrm.getY(i), nrm.getZ(i));
-        colors.push(c.r, c.g, c.b);
-      }
-      geo.dispose();
-    }
-
-    const mergedGeo = new THREE.BufferGeometry();
-    mergedGeo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    mergedGeo.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
-    mergedGeo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-
-    const mergedMat = new THREE.MeshStandardMaterial({
-      vertexColors: true,
-      roughness: 0.8,
-      metalness: 0.1,
+    const wrapper = this.merged.merge(this.meshes, this.scene, {
+      roughness: 0.8, metalness: 0.1,
     });
-    patchWorldRevealMaterial(mergedMat);
+    this.meshes = wrapper ? [wrapper] : [];
+  }
 
-    const mergedMesh = new THREE.Mesh(mergedGeo, mergedMat);
-    mergedMesh.castShadow = true;
+  /** Destroy a ladder by index. Returns the ladder def, or null if invalid. */
+  destroyLadder(index: number): LadderDef | null {
+    if (!this.merged.destroy(index)) return null;
+    return this.ladders[index];
+  }
 
-    // Dispose originals
-    for (const group of this.meshes) {
-      group.traverse((child) => {
-        if ((child as THREE.Mesh).isMesh) {
-          (child as THREE.Mesh).geometry.dispose();
-        }
-      });
-      this.scene.remove(group);
+  /** Find all ladder indices whose high cell falls within the given obstacle footprint. */
+  findLaddersOnObstacle(obsX: number, obsZ: number, halfW: number, halfD: number): number[] {
+    const EPS = 0.01;
+    const result: number[] = [];
+    for (let i = 0; i < this.ladders.length; i++) {
+      if (this.merged.isDestroyed(i)) continue;
+      const ld = this.ladders[i];
+      if (
+        Math.abs(ld.highWorldX - obsX) < halfW + EPS &&
+        Math.abs(ld.highWorldZ - obsZ) < halfD + EPS
+      ) {
+        result.push(i);
+      }
     }
-
-    this.scene.add(mergedMesh);
-    // Wrap in group so existing code patterns work
-    const wrapper = new THREE.Group();
-    this.scene.remove(mergedMesh);
-    wrapper.add(mergedMesh);
-    this.scene.add(wrapper);
-    this.meshes = [wrapper];
+    return result;
   }
 
   clear(): void {
+    this.merged.clear(this.scene);
     for (const group of this.meshes) {
       this.scene.remove(group);
       group.traverse((child) => {

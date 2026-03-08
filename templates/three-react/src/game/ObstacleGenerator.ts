@@ -3,15 +3,13 @@ import type { AABBBox } from './pathfinding/NavGrid';
 import { WORLD_SIZE, EARTHY_COLORS } from './GameConstants';
 import { patchWorldRevealMaterial } from './shaders/WorldReveal';
 import { useGameStore } from '../store';
+import { MergedMesh } from './MergedMesh';
 
 export class ObstacleGenerator {
   obstacles: AABBBox[] = [];
   colors: number[] = [];
   meshes: THREE.Mesh[] = [];
-  /** After merge: vertex start index per obstacle (parallel to obstacles[]) */
-  private vertexRanges: { start: number; count: number }[] = [];
-  /** Set of destroyed obstacle indices */
-  private destroyed = new Set<number>();
+  private merged = new MergedMesh();
 
   constructor(private scene: THREE.Scene) {}
 
@@ -478,97 +476,24 @@ export class ObstacleGenerator {
     }
   }
 
-  /** Merge all individual box meshes into a single mesh with vertex colors.
-   *  Tracks per-obstacle vertex ranges so individual obstacles can be destroyed later. */
+  /** Merge all individual box meshes into a single mesh with vertex colors. */
   mergeMeshes(): void {
-    if (this.meshes.length < 2) return;
-
-    const positions: number[] = [];
-    const normals: number[] = [];
-    const vertColors: number[] = [];
-    this.vertexRanges = [];
-    this.destroyed.clear();
-
-    for (let i = 0; i < this.meshes.length; i++) {
-      const mesh = this.meshes[i];
-      const start = positions.length / 3;
-
-      let geo = mesh.geometry.index ? mesh.geometry.toNonIndexed() : mesh.geometry.clone();
-      const m = new THREE.Matrix4().makeTranslation(mesh.position.x, mesh.position.y, mesh.position.z);
-      geo.applyMatrix4(m);
-
-      const pos = geo.getAttribute('position') as THREE.BufferAttribute;
-      const nrm = geo.getAttribute('normal') as THREE.BufferAttribute;
-      const mat = mesh.material as THREE.MeshStandardMaterial;
-      const c = mat.color;
-
-      for (let v = 0; v < pos.count; v++) {
-        positions.push(pos.getX(v), pos.getY(v), pos.getZ(v));
-        normals.push(nrm.getX(v), nrm.getY(v), nrm.getZ(v));
-        vertColors.push(c.r, c.g, c.b);
-      }
-
-      this.vertexRanges.push({ start, count: pos.count });
-      geo.dispose();
-    }
-
-    const mergedGeo = new THREE.BufferGeometry();
-    mergedGeo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    mergedGeo.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
-    mergedGeo.setAttribute('color', new THREE.Float32BufferAttribute(vertColors, 3));
-
-    const mergedMat = new THREE.MeshStandardMaterial({
-      vertexColors: true,
-      roughness: 0.85,
-      metalness: 0.05,
+    const wrapper = this.merged.merge(this.meshes, this.scene, {
+      roughness: 0.85, metalness: 0.05, receiveShadow: true,
     });
-    patchWorldRevealMaterial(mergedMat);
-
-    const mergedMesh = new THREE.Mesh(mergedGeo, mergedMat);
-    mergedMesh.castShadow = true;
-    mergedMesh.receiveShadow = true;
-
-    // Dispose originals
-    for (const mesh of this.meshes) {
-      this.scene.remove(mesh);
-      mesh.geometry.dispose();
-      (mesh.material as THREE.Material).dispose();
-    }
-
-    this.scene.add(mergedMesh);
-    this.meshes = [mergedMesh];
+    this.meshes = wrapper ? [wrapper.children[0] as THREE.Mesh] : [];
   }
 
-  /** Whether the mesh has been merged (destruction API available). */
-  get isMerged(): boolean {
-    return this.vertexRanges.length > 0;
-  }
+  get isMerged(): boolean { return this.merged.isMerged; }
 
-  /** Destroy an obstacle by index — zeroes its vertices in the merged buffer.
-   *  Returns the obstacle's world position + dimensions, or null if already destroyed / not merged. */
+  /** Destroy an obstacle by index — zeroes its vertices in the merged buffer. */
   destroyObstacle(index: number): { x: number; z: number; height: number; halfW: number; halfD: number } | null {
-    if (!this.isMerged || index < 0 || index >= this.vertexRanges.length) return null;
-    if (this.destroyed.has(index)) return null;
-    this.destroyed.add(index);
-
-    const range = this.vertexRanges[index];
-    const mergedMesh = this.meshes[0];
-    const posAttr = mergedMesh.geometry.getAttribute('position') as THREE.BufferAttribute;
-
-    // Zero out all vertices for this obstacle (degenerate triangles — GPU culls them)
-    for (let v = range.start; v < range.start + range.count; v++) {
-      posAttr.setXYZ(v, 0, 0, 0);
-    }
-    posAttr.needsUpdate = true;
-
+    if (!this.merged.destroy(index)) return null;
     const obs = this.obstacles[index];
     return { x: obs.x, z: obs.z, height: obs.height, halfW: obs.halfW, halfD: obs.halfD };
   }
 
-  /** Check if obstacle at index has been destroyed. */
-  isDestroyed(index: number): boolean {
-    return this.destroyed.has(index);
-  }
+  isDestroyed(index: number): boolean { return this.merged.isDestroyed(index); }
 
   /** Find obstacle index at a world XZ position (topmost). Returns -1 if none. */
   getObstacleAt(wx: number, wz: number): number {
@@ -576,7 +501,7 @@ export class ObstacleGenerator {
     let bestIdx = -1;
     let bestH = -1;
     for (let i = 0; i < this.obstacles.length; i++) {
-      if (this.destroyed.has(i)) continue;
+      if (this.merged.isDestroyed(i)) continue;
       const box = this.obstacles[i];
       if (
         Math.abs(wx - box.x) < box.halfW + EPS &&
@@ -592,6 +517,7 @@ export class ObstacleGenerator {
 
   /** Dispose meshes and reset arrays */
   clear(): void {
+    this.merged.clear(this.scene);
     for (const mesh of this.meshes) {
       this.scene.remove(mesh);
       mesh.geometry.dispose();
@@ -600,7 +526,5 @@ export class ObstacleGenerator {
     this.meshes = [];
     this.obstacles = [];
     this.colors = [];
-    this.vertexRanges = [];
-    this.destroyed.clear();
   }
 }

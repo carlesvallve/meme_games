@@ -23,6 +23,7 @@ import { sfxDeathJingle } from './sfx/deathJingle';
 import { sfxUISelect, sfxUIAccept, sfxUICancel } from './sfx/uiSelect';
 import { sfxGem } from './sfx/gem';
 import { sfxClank } from './sfx/clank';
+import { sfxStoneBreak } from './sfx/stoneBreak';
 
 /**
  * Spatial audio attenuation
@@ -160,6 +161,7 @@ class AudioSystemClass {
         case 'uiAccept':     sfxUIAccept(ctx, dest); break;
         case 'uiCancel':     sfxUICancel(ctx, dest); break;
         case 'clank':        sfxClank(ctx, dest); break;
+        case 'stoneBreak':   sfxStoneBreak(ctx, dest); break;
         default:             playTone(ctx, 440, 0.1, 'sine', 0.08); break;
       }
     } catch {
