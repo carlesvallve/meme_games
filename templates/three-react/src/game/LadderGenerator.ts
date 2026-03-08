@@ -93,7 +93,7 @@ export class LadderGenerator {
         const cx = idx % w;
         const cz = Math.floor(idx / w);
         const ch = navGrid.getCell(cx, cz)!.surfaceHeight;
-        for (const [dx, dz] of [[0, -1], [1, 0], [0, 1], [-1, 0]]) {
+        for (const [dx, dz] of [[0,-1],[1,-1],[1,0],[1,1],[0,1],[-1,1],[-1,0],[-1,-1]]) {
           const nx = cx + dx, nz = cz + dz;
           if (nx < 0 || nx >= w || nz < 0 || nz >= h) continue;
           const nIdx = nz * w + nx;

@@ -424,8 +424,8 @@ export class NavGrid {
 
       // Also check all 8 neighbors by direct height difference — this catches
       // blocked cells that have passable=0 but are within step range (same terrace).
-      // Only check cardinal directions to avoid corner-cutting issues.
-      for (let dir = 0; dir < 8; dir += 2) {
+      // Includes diagonals with corner-cutting guards (both cardinal neighbors must be reachable).
+      for (let dir = 0; dir < 8; dir++) {
         const ngx = cgx + DIR_DGX[dir];
         const ngz = cgz + DIR_DGZ[dir];
         if (ngx < 0 || ngx >= width || ngz < 0 || ngz >= height) continue;
@@ -439,6 +439,20 @@ export class NavGrid {
         const heightDiff = neighbor.surfaceHeight - cell.surfaceHeight;
         if (heightDiff > stepUp + EPS) continue;   // too high to reach
         if (-heightDiff > stepDown + EPS) continue; // too far below
+
+        // Diagonal: both adjacent cardinal neighbors must be reachable and within step range
+        if (dir % 2 === 1) {
+          const [c1, c2] = DIAGONAL_CARDINALS[dir];
+          const a1x = cgx + DIR_DGX[c1], a1z = cgz + DIR_DGZ[c1];
+          const a2x = cgx + DIR_DGX[c2], a2z = cgz + DIR_DGZ[c2];
+          if (a1x < 0 || a1x >= width || a1z < 0 || a1z >= height) continue;
+          if (a2x < 0 || a2x >= width || a2z < 0 || a2z >= height) continue;
+          const adj1 = this.cells[a1z * width + a1x];
+          const adj2 = this.cells[a2z * width + a2x];
+          // Block diagonal if either cardinal neighbor is a wall above us
+          if (adj1.blocked && adj1.surfaceHeight - cell.surfaceHeight > stepUp + EPS) continue;
+          if (adj2.blocked && adj2.surfaceHeight - cell.surfaceHeight > stepUp + EPS) continue;
+        }
 
         // Unblock and enqueue — the flood will spread from here to more terrace cells
         neighbor.blocked = false;

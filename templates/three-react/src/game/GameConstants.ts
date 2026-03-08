@@ -21,10 +21,10 @@ export const MAX_FALL_SPEED = 30; // terminal velocity
 // ── Pathfinding (AStar.ts) ───────────────────────────────────────────
 /** Cost multiplier for climbing up (ascending stairs). Keep low so stairs ≈ 1 cell cost. */
 export const CLIMB_PENALTY = 0.5;
-/** Cost multiplier for descent — slight preference for staying elevated. */
-export const DESCENT_PENALTY = 0.5;
-/** Per-vertical-cell cost multiplier for ladder nav-links. Slightly above 1 so A* prefers stairs when both exist. */
-export const LADDER_COST = 1.2;
+/** Cost multiplier for descent — prefer staying elevated over dropping down. */
+export const DESCENT_PENALTY = 3.0;
+/** Per-vertical-cell cost multiplier for ladder nav-links. Moderate so ladders are usable but slightly costlier than flat walking. */
+export const LADDER_COST = 3;
 
 // ── Ladder / Climbing ────────────────────────────────────────────────
 export const LADDER_COLOR = 0x8B6914; // wood brown
