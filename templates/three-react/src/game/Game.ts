@@ -42,10 +42,7 @@ import {
   WORLD_SIZE,
   GROUND_COLOR,
   CAPSULE_RADIUS,
-  RING_STROKE,
-  MARKER_SNAP_SPEED,
   GOAL_DRAG_THRESHOLD,
-  MARKER_FADE_DURATION,
 } from './GameConstants';
 
 // ── Particle helpers ─────────────────────────────────────────────────
@@ -258,9 +255,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     rebuildWorld();
     character.setNavGrid(navGrid); // clears path + path line + label
     // Hide goal marker
-    markerMat.opacity = 0;
-    markerFade = 0;
-    markerSnapTarget = null;
+    pathLine.hideMarker();
   }
 
   let prevStepUp = useGameStore.getState().charStepUp;
@@ -290,13 +285,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     rebuildWorld();
     character.setNavGrid(navGrid);
 
-    // Rebuild click marker to match new cell size
-    if (gridCellSize !== markerCellSize) {
-      clickMarker.geometry.dispose();
-      markerGeo = createMarkerGeo(gridCellSize);
-      clickMarker.geometry = markerGeo;
-      markerCellSize = gridCellSize;
-    }
+    // PathLineRenderer handles marker resize internally via ensureMarker(cellSize)
   }
 
   // ── Torch light ──────────────────────────────────────────────────────
@@ -305,27 +294,8 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   torchLight.visible = false;
   scene.add(torchLight);
 
-  // Click marker ring — sized to match grid cell, stroke matches debug line width
-  let markerCellSize = gridCellSize;
-  function createMarkerGeo(cellSize: number): THREE.RingGeometry {
-    const outer = cellSize * 0.45;
-    const inner = outer - RING_STROKE;
-    const geo = new THREE.RingGeometry(inner, outer, 32);
-    geo.rotateX(-Math.PI / 2);
-    return geo;
-  }
-  let markerGeo = createMarkerGeo(gridCellSize);
-  const markerMat = new THREE.MeshBasicMaterial({
-    color: 0xffff44,
-    transparent: true,
-    opacity: 0,
-  });
-  const clickMarker = new THREE.Mesh(markerGeo, markerMat);
-  clickMarker.position.y = 0.05;
-  scene.add(clickMarker);
-  let markerFade = 0;
-  // Smooth snap: marker lerps to snapped grid position on mouse release
-  let markerSnapTarget: { x: number; z: number } | null = null;
+  // Goal marker is managed by the character's PathLineRenderer
+  const pathLine = character.getPathLine();
 
   // Raycaster for click-to-move
   const groundRaycaster = new THREE.Raycaster();
@@ -381,27 +351,21 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
         mx = snapped.x;
         mz = snapped.z;
       }
-      const outerRadius = gridCellSize * 0.45 - RING_STROKE * 0.5;
       if (
         character.goTo(
           hit.x,
           hit.z,
           useGameStore.getState().charMoveSpeed,
-          outerRadius,
+          pathLine.getMarkerRadius(),
           isDrag,
         )
       ) {
-        const markerY = hit.y + 0.05;
         // During drag in grid modes: show marker at raw mouse pos, snap on release
         if (isDrag && isGrid && goalPointerDown) {
-          clickMarker.position.set(hit.x, markerY, hit.z);
-          markerSnapTarget = { x: mx, z: mz };
+          pathLine.showMarkerWithSnap(hit.x, hit.z, mx, mz, hit.y, gridCellSize);
         } else {
-          clickMarker.position.set(mx, markerY, mz);
-          markerSnapTarget = null;
+          pathLine.showMarker(mx, hit.y, mz, gridCellSize);
         }
-        markerMat.opacity = 1;
-        markerFade = -1;
       }
     }
   }
@@ -452,7 +416,6 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     if (!goalPointerMoved && !goalFiredOnDown) {
       tryGoTo(e.clientX, e.clientY);
     }
-    // markerSnapTarget was set during drag — tick loop will lerp it
     goalPointerDown = false;
     goalPointerId = -1;
   };
@@ -714,36 +677,10 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       torchLight.visible = false;
     }
 
-    // Smooth-snap marker to grid position after drag release
-    if (markerSnapTarget && !goalPointerDown) {
-      const dx = markerSnapTarget.x - clickMarker.position.x;
-      const dz = markerSnapTarget.z - clickMarker.position.z;
-      const dist = Math.sqrt(dx * dx + dz * dz);
-      if (dist < 0.01) {
-        clickMarker.position.x = markerSnapTarget.x;
-        clickMarker.position.z = markerSnapTarget.z;
-        markerSnapTarget = null;
-      } else {
-        const t = 1 - Math.exp(-MARKER_SNAP_SPEED * dt);
-        clickMarker.position.x += dx * t;
-        clickMarker.position.z += dz * t;
-      }
-    }
-    // Path line endpoint tracks marker position (smooth during drag + snap)
-    if (markerSnapTarget || goalPointerDown) {
-      character.setPathLineEndpoint(
-        clickMarker.position.x,
-        clickMarker.position.z,
-      );
-    }
-
-    // Click marker fade — start fading when path completes
-    if (markerFade === -1 && !character.isPathActive()) {
-      markerFade = MARKER_FADE_DURATION; // start fade-out
-    }
-    if (markerFade > 0) {
-      markerFade -= dt;
-      markerMat.opacity = Math.max(0, markerFade / MARKER_FADE_DURATION);
+    // Update goal marker (snap lerp + fade) — returns true when marker is animating
+    if (pathLine.updateMarker(dt, character.isPathActive(), goalPointerDown)) {
+      const mPos = pathLine.getMarkerPosition();
+      if (mPos) character.setPathLineEndpoint(mPos.x, mPos.z);
     }
 
     // World reveal animation
@@ -808,9 +745,6 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       canvas.removeEventListener('touchstart', onTouchStartGoal);
       scene.remove(character.root);
       character.dispose();
-      scene.remove(clickMarker);
-      markerGeo.dispose();
-      markerMat.dispose();
 
       // Obstacles & ladders
       clearObstacles();

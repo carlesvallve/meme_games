@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import { Line2 } from 'three/examples/jsm/lines/Line2.js';
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js';
-import { createTextLabel, updateTextLabel } from './TextLabel';
+import { createTextLabel, updateTextLabel } from '../rendering/TextLabel';
+import { RING_STROKE, MARKER_FADE_DURATION, MARKER_SNAP_SPEED } from '../GameConstants';
 
 export interface PathLineUpdateOpts {
   charPos: THREE.Vector3;
@@ -33,6 +34,13 @@ export class PathLineRenderer {
   // Distance label
   private distLabel: THREE.Sprite | null = null;
   private prevDistText = '';
+
+  // Goal marker (ring)
+  private marker: THREE.Mesh | null = null;
+  private markerMat: THREE.MeshBasicMaterial | null = null;
+  private markerFade = 0; // -1 = visible, >0 = fading out, 0 = hidden
+  private markerSnapTarget: { x: number; z: number } | null = null;
+  private markerCellSize = 0;
 
   setScene(scene: THREE.Scene | null): void {
     // Clean up old label from previous scene
@@ -188,6 +196,104 @@ export class PathLineRenderer {
     this.hideDistLabel();
   }
 
+  // ── Goal marker (ring) ──────────────────────────────────────────────
+
+  /** Ensure the marker ring mesh exists and matches the current cell size. */
+  private ensureMarker(cellSize: number): void {
+    if (!this.scene) return;
+    if (this.marker && this.markerCellSize === cellSize) return;
+    // Dispose old
+    if (this.marker) {
+      this.scene.remove(this.marker);
+      this.marker.geometry.dispose();
+      this.markerMat?.dispose();
+    }
+    const outer = cellSize * 0.45;
+    const inner = outer - RING_STROKE;
+    const geo = new THREE.RingGeometry(inner, outer, 32);
+    geo.rotateX(-Math.PI / 2);
+    this.markerMat = new THREE.MeshBasicMaterial({
+      color: 0xffff44,
+      transparent: true,
+      opacity: 0,
+    });
+    this.marker = new THREE.Mesh(geo, this.markerMat);
+    this.marker.position.y = 0.05;
+    this.scene.add(this.marker);
+    this.markerCellSize = cellSize;
+  }
+
+  /** Show the marker at a position. Call when a path is set. */
+  showMarker(x: number, y: number, z: number, cellSize: number): void {
+    this.ensureMarker(cellSize);
+    if (!this.marker || !this.markerMat) return;
+    this.marker.position.set(x, y + 0.05, z);
+    this.markerMat.opacity = 1;
+    this.markerFade = -1;
+    this.markerSnapTarget = null;
+  }
+
+  /** Show marker at raw position but set a snap target to lerp toward. */
+  showMarkerWithSnap(rawX: number, rawZ: number, snapX: number, snapZ: number, y: number, cellSize: number): void {
+    this.ensureMarker(cellSize);
+    if (!this.marker || !this.markerMat) return;
+    this.marker.position.set(rawX, y + 0.05, rawZ);
+    this.markerMat.opacity = 1;
+    this.markerFade = -1;
+    this.markerSnapTarget = { x: snapX, z: snapZ };
+  }
+
+  /** Hide the marker immediately. */
+  hideMarker(): void {
+    if (this.markerMat) this.markerMat.opacity = 0;
+    this.markerFade = 0;
+    this.markerSnapTarget = null;
+  }
+
+  /** Get the marker's outer radius for path endpoint trimming. */
+  getMarkerRadius(): number {
+    return this.markerCellSize * 0.45 - RING_STROKE * 0.5;
+  }
+
+  /** Get the marker's current world position (for path line endpoint tracking). */
+  getMarkerPosition(): THREE.Vector3 | null {
+    return this.marker?.position ?? null;
+  }
+
+  /** Per-frame update for marker snap lerp + fade. Returns true if marker is active. */
+  updateMarker(dt: number, pathActive: boolean, pointerDown: boolean): boolean {
+    if (!this.marker || !this.markerMat) return false;
+
+    // Smooth-snap to grid position after drag release
+    if (this.markerSnapTarget && !pointerDown) {
+      const dx = this.markerSnapTarget.x - this.marker.position.x;
+      const dz = this.markerSnapTarget.z - this.marker.position.z;
+      const dist = Math.sqrt(dx * dx + dz * dz);
+      if (dist < 0.01) {
+        this.marker.position.x = this.markerSnapTarget.x;
+        this.marker.position.z = this.markerSnapTarget.z;
+        this.markerSnapTarget = null;
+      } else {
+        const t = 1 - Math.exp(-MARKER_SNAP_SPEED * dt);
+        this.marker.position.x += dx * t;
+        this.marker.position.z += dz * t;
+      }
+    }
+
+    // Fade out when path completes
+    if (this.markerFade === -1 && !pathActive) {
+      this.markerFade = MARKER_FADE_DURATION;
+    }
+    if (this.markerFade > 0) {
+      this.markerFade -= dt;
+      this.markerMat.opacity = Math.max(0, this.markerFade / MARKER_FADE_DURATION);
+    }
+
+    return this.markerSnapTarget !== null || pointerDown;
+  }
+
+  // ── Dispose ─────────────────────────────────────────────────────────
+
   dispose(): void {
     this.clearLine();
     if (this.distLabel && this.scene) {
@@ -196,6 +302,13 @@ export class PathLineRenderer {
       (this.distLabel.material as THREE.SpriteMaterial).dispose();
     }
     this.distLabel = null;
+    if (this.marker && this.scene) {
+      this.scene.remove(this.marker);
+      this.marker.geometry.dispose();
+      this.markerMat?.dispose();
+    }
+    this.marker = null;
+    this.markerMat = null;
   }
 
   private clearLine(): void {

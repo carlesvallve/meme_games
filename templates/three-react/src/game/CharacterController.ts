@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { NavGrid } from './pathfinding/NavGrid';
-import { PathLineRenderer } from './rendering/PathLineRenderer';
+import { PathLineRenderer } from './pathfinding/PathLineRenderer';
 import type { AABBBox } from './pathfinding/NavGrid';
 import { findPath } from './pathfinding/AStar';
 import type { WaypointMeta } from './pathfinding/AStar';
@@ -931,6 +931,11 @@ export class CharacterController {
   /** Update the path line's last vertex to a custom world position (for smooth marker tracking) */
   setPathLineEndpoint(x: number, z: number): void {
     this.pathLine.setEndpoint(x, z, this.getSurfaceAt, this.goalRadius);
+  }
+
+  /** Access the path line renderer (for goal marker management). */
+  getPathLine(): PathLineRenderer {
+    return this.pathLine;
   }
 
   /** True while following an A* click-to-move path */
