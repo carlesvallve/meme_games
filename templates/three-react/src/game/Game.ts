@@ -113,6 +113,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.info.autoReset = false;
 
   // ── Scene ───────────────────────────────────────────────────────────
   const { scene, lights: sceneLights, sceneSky } = createScene();
@@ -538,6 +539,10 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
         worldReveal.start(maxH);
       }
     },
+    onMergeWorld: () => {
+      obstacleGen.mergeMeshes();
+      ladderSystem.mergeMeshes();
+    },
   });
 
   // ── Game loop ───────────────────────────────────────────────────────
@@ -735,7 +740,14 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     cam.updatePosition(dt);
 
     // Render
+    renderer.info.reset();
     postProcess.render();
+
+    // Push draw call count to store (only when changed to avoid unnecessary subscriber notifications)
+    const dc = renderer.info.render.calls;
+    if (dc !== useGameStore.getState().drawCalls) {
+      useGameStore.setState({ drawCalls: dc });
+    }
   }
 
   rafId = requestAnimationFrame(tick);

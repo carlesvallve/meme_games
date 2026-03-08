@@ -474,6 +474,61 @@ export class ObstacleGenerator {
     }
   }
 
+  /** Merge all individual box meshes into a single mesh with vertex colors.
+   *  Reduces draw calls from 100-300+ to 1. obstacles[] and colors[] stay unchanged. */
+  mergeMeshes(): void {
+    if (this.meshes.length < 2) return;
+
+    const positions: number[] = [];
+    const normals: number[] = [];
+    const vertColors: number[] = [];
+
+    for (const mesh of this.meshes) {
+      let geo = mesh.geometry.index ? mesh.geometry.toNonIndexed() : mesh.geometry.clone();
+      // Bake mesh.position into vertex positions (geometry is pre-translated via geo.translate)
+      const m = new THREE.Matrix4().makeTranslation(mesh.position.x, mesh.position.y, mesh.position.z);
+      geo.applyMatrix4(m);
+
+      const pos = geo.getAttribute('position') as THREE.BufferAttribute;
+      const nrm = geo.getAttribute('normal') as THREE.BufferAttribute;
+      const mat = mesh.material as THREE.MeshStandardMaterial;
+      const c = mat.color;
+
+      for (let i = 0; i < pos.count; i++) {
+        positions.push(pos.getX(i), pos.getY(i), pos.getZ(i));
+        normals.push(nrm.getX(i), nrm.getY(i), nrm.getZ(i));
+        vertColors.push(c.r, c.g, c.b);
+      }
+      geo.dispose();
+    }
+
+    const mergedGeo = new THREE.BufferGeometry();
+    mergedGeo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    mergedGeo.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+    mergedGeo.setAttribute('color', new THREE.Float32BufferAttribute(vertColors, 3));
+
+    const mergedMat = new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      roughness: 0.85,
+      metalness: 0.05,
+    });
+    patchWorldRevealMaterial(mergedMat);
+
+    const mergedMesh = new THREE.Mesh(mergedGeo, mergedMat);
+    mergedMesh.castShadow = true;
+    mergedMesh.receiveShadow = true;
+
+    // Dispose originals
+    for (const mesh of this.meshes) {
+      this.scene.remove(mesh);
+      mesh.geometry.dispose();
+      (mesh.material as THREE.Material).dispose();
+    }
+
+    this.scene.add(mergedMesh);
+    this.meshes = [mergedMesh];
+  }
+
   /** Dispose meshes and reset arrays */
   clear(): void {
     for (const mesh of this.meshes) {

@@ -100,6 +100,17 @@ export function WorldPanel() {
             Ladders
           </button>
           <button
+            onClick={() => useGameStore.getState().onMergeWorld?.()}
+            style={{
+              ...obstacleBtnStyle,
+              background: 'rgba(180,140,255,0.15)',
+              color: '#c8a8ff',
+              border: '1px solid rgba(180,140,255,0.3)',
+            }}
+          >
+            Merge
+          </button>
+          <button
             onClick={() => useGameStore.getState().onClearObstacles?.()}
             style={clearBtnStyle}
           >

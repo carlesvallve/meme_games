@@ -5,7 +5,8 @@ import { MenuScreen } from './MenuScreen';
 import { SettingsPanel } from './settings';
 
 function FPSCounter() {
-  const ref = useRef<HTMLDivElement>(null);
+  const fpsRef = useRef<HTMLSpanElement>(null);
+  const dcRef = useRef<HTMLSpanElement>(null);
 
   useEffect(() => {
     let raf = 0;
@@ -19,10 +20,13 @@ function FPSCounter() {
         const fps = Math.round(frames / ((now - last) / 1000));
         frames = 0;
         last = now;
-        if (ref.current) {
-          ref.current.textContent = `${fps} fps`;
-          ref.current.style.color =
+        if (fpsRef.current) {
+          fpsRef.current.textContent = `${fps} fps`;
+          fpsRef.current.style.color =
             fps >= 50 ? '#8f8' : fps >= 30 ? '#ff8' : '#f88';
+        }
+        if (dcRef.current) {
+          dcRef.current.textContent = `${useGameStore.getState().drawCalls} dc`;
         }
       }
       raf = requestAnimationFrame(tick);
@@ -33,21 +37,23 @@ function FPSCounter() {
 
   return (
     <div
-      ref={ref}
       style={{
         position: 'absolute',
         top: 8,
         right: 12,
-        color: '#8f8',
-        fontSize: 11,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'flex-end',
         fontFamily: 'monospace',
         fontWeight: 600,
+        fontSize: 11,
         opacity: 0.7,
         pointerEvents: 'none',
         userSelect: 'none',
       }}
     >
-      -- fps
+      <span ref={fpsRef} style={{ color: '#8f8' }}>-- fps</span>
+      <span ref={dcRef} style={{ color: '#aaa' }}>0 dc</span>
     </div>
   );
 }
