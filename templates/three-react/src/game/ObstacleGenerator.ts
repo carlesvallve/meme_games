@@ -8,6 +8,10 @@ export class ObstacleGenerator {
   obstacles: AABBBox[] = [];
   colors: number[] = [];
   meshes: THREE.Mesh[] = [];
+  /** After merge: vertex start index per obstacle (parallel to obstacles[]) */
+  private vertexRanges: { start: number; count: number }[] = [];
+  /** Set of destroyed obstacle indices */
+  private destroyed = new Set<number>();
 
   constructor(private scene: THREE.Scene) {}
 
@@ -475,17 +479,21 @@ export class ObstacleGenerator {
   }
 
   /** Merge all individual box meshes into a single mesh with vertex colors.
-   *  Reduces draw calls from 100-300+ to 1. obstacles[] and colors[] stay unchanged. */
+   *  Tracks per-obstacle vertex ranges so individual obstacles can be destroyed later. */
   mergeMeshes(): void {
     if (this.meshes.length < 2) return;
 
     const positions: number[] = [];
     const normals: number[] = [];
     const vertColors: number[] = [];
+    this.vertexRanges = [];
+    this.destroyed.clear();
 
-    for (const mesh of this.meshes) {
+    for (let i = 0; i < this.meshes.length; i++) {
+      const mesh = this.meshes[i];
+      const start = positions.length / 3;
+
       let geo = mesh.geometry.index ? mesh.geometry.toNonIndexed() : mesh.geometry.clone();
-      // Bake mesh.position into vertex positions (geometry is pre-translated via geo.translate)
       const m = new THREE.Matrix4().makeTranslation(mesh.position.x, mesh.position.y, mesh.position.z);
       geo.applyMatrix4(m);
 
@@ -494,11 +502,13 @@ export class ObstacleGenerator {
       const mat = mesh.material as THREE.MeshStandardMaterial;
       const c = mat.color;
 
-      for (let i = 0; i < pos.count; i++) {
-        positions.push(pos.getX(i), pos.getY(i), pos.getZ(i));
-        normals.push(nrm.getX(i), nrm.getY(i), nrm.getZ(i));
+      for (let v = 0; v < pos.count; v++) {
+        positions.push(pos.getX(v), pos.getY(v), pos.getZ(v));
+        normals.push(nrm.getX(v), nrm.getY(v), nrm.getZ(v));
         vertColors.push(c.r, c.g, c.b);
       }
+
+      this.vertexRanges.push({ start, count: pos.count });
       geo.dispose();
     }
 
@@ -529,6 +539,57 @@ export class ObstacleGenerator {
     this.meshes = [mergedMesh];
   }
 
+  /** Whether the mesh has been merged (destruction API available). */
+  get isMerged(): boolean {
+    return this.vertexRanges.length > 0;
+  }
+
+  /** Destroy an obstacle by index — zeroes its vertices in the merged buffer.
+   *  Returns the obstacle's world position + dimensions, or null if already destroyed / not merged. */
+  destroyObstacle(index: number): { x: number; z: number; height: number; halfW: number; halfD: number } | null {
+    if (!this.isMerged || index < 0 || index >= this.vertexRanges.length) return null;
+    if (this.destroyed.has(index)) return null;
+    this.destroyed.add(index);
+
+    const range = this.vertexRanges[index];
+    const mergedMesh = this.meshes[0];
+    const posAttr = mergedMesh.geometry.getAttribute('position') as THREE.BufferAttribute;
+
+    // Zero out all vertices for this obstacle (degenerate triangles — GPU culls them)
+    for (let v = range.start; v < range.start + range.count; v++) {
+      posAttr.setXYZ(v, 0, 0, 0);
+    }
+    posAttr.needsUpdate = true;
+
+    const obs = this.obstacles[index];
+    return { x: obs.x, z: obs.z, height: obs.height, halfW: obs.halfW, halfD: obs.halfD };
+  }
+
+  /** Check if obstacle at index has been destroyed. */
+  isDestroyed(index: number): boolean {
+    return this.destroyed.has(index);
+  }
+
+  /** Find obstacle index at a world XZ position (topmost). Returns -1 if none. */
+  getObstacleAt(wx: number, wz: number): number {
+    const EPS = 0.01;
+    let bestIdx = -1;
+    let bestH = -1;
+    for (let i = 0; i < this.obstacles.length; i++) {
+      if (this.destroyed.has(i)) continue;
+      const box = this.obstacles[i];
+      if (
+        Math.abs(wx - box.x) < box.halfW + EPS &&
+        Math.abs(wz - box.z) < box.halfD + EPS &&
+        box.height > bestH
+      ) {
+        bestH = box.height;
+        bestIdx = i;
+      }
+    }
+    return bestIdx;
+  }
+
   /** Dispose meshes and reset arrays */
   clear(): void {
     for (const mesh of this.meshes) {
@@ -539,5 +600,7 @@ export class ObstacleGenerator {
     this.meshes = [];
     this.obstacles = [];
     this.colors = [];
+    this.vertexRanges = [];
+    this.destroyed.clear();
   }
 }
