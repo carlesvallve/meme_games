@@ -245,8 +245,13 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     ladderSystem.clear();
     const { charStepUp, charStepDown } = useGameStore.getState();
     navGrid.build([], charStepUp, charStepDown, CAPSULE_RADIUS);
+    character.setNavGrid(navGrid); // clears path + path line + label
     character.setObstacles([]);
     character.setLadderDefs([]);
+    // Hide goal marker
+    markerMat.opacity = 0;
+    markerFade = 0;
+    markerSnapTarget = null;
     gridOverlay.rebuild(WORLD_SIZE, gridCellSize, GROUND_COLOR, [], []);
     refreshDebugNav();
   }

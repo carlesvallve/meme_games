@@ -120,9 +120,8 @@ export class WorldRevealFX {
     worldRevealUniforms.u_worldRevealActive.value = 1.0;
     worldRevealUniforms.u_worldRevealMaxH.value = maxHeight + 0.5;
 
-    // Initial flash + shake on generation start
+    // Initial brightness flash on generation start (no shake — too jarring)
     this.brightnessBoost = 0.2;
-    this.cam?.shake(0.06, 0.25);
   }
 
   /** Call every frame with delta time. Drives shader + effects. */
@@ -144,20 +143,20 @@ export class WorldRevealFX {
       + worldRevealUniforms.u_worldRevealRadial.value;
     const riseWindow = 0.3;
     const totalRange = 1.0 + maxDelay + riseWindow;
-    worldRevealUniforms.u_worldRevealT.value = t * totalRange;
+    const shaderT = t * totalRange;
+    worldRevealUniforms.u_worldRevealT.value = shaderT;
 
-    // Periodic rumble — small camera shakes as blocks emerge
-    // Stop effects early so they don't outlast the shader
-    const effectEnd = 0.85; // stop rumble at 85% so last shake decays by 100%
-    if (t < effectEnd && this.elapsed - this.lastRumble > 0.35) {
+    // Check if all fragments have been revealed (shader is visually done)
+    const shaderDone = shaderT >= maxDelay + riseWindow;
+
+    // Periodic brightness pulse as blocks emerge
+    if (!shaderDone && this.elapsed - this.lastRumble > 0.35) {
       this.lastRumble = this.elapsed;
-      const intensity = 0.02 + (1 - t) * 0.03;
-      this.cam?.shake(intensity, 0.15); // short shake so it decays quickly
       this.brightnessBoost = Math.max(this.brightnessBoost, 0.06 * (1 - t));
     }
 
-    // End
-    if (t >= 1.0) {
+    // End when shader is visually complete
+    if (shaderDone) {
       this.active = false;
       this.brightnessBoost = 0;
       worldRevealUniforms.u_worldRevealActive.value = 0.0;
