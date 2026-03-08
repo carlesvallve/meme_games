@@ -86,6 +86,8 @@ export class CharacterController {
   private fallStartY = 0; // Y when fall began (for impact detection)
   private isFalling = false;
   private landingStun = 0; // seconds of movement pause after hard landing
+  private dropDelay = 0; // brief pause at ledge edge before dropping
+  private fallDamping = 1; // horizontal speed multiplier during falls (0-1)
   onLandingImpact: ((fallHeight: number) => void) | null = null; // set by Game.ts for camera shake
   private pathNavHeights: number[] = []; // NavGrid heights per waypoint (for groundY interpolation)
   private prevWaypointNavH = 0; // NavGrid height of the waypoint we just left
@@ -398,9 +400,10 @@ export class CharacterController {
     dt: number,
     speed: number,
   ): void {
-    // Don't allow movement while climbing or stunned from landing
+    // Don't allow movement while climbing, stunned, or pausing at ledge edge
     if (this.climbState) return;
     if (this.landingStun > 0) return;
+    if (this.dropDelay > 0) return;
 
     if (dx === 0 && dz === 0) {
       if (this.moveSpeed > 0 && this.path.length === 0) {
@@ -455,8 +458,10 @@ export class CharacterController {
     const pos = this.root.position;
     const oldX = pos.x;
     const oldZ = pos.z;
-    pos.x += nx * speed * dt;
-    pos.z += nz * speed * dt;
+    // Apply fall damping to direct movement (computed in update())
+    const effSpeed = speed * this.fallDamping;
+    pos.x += nx * effSpeed * dt;
+    pos.z += nz * effSpeed * dt;
 
     // Clamp to navGrid bounds
     const half = this.navGrid.getHalfSize();
@@ -670,12 +675,18 @@ export class CharacterController {
       }
     }
 
+    // ── Drop detection: freeze horizontal movement during drops (> 1 cell) ──
+    // Stair steps (≤1 cell) move normally. Drops halt horizontally until landing.
+    const isDrop = this.isFalling && (this.visualGroundY - this.groundY) > this.navGrid.cellSize;
+    this.fallDamping = isDrop ? 0 : 1;
+
     // ── A* path following: continuous waypoint movement (all modes) ──
     if (
       this.path.length > 0 &&
       this.pathIndex < this.path.length &&
       !this.pathPaused &&
-      this.landingStun <= 0
+      this.landingStun <= 0 &&
+      this.dropDelay <= 0
     ) {
       const target = this.path[this.pathIndex];
       const pdx = target.x - pos.x;
@@ -683,7 +694,15 @@ export class CharacterController {
       const dist = Math.sqrt(pdx * pdx + pdz * pdz);
 
       const isLast = this.pathIndex >= this.path.length - 1;
-      const reach = isLast ? 0.05 : WAYPOINT_THRESHOLD;
+      // Tighter threshold at waypoints with significant height drops to avoid skipping
+      let reach = isLast ? 0.05 : WAYPOINT_THRESHOLD;
+      if (!isLast && this.pathNavHeights.length > 0) {
+        const curH = this.pathNavHeights[this.pathIndex] ?? 0;
+        const prevH = this.pathNavHeights[this.pathIndex - 1] ?? curH;
+        if (Math.abs(curH - prevH) > this.navGrid.cellSize * 0.5) {
+          reach = Math.min(reach, 0.12);
+        }
+      }
 
       if (dist < reach) {
         // Set groundY to this waypoint's NavGrid height (stable, no collision artifacts)
@@ -745,6 +764,8 @@ export class CharacterController {
           const maxStep = dist / dt;
           moveSpd = Math.min(speed, Math.max(0.5, maxStep));
         }
+        // Apply fall damping — slow horizontal movement while airborne
+        moveSpd *= this.fallDamping;
         const step = Math.min(moveSpd * dt, dist);
         pos.x += (pdx / dist) * step;
         pos.z += (pdz / dist) * step;
@@ -795,10 +816,14 @@ export class CharacterController {
         const g = this.navGrid.worldToGrid(pos.x, pos.z);
         const navCell = this.navGrid.getCell(g.gx, g.gz);
         const cellH = navCell ? navCell.surfaceHeight : 0;
-        // Never drop below the minimum of prev/target waypoint heights during path traversal.
+        // Floor: never drop below the minimum of prev/target waypoint heights.
         // Prevents falling through ground-level cells between two elevated waypoints.
         const minWaypointH = Math.min(this.prevWaypointNavH, targetNavH);
-        this.groundY = Math.max(cellH, minWaypointH);
+        // Ceiling: when heading to a lower waypoint, don't let the cell tracker
+        // raise groundY back above prevWaypointNavH (the terrace we just left).
+        // This ensures groundY actually drops when we advance past a cliff edge.
+        const maxWaypointH = this.prevWaypointNavH;
+        this.groundY = Math.min(Math.max(cellH, minWaypointH), maxWaypointH);
       } else {
         const surfaceY = getSurfaceHeight(
           pos.x,
@@ -834,25 +859,36 @@ export class CharacterController {
       this.velocityY = 0;
       this.isFalling = false;
     } else if (this.groundY < this.visualGroundY) {
+      const cellSize = this.navGrid.cellSize;
       // Track fall start
       if (!this.isFalling) {
         this.isFalling = true;
         this.fallStartY = this.visualGroundY;
+        // "Drop" = gap > 1 cell → pause at ledge before gravity
+        const dropGap = this.visualGroundY - this.groundY;
+        if (dropGap > cellSize) {
+          this.dropDelay = 0.08;
+        }
       }
-      // Stepping down: gravity-based fall
-      this.velocityY = Math.min(
-        this.velocityY + this.gravity * dt,
-        this.maxFallSpeed,
-      );
-      this.visualGroundY -= this.velocityY * dt;
+      // During drop delay: freeze at ledge edge
+      if (this.dropDelay > 0) {
+        this.dropDelay -= dt;
+      } else {
+        // Gravity-based fall
+        this.velocityY = Math.min(
+          this.velocityY + this.gravity * dt,
+          this.maxFallSpeed,
+        );
+        this.visualGroundY -= this.velocityY * dt;
+      }
+      // Landing
       if (this.visualGroundY <= this.groundY) {
         this.visualGroundY = this.groundY;
-        // Landing impact
+        // Landing stun for drops (> 1 cell)
         const fallHeight = this.fallStartY - this.groundY;
-        const cellSize = this.navGrid.cellSize;
-        if (fallHeight > cellSize * 1.5) {
+        if (fallHeight > cellSize) {
           const cells = fallHeight / cellSize;
-          this.landingStun = Math.min(0.05 + cells * 0.03, 0.2);
+          this.landingStun = Math.min(0.08 + cells * 0.04, 0.3);
           audioSystem.playStep(Math.min(0.5 + cells * 0.1, 1.0), 0.6);
           this.onLandingImpact?.(fallHeight);
         }
