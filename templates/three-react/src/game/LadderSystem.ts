@@ -165,6 +165,25 @@ export class LadderSystem {
     this.meshes.push(group);
   }
 
+  /** Re-register nav-links for all surviving ladders on a fresh navGrid.
+   *  Call after navGrid.build() to restore ladder connectivity without regenerating. */
+  reregisterNavLinks(navGrid: NavGrid): void {
+    for (let i = 0; i < this.ladders.length; i++) {
+      if (this.merged.isDestroyed(i)) continue;
+      const ld = this.ladders[i];
+      const verticalCells = Math.abs(ld.topY - ld.bottomY) / navGrid.cellSize;
+      const cost = verticalCells * LADDER_COST + 1;
+      navGrid.addNavLink(
+        ld.lowCellGX, ld.lowCellGZ,
+        ld.highCellGX, ld.highCellGZ,
+        cost, i,
+      );
+    }
+    if (this.ladders.length > 0) {
+      navGrid.recomputeReachability();
+    }
+  }
+
   get isMerged(): boolean { return this.merged.isMerged; }
 
   /** Merge all ladder groups into a single mesh with vertex colors. */

@@ -200,7 +200,10 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       charStepDown,
       CAPSULE_RADIUS,
     );
+    // Re-register surviving ladder nav-links + recompute reachability
+    ladderSystem.reregisterNavLinks(navGrid);
     character.setObstacles(obstacleGen.obstacles);
+    character.setLadderDefs(ladderSystem.ladders);
     gridOverlay.rebuild(
       WORLD_SIZE,
       gridCellSize,
