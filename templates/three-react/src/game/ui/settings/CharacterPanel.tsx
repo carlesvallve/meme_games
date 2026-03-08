@@ -1,10 +1,18 @@
+import { useMemo } from 'react';
 import { useGameStore } from '../../../store';
 import { SettingsWindow, Section, Select, Slider, Toggle, btnStyle, rowStyle, resetBtnStyle } from './shared';
+import { CHARACTER_MODELS } from '../../CharacterModelDefs';
 
 const SNAP_MODES = ['free', '4dir', '8dir'] as const;
+const MODEL_OPTIONS = CHARACTER_MODELS.map((m) => m.id);
+const MODEL_LABELS = CHARACTER_MODELS.map((m) => m.label);
 
 export function CharacterPanel() {
+  const charModel = useGameStore((s) => s.charModel);
+  const setCharModel = useGameStore((s) => s.setCharModel);
   const animList = useGameStore((s) => s.charAnimationList);
+  const animGroup = useGameStore((s) => s.charAnimGroup);
+  const setAnimGroup = useGameStore((s) => s.setCharAnimGroup);
   const animation = useGameStore((s) => s.charAnimation);
   const speed = useGameStore((s) => s.charSpeed);
   const moveSpeed = useGameStore((s) => s.charMoveSpeed);
@@ -32,29 +40,94 @@ export function CharacterPanel() {
   const setStringPull = useGameStore((s) => s.setCharStringPull);
   const setSnapMode = useGameStore((s) => s.setCharSnapMode);
 
+  // Parse animation groups from "Group/AnimName" format
+  const { groups, animsForGroup } = useMemo(() => {
+    const groupSet = new Set<string>();
+    const map = new Map<string, string[]>();
+    for (const name of animList) {
+      const slashIdx = name.indexOf('/');
+      if (slashIdx > 0) {
+        const g = name.slice(0, slashIdx);
+        groupSet.add(g);
+        if (!map.has(g)) map.set(g, []);
+        map.get(g)!.push(name);
+      } else {
+        // Ungrouped animations go under "Other"
+        groupSet.add('Other');
+        if (!map.has('Other')) map.set('Other', []);
+        map.get('Other')!.push(name);
+      }
+    }
+    return { groups: Array.from(groupSet), animsForGroup: map };
+  }, [animList]);
+
+  // Auto-select first group if current group is invalid
+  const effectiveGroup = groups.includes(animGroup) ? animGroup : (groups[0] ?? '');
+
+  // Animations in the selected group
+  const currentAnims = animsForGroup.get(effectiveGroup) ?? [];
+  // Display labels: strip group prefix
+  const animLabels = currentAnims.map((a) => {
+    const slashIdx = a.indexOf('/');
+    return slashIdx > 0 ? a.slice(slashIdx + 1) : a;
+  });
+
+  const handleGroupChange = (g: string) => {
+    setAnimGroup(g);
+    // Auto-select first animation in the new group
+    const anims = animsForGroup.get(g);
+    if (anims && anims.length > 0) {
+      setAnimation(anims[0]);
+    }
+  };
+
   return (
     <SettingsWindow>
-      <Section label='Animation' first accent='#af6'>
-        {animList.length > 0 ? (
-          <Select
-            label='Clip'
-            value={animation}
-            options={animList}
-            accent='#af6'
-            onChange={setAnimation}
-          />
-        ) : (
-          <div style={{ color: '#888', fontSize: 11 }}>Loading model...</div>
-        )}
-        <Slider
-          label='Anim Speed'
-          value={speed}
-          min={0}
-          max={10}
-          step={0.1}
-          accent='#af6'
-          onChange={setSpeed}
+      <Section label='Model' first accent='#f8a'>
+        <Select
+          label='Model'
+          value={charModel}
+          options={MODEL_OPTIONS}
+          labels={MODEL_LABELS}
+          accent='#f8a'
+          onChange={setCharModel}
         />
+        {animList.length > 0 ? (
+          <>
+            {groups.length > 1 && (
+              <Select
+                label='Anim Set'
+                value={effectiveGroup}
+                options={groups}
+                accent='#f8a'
+                onChange={handleGroupChange}
+              />
+            )}
+            <Select
+              label='Animation'
+              value={animation}
+              options={currentAnims}
+              labels={animLabels}
+              accent='#f8a'
+              onChange={setAnimation}
+            />
+          </>
+        ) : (
+          charModel !== 'none' && <div style={{ color: '#888', fontSize: 11 }}>Loading model...</div>
+        )}
+        {animList.length > 0 && (
+          <Slider
+            label='Anim Speed'
+            value={speed}
+            min={0}
+            max={3}
+            step={0.1}
+            accent='#f8a'
+            onChange={setSpeed}
+          />
+        )}
+      </Section>
+      <Section label='Movement' accent='#af6'>
         <Slider
           label='Move Speed'
           value={moveSpeed}

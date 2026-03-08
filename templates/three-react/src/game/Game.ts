@@ -44,6 +44,7 @@ import {
   CAPSULE_RADIUS,
   GOAL_DRAG_THRESHOLD,
 } from './GameConstants';
+import { CHARACTER_MODELS } from './CharacterModelDefs';
 
 // ── Particle helpers ─────────────────────────────────────────────────
 
@@ -183,6 +184,31 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     const cells = fallHeight / gridCellSize;
     cam.shake(Math.min(cells * 0.04, 0.25), Math.min(cells * 0.06, 0.3));
   };
+
+  // Model loading — reacts to store.charModel changes
+  let currentModelId = '';
+  function syncModel(modelId: string): void {
+    if (modelId === currentModelId) return;
+    currentModelId = modelId;
+    const def = CHARACTER_MODELS.find((m) => m.id === modelId);
+    if (!def || !def.opts) {
+      // "none" = revert to placeholder box
+      character.clearModel();
+      useGameStore.getState().setCharAnimationList([]);
+      return;
+    }
+    character.loadModel({
+      meshUrl: def.opts.meshUrl,
+      scale: def.opts.scale,
+      rotation: def.opts.rotation,
+      onLoaded: (names) => {
+        console.log(`Model "${def.label}" loaded: ${names.length} animations (mesh + shared anim GLBs)`);
+        useGameStore.getState().setCharAnimationList(names);
+      },
+    });
+  }
+  // Initial sync
+  syncModel(useGameStore.getState().charModel);
 
   // ── Obstacles & Ladders ────────────────────────────────────────────
   const obstacleGen = new ObstacleGenerator(scene);
@@ -611,6 +637,19 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     character.setGravity(store.charGravity);
     character.setSnapMode(store.charSnapMode);
     const moveSpeed = store.charMoveSpeed;
+
+    // Sync character model from dropdown
+    syncModel(store.charModel);
+
+    // Sync animation preview from dropdown
+    const model = character.getModel();
+    if (model && model.isLoaded()) {
+      const wantAnim = store.charAnimation;
+      if (wantAnim && model.getCurrentClip() !== wantAnim) {
+        model.play(wantAnim);
+      }
+      model.setRawTimeScale(store.charSpeed);
+    }
 
     const inp = input.update();
     let dx = 0,

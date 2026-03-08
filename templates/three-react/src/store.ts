@@ -130,7 +130,7 @@ const SETTINGS_KEY = 'three-react:settings';
 
 /** Keys that should never be persisted (transient / runtime-only) */
 const TRANSIENT_KEYS = new Set([
-  'phase', 'charAnimation', 'charAnimationList', 'settingsPanelOpen',
+  'phase', 'charAnimGroup', 'charAnimation', 'charAnimationList', 'settingsPanelOpen',
   'onStartGame', 'onPauseToggle', 'onResetCameraParams', 'onResetLightParams',
   'onGenerateObstacles', 'onGenerateTerrain', 'onGenerateLadders', 'onClearObstacles', 'onGenerateWorld', 'onMergeWorld', 'onUnmergeWorld',
   'drawCalls',
@@ -184,6 +184,10 @@ interface GameStore {
   postProcess: PostProcessSettings;
 
   // Character
+  charModel: string;
+  setCharModel: (v: string) => void;
+  charAnimGroup: string;
+  setCharAnimGroup: (v: string) => void;
   charAnimation: string;
   charSpeed: number;
   charMoveSpeed: number;
@@ -290,6 +294,10 @@ export const useGameStore = create<GameStore>((set) => ({
   sunDebug: false,
   postProcess: (saved.postProcess as PostProcessSettings) ?? { ...DEFAULT_POST_PROCESS },
 
+  charModel: (saved.charModel as string) ?? 'none',
+  setCharModel: (charModel) => set({ charModel }),
+  charAnimGroup: '',
+  setCharAnimGroup: (charAnimGroup) => set({ charAnimGroup }),
   charAnimation: 'Idle',
   charSpeed: (saved.charSpeed as number) ?? 1,
   charMoveSpeed: (saved.charMoveSpeed as number) ?? 5,

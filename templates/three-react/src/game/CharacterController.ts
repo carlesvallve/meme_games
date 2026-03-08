@@ -26,6 +26,9 @@ import {
   LADDER_SEARCH_RADIUS,
   LADDER_DOT_THRESHOLD,
 } from './GameConstants';
+import { CharacterModel } from './CharacterModel';
+import type { CharacterModelOpts } from './CharacterModel';
+// CharacterModelOpts.meshUrl is the mesh-only GLB; shared animations loaded automatically
 
 interface ClimbState {
   ladder: LadderDef;
@@ -92,20 +95,78 @@ export class CharacterController {
   private pathNavHeights: number[] = []; // NavGrid heights per waypoint (for groundY interpolation)
   private prevWaypointNavH = 0; // NavGrid height of the waypoint we just left
 
+  // Character model (GLB with skeleton + animations)
+  private model: CharacterModel | null = null;
+  private placeholderMesh: THREE.Mesh | null = null;
+  /** Called when model finishes loading — passes animation name list */
+  onAnimationsLoaded: ((names: string[]) => void) | null = null;
+
   constructor(navGrid: NavGrid) {
     this.navGrid = navGrid;
     this.root = new THREE.Group();
 
+    // Placeholder box until model loads
     const geo = new THREE.BoxGeometry(0.25, 0.5, 0.25);
     geo.translate(0, 0.25, 0);
     const mat = new THREE.MeshStandardMaterial({
       color: 0x44aaff,
       roughness: 0.6,
     });
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    this.root.add(mesh);
+    this.placeholderMesh = new THREE.Mesh(geo, mat);
+    this.placeholderMesh.castShadow = true;
+    this.placeholderMesh.receiveShadow = true;
+    this.root.add(this.placeholderMesh);
+  }
+
+  /** Load a GLB character model to replace the placeholder box. */
+  loadModel(opts: CharacterModelOpts): void {
+    // Clean up previous model if any
+    this.clearModel();
+    const origOnLoaded = opts.onLoaded;
+    this.model = new CharacterModel({
+      ...opts,
+      onMeshReady: () => {
+        // Show model immediately when mesh loads (before animations)
+        if (this.placeholderMesh) {
+          this.root.remove(this.placeholderMesh);
+          this.placeholderMesh.geometry.dispose();
+          (this.placeholderMesh.material as THREE.Material).dispose();
+          this.placeholderMesh = null;
+        }
+        this.root.add(this.model!.group);
+        // Debug: verify hierarchy
+        const rootPos = this.root.position;
+        const grpPos = this.model!.group.position;
+        console.log(`[CharController] Model group added to root. root pos=(${rootPos.x.toFixed(2)}, ${rootPos.y.toFixed(2)}, ${rootPos.z.toFixed(2)}), group pos=(${grpPos.x.toFixed(2)}, ${grpPos.y.toFixed(2)}, ${grpPos.z.toFixed(2)}), root.children=${this.root.children.length}`);
+      },
+      onLoaded: (names) => {
+        origOnLoaded?.(names);
+        this.onAnimationsLoaded?.(names);
+      },
+    });
+  }
+
+  /** Remove current model and restore placeholder box. */
+  clearModel(): void {
+    if (this.model) {
+      this.root.remove(this.model.group);
+      this.model.dispose();
+      this.model = null;
+    }
+    if (!this.placeholderMesh) {
+      const geo = new THREE.BoxGeometry(0.25, 0.5, 0.25);
+      geo.translate(0, 0.25, 0);
+      const mat = new THREE.MeshStandardMaterial({ color: 0x44aaff, roughness: 0.6 });
+      this.placeholderMesh = new THREE.Mesh(geo, mat);
+      this.placeholderMesh.castShadow = true;
+      this.placeholderMesh.receiveShadow = true;
+      this.root.add(this.placeholderMesh);
+    }
+  }
+
+  /** Get the character model (if loaded). */
+  getModel(): CharacterModel | null {
+    return this.model;
   }
 
   /** Call once after adding root to scene */
@@ -926,6 +987,9 @@ export class CharacterController {
       this.hopPhase = 0;
       this.lastHopHalf = 0;
     }
+
+    // Update character model animation mixer
+    this.model?.update(dt);
   }
 
   /** Update the path line's last vertex to a custom world position (for smooth marker tracking) */
@@ -957,6 +1021,11 @@ export class CharacterController {
 
   dispose(): void {
     this.pathLine.dispose();
+    this.model?.dispose();
+    if (this.placeholderMesh) {
+      this.placeholderMesh.geometry.dispose();
+      (this.placeholderMesh.material as THREE.Material).dispose();
+    }
     this.root.traverse((child) => {
       if ((child as THREE.Mesh).isMesh) {
         const mesh = child as THREE.Mesh;

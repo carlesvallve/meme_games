@@ -155,10 +155,12 @@ export function Toggle({ label, value, onChange }: { label: string; value: boole
 
 /* ── Single-Select Dropdown ── */
 
-export function Select({ label, value, options, accent = '#6af', onChange }: {
+export function Select({ label, value, options, labels, accent = '#6af', onChange }: {
   label: string;
   value: string;
   options: string[];
+  /** Display labels for each option (defaults to option values) */
+  labels?: string[];
   accent?: string;
   onChange: (v: string) => void;
 }) {
@@ -173,8 +175,8 @@ export function Select({ label, value, options, accent = '#6af', onChange }: {
           ['--thumb-color' as any]: accent,
         }}
       >
-        {options.map((opt) => (
-          <option key={opt} value={opt}>{opt}</option>
+        {options.map((opt, i) => (
+          <option key={opt} value={opt}>{labels ? labels[i] : opt}</option>
         ))}
       </select>
     </div>
