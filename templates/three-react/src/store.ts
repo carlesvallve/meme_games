@@ -132,7 +132,7 @@ const SETTINGS_KEY = 'three-react:settings';
 const TRANSIENT_KEYS = new Set([
   'phase', 'charAnimGroup', 'charAnimation', 'charAnimationList', 'settingsPanelOpen',
   'onStartGame', 'onPauseToggle', 'onResetCameraParams', 'onResetLightParams',
-  'onGenerateObstacles', 'onGenerateTerrain', 'onGenerateLadders', 'onClearObstacles', 'onGenerateWorld', 'onMergeWorld', 'onUnmergeWorld',
+  'onRandomizeParts', 'onGetHierarchy', 'onToggleHierarchyNode', 'hierarchyVersion', 'onGenerateObstacles', 'onGenerateTerrain', 'onGenerateLadders', 'onClearObstacles', 'onGenerateWorld', 'onMergeWorld', 'onUnmergeWorld',
   'drawCalls',
 ]);
 
@@ -201,6 +201,10 @@ interface GameStore {
   charGravity: number;
   setCharGravity: (v: number) => void;
   charSnapMode: 'free' | '4dir' | '8dir';
+  charGroundPin: boolean;
+  setCharGroundPin: (v: boolean) => void;
+  charTestAnim: boolean;
+  setCharTestAnim: (v: boolean) => void;
   charAutoMove: boolean;
   setCharAutoMove: (v: boolean) => void;
   charContinuousPath: boolean;
@@ -261,6 +265,10 @@ interface GameStore {
   onGenerateTerrain: (() => void) | null;
   onGenerateLadders: (() => void) | null;
   onClearObstacles: (() => void) | null;
+  onRandomizeParts: (() => void) | null;
+  onGetHierarchy: (() => { uuid: string; name: string; type: string; visible: boolean; vertCount: number; materialName: string; depth: number; childCount: number }[]) | null;
+  onToggleHierarchyNode: ((uuid: string) => void) | null;
+  hierarchyVersion: number;
   onGenerateWorld: (() => void) | null;
   onMergeWorld: (() => void) | null;
   onUnmergeWorld: (() => void) | null;
@@ -311,6 +319,10 @@ export const useGameStore = create<GameStore>((set) => ({
   charGravity: (saved.charGravity as number) ?? 60,
   setCharGravity: (charGravity) => set({ charGravity }),
   charSnapMode: ((saved.charSnapMode as string) ?? '8dir') as 'free' | '4dir' | '8dir',
+  charGroundPin: (saved.charGroundPin as boolean) ?? true,
+  setCharGroundPin: (charGroundPin) => set({ charGroundPin }),
+  charTestAnim: false,
+  setCharTestAnim: (charTestAnim) => set({ charTestAnim }),
   charAutoMove: (saved.charAutoMove as boolean) ?? true,
   setCharAutoMove: (charAutoMove) => set({ charAutoMove }),
   charContinuousPath: (saved.charContinuousPath as boolean) ?? true,
@@ -371,6 +383,10 @@ export const useGameStore = create<GameStore>((set) => ({
   onGenerateTerrain: null,
   onGenerateLadders: null,
   onClearObstacles: null,
+  onRandomizeParts: null,
+  onGetHierarchy: null,
+  onToggleHierarchyNode: null,
+  hierarchyVersion: 0,
   onGenerateWorld: null,
   onMergeWorld: null,
   onUnmergeWorld: null,

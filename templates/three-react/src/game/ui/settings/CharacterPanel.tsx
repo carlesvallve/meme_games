@@ -1,7 +1,81 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useGameStore } from '../../../store';
 import { SettingsWindow, Section, Select, Slider, Toggle, btnStyle, rowStyle, resetBtnStyle } from './shared';
 import { CHARACTER_MODELS } from '../../CharacterModelDefs';
+
+function HierarchyPanel() {
+  const version = useGameStore((s) => s.hierarchyVersion);
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+
+  const items = useMemo(() => {
+    const fn = useGameStore.getState().onGetHierarchy;
+    return fn ? fn() : [];
+  }, [version]);
+
+  if (items.length === 0) return null;
+
+  const toggleCollapse = (uuid: string) => {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(uuid)) next.delete(uuid); else next.add(uuid);
+      return next;
+    });
+  };
+
+  // Build visibility: hide children of collapsed nodes
+  const visibleItems: typeof items = [];
+  const collapseDepth: number[] = []; // stack of depths we're hiding under
+  for (const item of items) {
+    // If we're inside a collapsed subtree, skip
+    if (collapseDepth.length > 0 && item.depth > collapseDepth[collapseDepth.length - 1]) continue;
+    // Pop any collapse entries at same or lower depth
+    while (collapseDepth.length > 0 && item.depth <= collapseDepth[collapseDepth.length - 1]) collapseDepth.pop();
+    visibleItems.push(item);
+    if (item.type === 'Node' && collapsed.has(item.uuid)) {
+      collapseDepth.push(item.depth);
+    }
+  }
+
+  return (
+    <div style={{ maxHeight: 200, overflowY: 'auto', fontSize: 10, fontFamily: 'monospace', lineHeight: '18px', marginTop: 4 }}>
+      {visibleItems.map((item) => {
+        const indent = item.depth * 10;
+        const isMesh = item.type === 'Mesh';
+        const isNode = item.type === 'Node';
+        const isCollapsed = collapsed.has(item.uuid);
+        return (
+          <div
+            key={item.uuid}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 3,
+              paddingLeft: indent, cursor: 'pointer',
+              opacity: item.visible ? 1 : 0.35,
+              color: isMesh ? '#ccc' : '#aaa',
+            }}
+            onClick={() => {
+              if (isNode) {
+                toggleCollapse(item.uuid);
+              } else {
+                useGameStore.getState().onToggleHierarchyNode?.(item.uuid);
+              }
+            }}
+            title={isMesh ? `${item.materialName} (${item.vertCount}v)` : `${item.childCount} children`}
+          >
+            <span style={{ width: 10, textAlign: 'center', fontSize: 8, color: isNode ? '#aaa' : (item.visible ? '#6f6' : '#f66') }}>
+              {isNode ? (isCollapsed ? '▶' : '▼') : (item.visible ? '●' : '○')}
+            </span>
+            <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {item.name}
+            </span>
+            {isMesh && (
+              <span style={{ color: '#555', flexShrink: 0 }}>{item.vertCount}v</span>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 const SNAP_MODES = ['free', '4dir', '8dir'] as const;
 const MODEL_OPTIONS = CHARACTER_MODELS.map((m) => m.id);
@@ -28,6 +102,10 @@ export function CharacterPanel() {
   const debugPath = useGameStore((s) => s.charDebugPath);
   const stringPull = useGameStore((s) => s.charStringPull);
   const snapMode = useGameStore((s) => s.charSnapMode);
+  const groundPin = useGameStore((s) => s.charGroundPin);
+  const setGroundPin = useGameStore((s) => s.setCharGroundPin);
+  const testAnim = useGameStore((s) => s.charTestAnim);
+  const setTestAnim = useGameStore((s) => s.setCharTestAnim);
   const autoMove = useGameStore((s) => s.charAutoMove);
   const setAutoMove = useGameStore((s) => s.setCharAutoMove);
   const continuousPath = useGameStore((s) => s.charContinuousPath);
@@ -92,6 +170,20 @@ export function CharacterPanel() {
           accent='#f8a'
           onChange={setCharModel}
         />
+        {charModel !== 'none' && (
+          <>
+            <div style={rowStyle}>
+              <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Parts</span>
+              <button
+                onClick={() => useGameStore.getState().onRandomizeParts?.()}
+                style={{ ...btnStyle(false), flex: 1 }}
+              >
+                Randomize
+              </button>
+            </div>
+            <HierarchyPanel />
+          </>
+        )}
         {animList.length > 0 ? (
           <>
             {groups.length > 1 && (
@@ -125,6 +217,20 @@ export function CharacterPanel() {
             accent='#f8a'
             onChange={setSpeed}
           />
+        )}
+        {charModel !== 'none' && (
+          <>
+            <Toggle
+              label='Ground Pin'
+              value={groundPin}
+              onChange={setGroundPin}
+            />
+            <Toggle
+              label='Test Anim'
+              value={testAnim}
+              onChange={setTestAnim}
+            />
+          </>
         )}
       </Section>
       <Section label='Movement' accent='#af6'>

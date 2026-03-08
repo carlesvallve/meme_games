@@ -55,7 +55,7 @@ export class PathLineRenderer {
 
   setEnabled(enabled: boolean): void {
     this.enabled = enabled;
-    if (!enabled) this.clear();
+    if (!enabled) this.clearLine();
   }
 
   isEnabled(): boolean {
@@ -68,14 +68,16 @@ export class PathLineRenderer {
 
   /** Build/update the path line from character state. */
   update(opts: PathLineUpdateOpts): void {
-    if (!this.enabled || !this.scene) return;
-    this.clearLine();
+    if (!this.scene) return;
 
     const { charPos, groundY, path, pathIndex, goalRadius, climbState, getSurfaceAt } = opts;
 
-    // Update distance label — walk remaining path segments and sum world distance, then convert to cells
+    // Always update distance label (even when path line is hidden)
     const cellDist = this.computeCellDistance(charPos, groundY, path, pathIndex, opts.pathMeta, opts.cellSize, getSurfaceAt);
     this.updateDistLabel(cellDist, path, getSurfaceAt);
+
+    if (!this.enabled) return;
+    this.clearLine();
 
     // During climbing, use the frozen positions from before climbing started
     if (climbState && this.frozenPositions && this.frozenPositions.length >= 6) {

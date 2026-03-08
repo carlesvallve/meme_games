@@ -11,8 +11,9 @@ export const CAPSULE_RADIUS = 0.25;
 
 // ── Character (DummyCharacter.ts) ────────────────────────────────────
 export const DEFAULT_TURN_SPEED = 12;
-export const WAYPOINT_THRESHOLD = 0.3;
+export const WAYPOINT_THRESHOLD = 0.4;
 export const HOP_HEIGHT = 0.06;
+export const WALK_SPEED_FACTOR = 0.4;
 export const FOOT_SFX_COOLDOWN = 0.12;
 export const STEP_UP_RATE = 20; // exponential lerp rate for stepping up
 export const GRAVITY = 60; // fall acceleration

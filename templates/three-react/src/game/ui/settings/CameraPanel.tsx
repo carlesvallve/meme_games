@@ -13,8 +13,8 @@ const CAMERA_MODES: string[] = ['topdown', 'thirdperson'];
 
 const CAMERA_PARAMS: SliderDef<keyof CameraParams>[] = [
   { key: 'fov', label: 'FOV', min: 30, max: 90, step: 5 },
-  { key: 'distance', label: 'Zoom', min: 2, max: 40, step: 0.5 },
-  { key: 'minDistance', label: 'Zoom Min', min: 2, max: 15, step: 0.5 },
+  { key: 'distance', label: 'Zoom', min: 0.5, max: 40, step: 0.5 },
+  { key: 'minDistance', label: 'Zoom Min', min: 0.5, max: 15, step: 0.5 },
   { key: 'maxDistance', label: 'Zoom Max', min: 10, max: 40, step: 0.5 },
   { key: 'pitchMin', label: 'Pitch Min', min: -89, max: -20, step: 1 },
   { key: 'pitchMax', label: 'Pitch Max', min: -50, max: 45, step: 1 },

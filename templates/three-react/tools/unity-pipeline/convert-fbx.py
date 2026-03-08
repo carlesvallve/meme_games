@@ -282,13 +282,6 @@ def retarget_animation(target_arm, source_arm, action_name):
     for bone in target_arm.data.bones:
         tgt_rest_local[bone.name] = _rest_local_quat(bone)
 
-    # Left-side arm bones need delta axis flip because source and target have
-    # different bone rolls (confirmed visually: right arm correct, left arm flipped).
-    # Hands/fingers excluded — they have different rest orientation issues.
-    flip_bones = {
-        "B-shoulder.L", "B-upperArm.L", "B-forearm.L",
-    }
-
     # Create new action
     if not target_arm.animation_data:
         target_arm.animation_data_create()
@@ -296,8 +289,17 @@ def retarget_animation(target_arm, source_arm, action_name):
     new_action.use_fake_user = True
     target_arm.animation_data.action = new_action
 
-    # Frame-by-frame retargeting: right-multiply world delta (works for matched bone rolls)
-    # with axis flip for left-side bones that have incompatible rolls.
+    # Left arm bones: instead of retargeting from broken left source bones,
+    # mirror the right arm's pose_delta (local rotation). The right side works
+    # perfectly, so we just mirror it: (w, x, y, z) → (w, x, -y, -z)
+    # (reflection across YZ plane in bone-local space).
+    MIRROR_R_TO_L = {
+        "LowManRightShoulder": "LowManLeftShoulder",
+        "LowManRightArm": "LowManLeftArm",
+        "LowManRightForeArm": "LowManLeftForeArm",
+    }
+    MIRROR_L_SKIP = set(MIRROR_R_TO_L.values())  # skip these in main loop
+
     for frame in range(frame_start, frame_end + 1):
         bpy.context.scene.frame_set(frame)
 
@@ -305,10 +307,21 @@ def retarget_animation(target_arm, source_arm, action_name):
         bpy.ops.object.mode_set(mode='POSE')
 
         computed_arm_rot = {}
+        right_desired_worlds = {}  # store right side WORLD rotations for mirroring
 
         for tgt_bone in all_tgt_bones_sorted:
             tgt_name = tgt_bone.name
             src_name = rev_map.get(tgt_name)
+
+            # Skip left arm bones — they'll be mirrored from right side after
+            if tgt_name in MIRROR_L_SKIP:
+                # Still need computed_arm_rot for cascade; use rest pose placeholder
+                if tgt_bone.parent and tgt_bone.parent.name in computed_arm_rot:
+                    parent_arm = computed_arm_rot[tgt_bone.parent.name]
+                    computed_arm_rot[tgt_name] = parent_arm @ tgt_rest_local[tgt_name]
+                else:
+                    computed_arm_rot[tgt_name] = tgt_bone.matrix_local.to_quaternion()
+                continue
 
             if src_name:
                 src_pb = source_arm.pose.bones[src_name]
@@ -318,10 +331,6 @@ def retarget_animation(target_arm, source_arm, action_name):
 
                 # Local-frame delta (right-multiply)
                 world_delta = src_rest_world[src_name].conjugated() @ src_cur_world
-
-                # For bones with incompatible rolls, flip the rotation axis
-                if src_name in flip_bones:
-                    world_delta = MQuaternion((world_delta.w, -world_delta.x, -world_delta.y, -world_delta.z))
 
                 # Apply to target rest world
                 desired_world = tgt_rest_world[tgt_name] @ world_delta
@@ -345,6 +354,10 @@ def retarget_animation(target_arm, source_arm, action_name):
                 tgt_pb.rotation_quaternion = pose_delta
                 tgt_pb.keyframe_insert(data_path="rotation_quaternion", frame=frame)
 
+                # Store right side world rotation for mirroring
+                if tgt_name in MIRROR_R_TO_L:
+                    right_desired_worlds[tgt_name] = desired_world
+
                 # Root position delta (hips only)
                 if tgt_name == "LowManHips":
                     src_cur_pos = src_pb.matrix.to_translation()
@@ -359,6 +372,43 @@ def retarget_animation(target_arm, source_arm, action_name):
                     computed_arm_rot[tgt_name] = parent_arm @ tgt_rest_local[tgt_name]
                 else:
                     computed_arm_rot[tgt_name] = tgt_bone.matrix_local.to_quaternion()
+
+        # Mirror right arm world rotations → left arm
+        # Work in WORLD space (not local) to handle asymmetric rest poses
+        for right_name, left_name in MIRROR_R_TO_L.items():
+            if right_name not in right_desired_worlds:
+                continue
+            right_world = right_desired_worlds[right_name]
+            # Mirror world rotation from right → left
+            # Uncomment ONE line to test each sign combo:
+            w, x, y, z = right_world.w, right_world.x, right_world.y, right_world.z
+            # mirrored_world = MQuaternion(( w,  x,  y,  z))  # 0: identity
+            # mirrored_world = MQuaternion(( w,  x,  y, -z))  # 1
+            # mirrored_world = MQuaternion(( w,  x, -y,  z))  # 2
+            # mirrored_world = MQuaternion(( w,  x, -y, -z))  # 3
+            # mirrored_world = MQuaternion(( w, -x,  y,  z))  # 4
+            # mirrored_world = MQuaternion(( w, -x,  y, -z))  # 5
+            # mirrored_world = MQuaternion(( w, -x, -y,  z))  # 6
+            mirrored_world = MQuaternion(( w, -x, -y, -z))  # 7
+
+            # Convert to armature space
+            desired_arm = tgt_arm_world_q.conjugated() @ mirrored_world
+            computed_arm_rot[left_name] = desired_arm
+
+            # Compute local pose_delta from the left bone's actual parent + rest
+            left_bone = target_arm.data.bones[left_name]
+            if left_bone.parent and left_bone.parent.name in computed_arm_rot:
+                parent_arm = computed_arm_rot[left_bone.parent.name]
+            elif left_bone.parent:
+                parent_arm = left_bone.parent.matrix_local.to_quaternion()
+            else:
+                parent_arm = MQuaternion()
+            rest_local = tgt_rest_local[left_name]
+            pose_delta = (parent_arm @ rest_local).conjugated() @ desired_arm
+
+            tgt_pb = target_arm.pose.bones[left_name]
+            tgt_pb.rotation_quaternion = pose_delta
+            tgt_pb.keyframe_insert(data_path="rotation_quaternion", frame=frame)
 
         bpy.ops.object.mode_set(mode='OBJECT')
 
@@ -452,7 +502,66 @@ def import_and_retarget_anim(target_arm, anim_fbx_path, keep_objects):
 
 # ─── Export ───────────────────────────────────────────────────────────
 
+
+def fix_orphan_vertices():
+    """Fix vertices with no bone weights by copying weights from face-adjacent verts.
+    Orphan verts cause wild deformation in skinned meshes because they stay at
+    the origin while everything else moves with the skeleton."""
+    for obj in bpy.data.objects:
+        if obj.type != "MESH" or len(obj.vertex_groups) == 0:
+            continue
+        mesh = obj.data
+        # Find orphan verts (no vertex group assignments)
+        orphans = set()
+        for v in mesh.vertices:
+            if len(v.groups) == 0:
+                orphans.add(v.index)
+        if not orphans:
+            continue
+
+        # Build adjacency from faces: for each vert, which other verts share a face
+        adjacency = {vi: set() for vi in orphans}
+        for poly in mesh.polygons:
+            poly_verts = set(poly.vertices)
+            for vi in poly_verts:
+                if vi in orphans:
+                    adjacency[vi].update(poly_verts - {vi})
+
+        # For each orphan, average weights from its non-orphan neighbors
+        fixed = 0
+        for vi in orphans:
+            neighbors = adjacency[vi] - orphans  # only non-orphan neighbors
+            if not neighbors:
+                continue
+            # Collect all weights from neighbors
+            weight_sums = {}
+            count = 0
+            for ni in neighbors:
+                nv = mesh.vertices[ni]
+                for g in nv.groups:
+                    gname = obj.vertex_groups[g.group].name
+                    weight_sums[gname] = weight_sums.get(gname, 0.0) + g.weight
+                count += 1
+            if count == 0:
+                continue
+            # Average and assign
+            for gname, wsum in weight_sums.items():
+                avg = wsum / count
+                if avg > 0.01:  # skip negligible weights
+                    vg = obj.vertex_groups.get(gname)
+                    if vg:
+                        vg.add([vi], avg, 'REPLACE')
+            fixed += 1
+
+        if fixed > 0:
+            print(f"  [weights] Fixed {fixed}/{len(orphans)} orphan verts in {obj.name}")
+
+
 def export_glb(filepath, mesh_only=False, anim_only=False):
+    # Fix orphan vertex weights before mesh export
+    if not anim_only:
+        fix_orphan_vertices()
+
     bpy.ops.object.select_all(action="DESELECT")
     for obj in bpy.data.objects:
         if anim_only:

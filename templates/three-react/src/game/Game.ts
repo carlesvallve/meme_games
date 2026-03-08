@@ -102,6 +102,28 @@ function syncParticles(
   }
 }
 
+/** Find an animation clip by keyword across both grouped ("Movement/Run01") and flat ("Run") names. */
+function resolveAnim(model: { getAnimationNames(): string[] }, keyword: string): string | null {
+  const names = model.getAnimationNames();
+  // Exact match first
+  if (names.includes(keyword)) return keyword;
+  // Case-insensitive exact (flat names like "Run", "Idle", "Jump")
+  const lower = keyword.toLowerCase();
+  const exact = names.find(n => n.toLowerCase() === lower);
+  if (exact) return exact;
+  // Partial match: "Run" matches "Movement/Run01" or "Run_Carry"
+  // Prefer shorter matches (closer to the keyword)
+  const matches = names.filter(n => {
+    const last = n.includes('/') ? n.slice(n.lastIndexOf('/') + 1) : n;
+    return last.toLowerCase().startsWith(lower);
+  });
+  if (matches.length > 0) {
+    // Prefer exact suffix match over prefix-only
+    return matches.sort((a, b) => a.length - b.length)[0];
+  }
+  return null;
+}
+
 export function createGame(canvas: HTMLCanvasElement): GameInstance {
   // ── Renderer ────────────────────────────────────────────────────────
   const renderer = new THREE.WebGLRenderer({
@@ -202,13 +224,34 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       scale: def.opts.scale,
       rotation: def.opts.rotation,
       onLoaded: (names) => {
-        console.log(`Model "${def.label}" loaded: ${names.length} animations (mesh + shared anim GLBs)`);
+        console.log(`Model "${def.label}" loaded: ${names.length} animations`);
         useGameStore.getState().setCharAnimationList(names);
       },
-    });
+    }, def.loader ?? 'imminence');
   }
   // Initial sync
   syncModel(useGameStore.getState().charModel);
+
+  // Character model callbacks
+  useGameStore.setState({
+    onRandomizeParts: () => {
+      const model = character.getModel();
+      if (model) {
+        model.randomizeParts();
+        useGameStore.setState({ hierarchyVersion: Date.now() });
+      }
+    },
+    onGetHierarchy: () => {
+      const model = character.getModel();
+      return model ? model.getHierarchy() : [];
+    },
+    onToggleHierarchyNode: (uuid: string) => {
+      const model = character.getModel();
+      if (!model) return;
+      model.toggleNodeByUuid(uuid);
+      useGameStore.setState({ hierarchyVersion: Date.now() });
+    },
+  });
 
   // ── Obstacles & Ladders ────────────────────────────────────────────
   const obstacleGen = new ObstacleGenerator(scene);
@@ -458,6 +501,56 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   window.addEventListener('pointercancel', onPointerUpGoal);
   canvas.addEventListener('touchstart', onTouchStartGoal, { passive: true });
 
+  // ── Mesh pick label (right-click on character to identify parts) ────
+  const meshPickRaycaster = new THREE.Raycaster();
+  const meshPickNDC = new THREE.Vector2();
+  let meshPickLabel: HTMLDivElement | null = null;
+
+  function removeMeshPickLabel(): void {
+    if (meshPickLabel) { meshPickLabel.remove(); meshPickLabel = null; }
+  }
+
+  const onRightClickPick = (e: MouseEvent) => {
+    // Right-click only
+    if (e.button !== 2) return;
+    const model = character.getModel();
+    if (!model) return;
+
+    const rect = canvas.getBoundingClientRect();
+    meshPickNDC.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    meshPickNDC.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+    meshPickRaycaster.setFromCamera(meshPickNDC, cam.camera);
+
+    const pick = model.pickMesh(meshPickRaycaster);
+    removeMeshPickLabel();
+    if (!pick) return;
+
+    // Create floating label
+    meshPickLabel = document.createElement('div');
+    meshPickLabel.innerHTML = `<b>[${pick.groupName}] ${pick.variantName}</b><br>mesh: ${pick.meshName}<br>mat: ${pick.materialName}<br>verts: ${pick.vertCount}`;
+    Object.assign(meshPickLabel.style, {
+      position: 'fixed',
+      left: `${e.clientX + 12}px`,
+      top: `${e.clientY - 8}px`,
+      background: 'rgba(0,0,0,0.85)',
+      color: '#fff',
+      padding: '4px 10px',
+      borderRadius: '4px',
+      fontSize: '12px',
+      fontFamily: 'monospace',
+      pointerEvents: 'none',
+      zIndex: '9999',
+      whiteSpace: 'pre',
+      border: '1px solid rgba(255,255,255,0.2)',
+    });
+    document.body.appendChild(meshPickLabel);
+    console.log(`[MeshPick] Group="${pick.groupName}" Variant="${pick.variantName}" mesh="${pick.meshName}" mat="${pick.materialName}" verts=${pick.vertCount}`);
+
+    // Auto-dismiss after 3s
+    setTimeout(removeMeshPickLabel, 3000);
+  };
+  canvas.addEventListener('mousedown', onRightClickPick);
+
   // Context menu prevention handled by Camera
 
   // ── Particle systems ────────────────────────────────────────────────
@@ -640,16 +733,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
 
     // Sync character model from dropdown
     syncModel(store.charModel);
-
-    // Sync animation preview from dropdown
-    const model = character.getModel();
-    if (model && model.isLoaded()) {
-      const wantAnim = store.charAnimation;
-      if (wantAnim && model.getCurrentClip() !== wantAnim) {
-        model.play(wantAnim);
-      }
-      model.setRawTimeScale(store.charSpeed);
-    }
+    character.setHopEnabled(store.charHop);
 
     const inp = input.update();
     let dx = 0,
@@ -660,6 +744,36 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     if (inp.backward) dz += 1;
     character.moveDirectional(dx, dz, cam.getAngleY(), dt, moveSpeed);
     character.update(dt, moveSpeed);
+
+    // Sync animation: locomotion state machine drives anim, dropdown only in idle
+    const model = character.getModel();
+    if (model && model.isLoaded()) {
+      model.setGroundPin(store.charGroundPin);
+      if (store.charTestAnim) {
+        // Test mode: dropdown controls animation, no gameplay override
+        if (model.getCurrentClip() !== store.charAnimation) model.play(store.charAnimation);
+        model.setRawTimeScale(store.charSpeed);
+      } else {
+        const anim = character.getAnimState();
+        if (anim.state === 'walk') {
+          const walkAnim = resolveAnim(model, 'Walk') ?? resolveAnim(model, 'Run');
+          if (walkAnim && model.getCurrentClip() !== walkAnim) model.play(walkAnim);
+          model.setTimeScale(anim.moveSpeed);
+        } else if (anim.state === 'run') {
+          const runAnim = resolveAnim(model, 'Run') ?? resolveAnim(model, 'Walk');
+          if (runAnim && model.getCurrentClip() !== runAnim) model.play(runAnim);
+          model.setTimeScale(anim.moveSpeed);
+        } else if (anim.state === 'jump' || anim.state === 'climb') {
+          const jumpAnim = resolveAnim(model, 'Jump');
+          if (jumpAnim && model.getCurrentClip() !== jumpAnim) model.play(jumpAnim, 0.1);
+          model.setTimeScale(anim.moveSpeed || moveSpeed);
+        } else {
+          const idleAnim = resolveAnim(model, 'Idle') ?? 'Idle';
+          if (model.getCurrentClip() !== idleAnim) model.play(idleAnim);
+          model.setRawTimeScale(store.charSpeed);
+        }
+      }
+    }
 
     const pos = character.getPosition();
     cam.setTarget(pos.x, pos.y, pos.z);
@@ -782,6 +896,8 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       window.removeEventListener('pointerup', onPointerUpGoal);
       window.removeEventListener('pointercancel', onPointerUpGoal);
       canvas.removeEventListener('touchstart', onTouchStartGoal);
+      canvas.removeEventListener('mousedown', onRightClickPick);
+      removeMeshPickLabel();
       scene.remove(character.root);
       character.dispose();
 

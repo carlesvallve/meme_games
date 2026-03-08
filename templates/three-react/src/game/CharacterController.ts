@@ -25,10 +25,14 @@ import {
   LADDER_RUNG_SPACING,
   LADDER_SEARCH_RADIUS,
   LADDER_DOT_THRESHOLD,
+  WALK_SPEED_FACTOR,
 } from './GameConstants';
 import { CharacterModel } from './CharacterModel';
+import { GltfCharacterModel } from './GltfCharacterModel';
 import type { CharacterModelOpts } from './CharacterModel';
 // CharacterModelOpts.meshUrl is the mesh-only GLB; shared animations loaded automatically
+
+type AnyCharacterModel = CharacterModel | GltfCharacterModel;
 
 interface ClimbState {
   ladder: LadderDef;
@@ -54,7 +58,9 @@ export class CharacterController {
   private path: { x: number; z: number }[] = [];
   private pathIndex = 0;
   private moveSpeed = 0;
-  private hopEnabled = true;
+  private hopEnabled = false;
+  private walking = false;
+  private _onKeyDown: ((e: KeyboardEvent) => void) | null = null;
   private hopPhase = 0;
   private lastHopHalf = 0;
   private footSfxTimer = 0;
@@ -96,7 +102,7 @@ export class CharacterController {
   private prevWaypointNavH = 0; // NavGrid height of the waypoint we just left
 
   // Character model (GLB with skeleton + animations)
-  private model: CharacterModel | null = null;
+  private model: AnyCharacterModel | null = null;
   private placeholderMesh: THREE.Mesh | null = null;
   /** Called when model finishes loading — passes animation name list */
   onAnimationsLoaded: ((names: string[]) => void) | null = null;
@@ -116,14 +122,24 @@ export class CharacterController {
     this.placeholderMesh.castShadow = true;
     this.placeholderMesh.receiveShadow = true;
     this.root.add(this.placeholderMesh);
+
+    // Shift = toggle walk/run
+    this._onKeyDown = (e: KeyboardEvent) => {
+      if (e.type === 'keydown' && (e.code === 'ShiftLeft' || e.code === 'ShiftRight')) {
+        this.walking = !this.walking;
+      }
+    };
+    window.addEventListener('keydown', this._onKeyDown);
   }
 
-  /** Load a GLB character model to replace the placeholder box. */
-  loadModel(opts: CharacterModelOpts): void {
+  /** Load a GLB character model to replace the placeholder box.
+   *  loaderType: 'imminence' = CharacterModel (mesh+shared anims), 'gltf' = GltfCharacterModel (self-contained) */
+  loadModel(opts: CharacterModelOpts, loaderType: 'imminence' | 'gltf' = 'imminence'): void {
     // Clean up previous model if any
     this.clearModel();
     const origOnLoaded = opts.onLoaded;
-    this.model = new CharacterModel({
+    const ModelClass = loaderType === 'gltf' ? GltfCharacterModel : CharacterModel;
+    this.model = new ModelClass({
       ...opts,
       onMeshReady: () => {
         // Show model immediately when mesh loads (before animations)
@@ -165,7 +181,7 @@ export class CharacterController {
   }
 
   /** Get the character model (if loaded). */
-  getModel(): CharacterModel | null {
+  getModel(): AnyCharacterModel | null {
     return this.model;
   }
 
@@ -187,6 +203,10 @@ export class CharacterController {
   setTurnSpeed(v: number): void {
     this.turnSpeed = v;
   }
+  setHopEnabled(v: boolean): void {
+    this.hopEnabled = v;
+  }
+
   setGravity(v: number): void {
     this.gravity = v;
     this.maxFallSpeed = v * 0.5; // terminal velocity scales with gravity
@@ -391,8 +411,10 @@ export class CharacterController {
           cs.phaseTime = 0;
           cs.startX = pos.x;
           cs.startZ = pos.z;
-          // Turn 180 on dismount: face away from wall when stepping off
-          cs.targetFacing = Math.atan2(-ladder.facingDX, -ladder.facingDZ);
+          // Turn 180 on dismount only when going down (face away from wall)
+          if (cs.direction === 'down') {
+            cs.targetFacing = Math.atan2(-ladder.facingDX, -ladder.facingDZ);
+          }
         }
       } else {
         // Move toward target rung
@@ -459,8 +481,9 @@ export class CharacterController {
     dz: number,
     cameraAngleY: number,
     dt: number,
-    speed: number,
+    baseSpeed: number,
   ): void {
+    const speed = this.walking ? baseSpeed * WALK_SPEED_FACTOR : baseSpeed;
     // Don't allow movement while climbing, stunned, or pausing at ledge edge
     if (this.climbState) return;
     if (this.landingStun > 0) return;
@@ -700,7 +723,11 @@ export class CharacterController {
   }
 
   /** Advance path following + settle + collision + hop. Call every frame. */
-  update(dt: number, speed: number): void {
+  private _baseSpeed = 0;
+
+  update(dt: number, baseSpeed: number): void {
+    this._baseSpeed = baseSpeed;
+    const speed = this.walking ? baseSpeed * WALK_SPEED_FACTOR : baseSpeed;
     // ── Climbing state machine takes priority ──
     if (this.climbState) {
     }
@@ -712,6 +739,8 @@ export class CharacterController {
       ) {
         this.updatePathLine();
       }
+      // Still update the model mixer so animations play during climbing
+      this.model?.update(dt);
       return;
     }
 
@@ -801,25 +830,7 @@ export class CharacterController {
           this.updatePathLine();
         }
       } else {
-        // Slow down on stairs: climbing up, or small descent (within stepUp = stair steps).
-        // Large drops and flat segments use full speed.
-        // Only slow if BOTH the current segment has elevation change AND the target node
-        // differs in height from its successor (we're mid-stairs, not on the last step).
         let moveSpd = speed;
-        if (this.pathNavHeights.length > 0 && this.pathIndex > 0) {
-          const prevH = this.pathNavHeights[this.pathIndex - 1] ?? 0;
-          const curH = this.pathNavHeights[this.pathIndex] ?? 0;
-          const diff = curH - prevH;
-          const isStair = diff > 0.01 || (diff < -0.01 && -diff <= this.stepUp);
-          if (isStair) {
-            // Check if target node continues to change elevation (mid-stairs)
-            // If next segment is flat, we're on the last step — don't slow down
-            const nextH = this.pathNavHeights[this.pathIndex + 1];
-            if (nextH !== undefined && Math.abs(nextH - curH) > 0.01) {
-              moveSpd *= 0.5;
-            }
-          }
-        }
         // Clamp speed on final approach to prevent overshoot (like voxel-engine)
         if (isLast) {
           const maxStep = dist / dt;
@@ -874,17 +885,39 @@ export class CharacterController {
         this.pathNavHeights.length > 0
       ) {
         const targetNavH = this.pathNavHeights[this.pathIndex] ?? 0;
-        const g = this.navGrid.worldToGrid(pos.x, pos.z);
-        const navCell = this.navGrid.getCell(g.gx, g.gz);
-        const cellH = navCell ? navCell.surfaceHeight : 0;
-        // Floor: never drop below the minimum of prev/target waypoint heights.
-        // Prevents falling through ground-level cells between two elevated waypoints.
-        const minWaypointH = Math.min(this.prevWaypointNavH, targetNavH);
-        // Ceiling: when heading to a lower waypoint, don't let the cell tracker
-        // raise groundY back above prevWaypointNavH (the terrace we just left).
-        // This ensures groundY actually drops when we advance past a cliff edge.
-        const maxWaypointH = this.prevWaypointNavH;
-        this.groundY = Math.min(Math.max(cellH, minWaypointH), maxWaypointH);
+        const heightDiff = targetNavH - this.prevWaypointNavH;
+        // For step-ups (small height increases), lerp groundY based on XZ progress
+        // toward the waypoint. This prevents groundY from jumping when the grid cell
+        // changes, keeping it in sync with visual movement (like free movement does).
+        // For drops and flat segments, use the cell-based approach.
+        if (Math.abs(heightDiff) <= this.stepUp) {
+          const target = this.path[this.pathIndex];
+          const prevWp = this.pathIndex > 1 ? this.path[this.pathIndex - 1] : null;
+          if (prevWp) {
+            const totalDx = target.x - prevWp.x;
+            const totalDz = target.z - prevWp.z;
+            const totalDist = Math.sqrt(totalDx * totalDx + totalDz * totalDz);
+            const currDx = pos.x - prevWp.x;
+            const currDz = pos.z - prevWp.z;
+            const currDist = Math.sqrt(currDx * currDx + currDz * currDz);
+            const rawT = totalDist > 0.001 ? Math.min(currDist / totalDist, 1) : 0;
+            // Start rising when close enough that we'll arrive within ~0.15s
+            // at current speed. This works for any speed.
+            const riseDistance = speed * 0.15;
+            const remaining = totalDist * (1 - rawT);
+            const t = remaining > riseDistance ? 0 : 1 - remaining / riseDistance;
+            this.groundY = this.prevWaypointNavH + heightDiff * t;
+          } else {
+            this.groundY = this.prevWaypointNavH;
+          }
+        } else {
+          const g = this.navGrid.worldToGrid(pos.x, pos.z);
+          const navCell = this.navGrid.getCell(g.gx, g.gz);
+          const cellH = navCell ? navCell.surfaceHeight : 0;
+          const minWaypointH = Math.min(this.prevWaypointNavH, targetNavH);
+          const maxWaypointH = this.prevWaypointNavH;
+          this.groundY = Math.min(Math.max(cellH, minWaypointH), maxWaypointH);
+        }
       } else {
         const surfaceY = getSurfaceHeight(
           pos.x,
@@ -913,10 +946,10 @@ export class CharacterController {
     // ── Smooth visual Y (lerp up, gravity down — matches voxel-engine) ──
     if (this.groundY > this.visualGroundY) {
       // Stepping up: exponential lerp
+      const gap = this.groundY - this.visualGroundY;
       this.visualGroundY =
         this.visualGroundY +
-        (this.groundY - this.visualGroundY) *
-          (1 - Math.exp(-STEP_UP_RATE * dt));
+        gap * (1 - Math.exp(-STEP_UP_RATE * dt));
       this.velocityY = 0;
       this.isFalling = false;
     } else if (this.groundY < this.visualGroundY) {
@@ -964,8 +997,9 @@ export class CharacterController {
     // ── Hop + step SFX ──
     this.footSfxTimer += dt;
     if (this.hopEnabled && this.moveSpeed > 0 && this.landingStun <= 0) {
-      this.hopPhase += dt * this.moveSpeed * 4;
-      const hop = Math.abs(Math.sin(this.hopPhase)) * HOP_HEIGHT;
+      const hopSpeed = this.walking ? this.moveSpeed * 1.5 : this.moveSpeed;
+      this.hopPhase += dt * hopSpeed * 4;
+      const hop = Math.abs(Math.sin(this.hopPhase)) * (this.walking ? 0 : HOP_HEIGHT);
       pos.y = this.visualGroundY + hop;
 
       // Play step SFX each time sin crosses zero (foot landing)
@@ -1015,11 +1049,34 @@ export class CharacterController {
     return this.moveSpeed > 0;
   }
 
+  /** Returns the current locomotion state for animation syncing. */
+  getAnimState(): { state: 'idle' | 'walk' | 'run' | 'jump' | 'climb'; moveSpeed: number } {
+    // Climbing ladder → climb (jump anim per rung)
+    if (this.climbState && this.climbState.phase === 'climb') {
+      return { state: 'climb', moveSpeed: 0 };
+    }
+    // Falling more than 1 cell → jump
+    const heightDiff = Math.abs(this.visualGroundY - this.groundY);
+    if (this.isFalling && heightDiff > this.navGrid.cellSize * 1.1) {
+      return { state: 'jump', moveSpeed: this._baseSpeed };
+    }
+    // Moving horizontally → walk or run
+    if (this.moveSpeed > 0 && this.landingStun <= 0) {
+      return { state: this.walking ? 'walk' : 'run', moveSpeed: this._baseSpeed };
+    }
+    return { state: 'idle', moveSpeed: 0 };
+  }
+
+  isWalking(): boolean { return this.walking; }
+
   getPosition(): THREE.Vector3 {
     return this.root.position;
   }
 
   dispose(): void {
+    if (this._onKeyDown) {
+      window.removeEventListener('keydown', this._onKeyDown);
+    }
     this.pathLine.dispose();
     this.model?.dispose();
     if (this.placeholderMesh) {
