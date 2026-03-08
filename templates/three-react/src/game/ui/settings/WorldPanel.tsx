@@ -1,7 +1,7 @@
 import { useGameStore } from '../../../store';
 import { SettingsWindow, Section, Slider, Toggle, resetBtnStyle } from './shared';
 
-const obstacleBtnStyle = {
+const genBtnStyle = {
   flex: 1,
   padding: '4px 10px',
   background: 'rgba(100,200,100,0.15)',
@@ -13,8 +13,15 @@ const obstacleBtnStyle = {
   fontWeight: 600,
 };
 
+const mergeBtnStyle = {
+  ...genBtnStyle,
+  background: 'rgba(180,140,255,0.15)',
+  color: '#c8a8ff',
+  border: '1px solid rgba(180,140,255,0.3)',
+};
+
 const clearBtnStyle = {
-  ...obstacleBtnStyle,
+  ...genBtnStyle,
   background: 'rgba(200,150,100,0.15)',
   color: '#fa8',
   border: '1px solid rgba(200,150,100,0.3)',
@@ -33,6 +40,8 @@ export function WorldPanel() {
   const setWorldRevealEnabled = useGameStore((s) => s.setWorldRevealEnabled);
   const ladderDensity = useGameStore((s) => s.ladderDensity);
   const setLadderDensity = useGameStore((s) => s.setLadderDensity);
+  const autoMerge = useGameStore((s) => s.autoMerge);
+  const setAutoMerge = useGameStore((s) => s.setAutoMerge);
 
   return (
     <SettingsWindow>
@@ -56,10 +65,11 @@ export function WorldPanel() {
           onChange={setGridCellSize}
         />
       </Section>
-      <Section label='Obstacles' accent='#8f8'>
+      <Section label='World' accent='#8f8'>
         <Toggle label='Debug NavGrid' value={debugNavGrid} onChange={setDebugNavGrid} />
         <Toggle label='Snap to Grid' value={obstacleSnap} onChange={setObstacleSnap} />
         <Toggle label='Build Effects' value={worldRevealEnabled} onChange={setWorldRevealEnabled} />
+        <Toggle label='Automerge' value={autoMerge} onChange={setAutoMerge} />
         <Slider
           label='Ladder Density'
           value={ladderDensity}
@@ -69,11 +79,12 @@ export function WorldPanel() {
           accent='#8f8'
           onChange={setLadderDensity}
         />
+        {/* Row 1: Generation */}
         <div style={{ display: 'flex', gap: 6 }}>
           <button
             onClick={() => useGameStore.getState().onGenerateWorld?.()}
             style={{
-              ...obstacleBtnStyle,
+              ...genBtnStyle,
               background: 'rgba(100,150,255,0.2)',
               color: '#8af',
               border: '1px solid rgba(100,150,255,0.4)',
@@ -83,32 +94,36 @@ export function WorldPanel() {
           </button>
           <button
             onClick={() => useGameStore.getState().onGenerateObstacles?.()}
-            style={obstacleBtnStyle}
+            style={genBtnStyle}
           >
             Obstacles
           </button>
           <button
             onClick={() => useGameStore.getState().onGenerateTerrain?.()}
-            style={obstacleBtnStyle}
+            style={genBtnStyle}
           >
-            Terrain
+            Terraces
           </button>
           <button
             onClick={() => useGameStore.getState().onGenerateLadders?.()}
-            style={obstacleBtnStyle}
+            style={genBtnStyle}
           >
             Ladders
           </button>
+        </div>
+        {/* Row 2: Merge / Unmerge / Clear */}
+        <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
           <button
             onClick={() => useGameStore.getState().onMergeWorld?.()}
-            style={{
-              ...obstacleBtnStyle,
-              background: 'rgba(180,140,255,0.15)',
-              color: '#c8a8ff',
-              border: '1px solid rgba(180,140,255,0.3)',
-            }}
+            style={mergeBtnStyle}
           >
             Merge
+          </button>
+          <button
+            onClick={() => useGameStore.getState().onUnmergeWorld?.()}
+            style={mergeBtnStyle}
+          >
+            Unmerge
           </button>
           <button
             onClick={() => useGameStore.getState().onClearObstacles?.()}

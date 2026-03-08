@@ -484,6 +484,41 @@ export class ObstacleGenerator {
     this.meshes = wrapper ? [wrapper.children[0] as THREE.Mesh] : [];
   }
 
+  /** Revert from merged state back to individual meshes.
+   *  Recreates meshes from obstacles[]/colors[] data (source of truth). */
+  unmerge(): void {
+    if (!this.merged.isMerged) return;
+    // Remove merged wrapper
+    this.merged.clear(this.scene);
+    // Remove any leftover individual meshes (added post-merge)
+    for (const m of this.meshes) {
+      this.scene.remove(m);
+      m.geometry.dispose();
+      (m.material as THREE.Material).dispose();
+    }
+    this.meshes = [];
+    // Recreate individual meshes from data arrays
+    for (let i = 0; i < this.obstacles.length; i++) {
+      const obs = this.obstacles[i];
+      if (obs.height <= 0) continue; // destroyed
+      const color = this.colors[i];
+      const geo = new THREE.BoxGeometry(obs.halfW * 2, obs.height, obs.halfD * 2);
+      geo.translate(0, obs.height / 2, 0);
+      const mat = new THREE.MeshStandardMaterial({
+        color,
+        roughness: 0.85,
+        metalness: 0.05,
+      });
+      patchWorldRevealMaterial(mat);
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.set(obs.x, 0, obs.z);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      this.scene.add(mesh);
+      this.meshes.push(mesh);
+    }
+  }
+
   get isMerged(): boolean { return this.merged.isMerged; }
 
   /** Destroy an obstacle by index — zeroes its vertices in the merged buffer. */
@@ -515,13 +550,17 @@ export class ObstacleGenerator {
     return bestIdx;
   }
 
-  /** Dispose meshes and reset arrays */
+  /** Dispose all meshes (merged + individual) and reset arrays */
   clear(): void {
+    // Remove merged wrapper (if any)
     this.merged.clear(this.scene);
+    // Remove any individual meshes (pre-merge or post-merge additions)
     for (const mesh of this.meshes) {
       this.scene.remove(mesh);
       mesh.geometry.dispose();
-      (mesh.material as THREE.Material).dispose();
+      const mat = mesh.material;
+      if (Array.isArray(mat)) mat.forEach(m => m.dispose());
+      else (mat as THREE.Material).dispose();
     }
     this.meshes = [];
     this.obstacles = [];

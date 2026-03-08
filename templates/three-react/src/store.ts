@@ -132,7 +132,7 @@ const SETTINGS_KEY = 'three-react:settings';
 const TRANSIENT_KEYS = new Set([
   'phase', 'charAnimation', 'charAnimationList', 'settingsPanelOpen',
   'onStartGame', 'onPauseToggle', 'onResetCameraParams', 'onResetLightParams',
-  'onGenerateObstacles', 'onGenerateTerrain', 'onGenerateLadders', 'onClearObstacles', 'onGenerateWorld', 'onMergeWorld',
+  'onGenerateObstacles', 'onGenerateTerrain', 'onGenerateLadders', 'onClearObstacles', 'onGenerateWorld', 'onMergeWorld', 'onUnmergeWorld',
   'drawCalls',
 ]);
 
@@ -259,6 +259,9 @@ interface GameStore {
   onClearObstacles: (() => void) | null;
   onGenerateWorld: (() => void) | null;
   onMergeWorld: (() => void) | null;
+  onUnmergeWorld: (() => void) | null;
+  autoMerge: boolean;
+  setAutoMerge: (v: boolean) => void;
   drawCalls: number;
 }
 
@@ -362,6 +365,9 @@ export const useGameStore = create<GameStore>((set) => ({
   onClearObstacles: null,
   onGenerateWorld: null,
   onMergeWorld: null,
+  onUnmergeWorld: null,
+  autoMerge: (saved.autoMerge as boolean) ?? true,
+  setAutoMerge: (autoMerge) => set({ autoMerge }),
   drawCalls: 0,
 }));
 

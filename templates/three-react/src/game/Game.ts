@@ -192,75 +192,75 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   const ladderSystem = new LadderSystem(scene);
   const ladderGenerator = new LadderGenerator();
 
-  function rebuildAfterGeneration(): void {
+  /** Single canonical navgrid rebuild — called after ANY world operation.
+   *  Rebuilds navGrid from obstacles, re-registers ladder nav-links,
+   *  recomputes reachability, updates character + overlay + debug. */
+  function rebuildWorld(): void {
     const { charStepUp, charStepDown } = useGameStore.getState();
-    navGrid.build(
-      obstacleGen.obstacles,
-      charStepUp,
-      charStepDown,
-      CAPSULE_RADIUS,
-    );
-    // Re-register surviving ladder nav-links + recompute reachability
+    navGrid.build(obstacleGen.obstacles, charStepUp, charStepDown, CAPSULE_RADIUS);
     ladderSystem.reregisterNavLinks(navGrid);
     character.setObstacles(obstacleGen.obstacles);
     character.setLadderDefs(ladderSystem.ladders);
-    gridOverlay.rebuild(
-      WORLD_SIZE,
-      gridCellSize,
-      GROUND_COLOR,
-      obstacleGen.obstacles,
-      obstacleGen.colors,
-    );
+    gridOverlay.rebuild(WORLD_SIZE, gridCellSize, GROUND_COLOR, obstacleGen.obstacles, obstacleGen.colors);
     refreshDebugNav();
   }
 
   function generateLadders(): void {
-    // Clear previous ladders, rebuild navGrid fresh, then place ladders
+    ladderSystem.unmerge();
+    // Rebuild navGrid fresh (clears old links) before scanning for ladder sites
     const { charStepUp, charStepDown } = useGameStore.getState();
-    navGrid.build(
-      obstacleGen.obstacles,
-      charStepUp,
-      charStepDown,
-      CAPSULE_RADIUS,
-    );
+    navGrid.build(obstacleGen.obstacles, charStepUp, charStepDown, CAPSULE_RADIUS);
     ladderGenerator.generate(navGrid, ladderSystem);
-    character.setLadderDefs(ladderSystem.ladders);
-    // Rebuild overlay after ladders unblocked cells and added nav-links
-    gridOverlay.rebuild(
-      WORLD_SIZE,
-      gridCellSize,
-      GROUND_COLOR,
-      obstacleGen.obstacles,
-      obstacleGen.colors,
-    );
-    refreshDebugNav();
+    // Now do full rebuild to re-register all ladder links + reachability
+    rebuildWorld();
+    autoMergeIfEnabled();
+  }
+
+  function mergeWorld(): void {
+    obstacleGen.unmerge();
+    ladderSystem.unmerge();
+    obstacleGen.mergeMeshes();
+    ladderSystem.mergeMeshes();
+    rebuildWorld();
+  }
+
+  function unmergeWorld(): void {
+    obstacleGen.unmerge();
+    ladderSystem.unmerge();
+    rebuildWorld();
+  }
+
+  let suppressAutoMerge = false;
+
+  function autoMergeIfEnabled(): void {
+    if (!suppressAutoMerge && useGameStore.getState().autoMerge) mergeWorld();
   }
 
   function generateObstacles(): void {
+    obstacleGen.unmerge();
     obstacleGen.generateObstacles(gridCellSize);
-    rebuildAfterGeneration();
+    rebuildWorld();
+    autoMergeIfEnabled();
   }
 
   function generateTerrain(): void {
+    obstacleGen.unmerge();
     obstacleGen.generateTerrain(gridCellSize);
-    rebuildAfterGeneration();
+    rebuildWorld();
+    autoMergeIfEnabled();
   }
 
   function clearObstacles(): void {
     destruction.cancelTarget();
     obstacleGen.clear();
     ladderSystem.clear();
-    const { charStepUp, charStepDown } = useGameStore.getState();
-    navGrid.build([], charStepUp, charStepDown, CAPSULE_RADIUS);
+    // Full rebuild with empty world
+    rebuildWorld();
     character.setNavGrid(navGrid); // clears path + path line + label
-    character.setObstacles([]);
-    character.setLadderDefs([]);
     // Hide goal marker
     markerMat.opacity = 0;
     markerFade = 0;
     markerSnapTarget = null;
-    gridOverlay.rebuild(WORLD_SIZE, gridCellSize, GROUND_COLOR, [], []);
-    refreshDebugNav();
   }
 
   let prevStepUp = useGameStore.getState().charStepUp;
@@ -284,17 +284,11 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       obstacleGen.colors,
     );
 
-    // Rebuild navGrid (preserve current obstacles)
+    // Rebuild navGrid with new cell size (preserves current obstacles)
     navGrid = new NavGrid(WORLD_SIZE, WORLD_SIZE, gridCellSize);
-    navGrid.build(
-      obstacleGen.obstacles,
-      useGameStore.getState().charStepUp,
-      useGameStore.getState().charStepDown,
-      CAPSULE_RADIUS,
-    );
-    ladderSystem.clear();
+    ladderSystem.clear(); // ladders invalid at old cell size
+    rebuildWorld();
     character.setNavGrid(navGrid);
-    character.setLadderDefs([]);
 
     // Rebuild click marker to match new cell size
     if (gridCellSize !== markerCellSize) {
@@ -303,7 +297,6 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       clickMarker.geometry = markerGeo;
       markerCellSize = gridCellSize;
     }
-    refreshDebugNav();
   }
 
   // ── Torch light ──────────────────────────────────────────────────────
@@ -537,21 +530,22 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     onClearObstacles: () => clearObstacles(),
     onGenerateWorld: () => {
       clearObstacles();
+      suppressAutoMerge = true;
       const passes = 6 + Math.floor(Math.random() * 5); // 6-10 passes
       for (let i = 0; i < passes; i++) {
         if (Math.random() < 0.5) generateObstacles();
         else generateTerrain();
       }
       generateLadders();
+      suppressAutoMerge = false;
+      autoMergeIfEnabled();
       if (useGameStore.getState().worldRevealEnabled) {
         const maxH = obstacleGen.obstacles.reduce((m, o) => Math.max(m, o.height), 0);
         worldReveal.start(maxH);
       }
     },
-    onMergeWorld: () => {
-      obstacleGen.mergeMeshes();
-      ladderSystem.mergeMeshes();
-    },
+    onMergeWorld: () => mergeWorld(),
+    onUnmergeWorld: () => unmergeWorld(),
   });
 
   // ── Game loop ───────────────────────────────────────────────────────
@@ -623,22 +617,8 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     ) {
       prevStepUp = store.charStepUp;
       prevStepDown = store.charStepDown;
-      navGrid.build(
-        obstacleGen.obstacles,
-        store.charStepUp,
-        store.charStepDown,
-        CAPSULE_RADIUS,
-      );
-      ladderSystem.clear();
-      character.setLadderDefs([]);
-      gridOverlay.rebuild(
-        WORLD_SIZE,
-        gridCellSize,
-        GROUND_COLOR,
-        obstacleGen.obstacles,
-        obstacleGen.colors,
-      );
-      refreshDebugNav();
+      ladderSystem.clear(); // ladders invalid with new step params
+      rebuildWorld();
     }
     gridOverlay.setOpacity(store.gridOpacity);
 
@@ -693,7 +673,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     if (inp.attack && obstacleGen.isMerged) {
       if (destruction.hasTarget) {
         if (destruction.confirmDestroy(obstacleGen, ladderSystem, cam)) {
-          rebuildAfterGeneration();
+          rebuildWorld();
         }
       } else {
         const cPos = character.getPosition();

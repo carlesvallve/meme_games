@@ -44,6 +44,7 @@ export class LadderSystem {
   private mat: THREE.MeshStandardMaterial;
   private cellSize = 0.5;
   private merged = new MergedMesh();
+  private destroyedIndices = new Set<number>();
 
   constructor(private scene: THREE.Scene) {
     this.mat = new THREE.MeshStandardMaterial({
@@ -169,7 +170,7 @@ export class LadderSystem {
    *  Call after navGrid.build() to restore ladder connectivity without regenerating. */
   reregisterNavLinks(navGrid: NavGrid): void {
     for (let i = 0; i < this.ladders.length; i++) {
-      if (this.merged.isDestroyed(i)) continue;
+      if (this.destroyedIndices.has(i) || this.merged.isDestroyed(i)) continue;
       const ld = this.ladders[i];
       const verticalCells = Math.abs(ld.topY - ld.bottomY) / navGrid.cellSize;
       const cost = verticalCells * LADDER_COST + 1;
@@ -186,6 +187,29 @@ export class LadderSystem {
 
   get isMerged(): boolean { return this.merged.isMerged; }
 
+  /** Revert from merged state back to individual meshes.
+   *  Recreates ladder groups from ladders[] data (source of truth). */
+  unmerge(): void {
+    if (!this.merged.isMerged) return;
+    // Remove merged wrapper
+    this.merged.clear(this.scene);
+    // Remove any leftover individual meshes (added post-merge)
+    for (const group of this.meshes) {
+      this.scene.remove(group);
+      group.traverse((child) => {
+        if ((child as THREE.Mesh).isMesh) {
+          (child as THREE.Mesh).geometry.dispose();
+        }
+      });
+    }
+    this.meshes = [];
+    // Recreate individual meshes from surviving ladder data
+    for (let i = 0; i < this.ladders.length; i++) {
+      if (this.destroyedIndices.has(i)) continue;
+      this.createLadderMesh(this.ladders[i]);
+    }
+  }
+
   /** Merge all ladder groups into a single mesh with vertex colors. */
   mergeMeshes(): void {
     const wrapper = this.merged.merge(this.meshes, this.scene, {
@@ -197,6 +221,7 @@ export class LadderSystem {
   /** Destroy a ladder by index. Returns the ladder def, or null if invalid. */
   destroyLadder(index: number): LadderDef | null {
     if (!this.merged.destroy(index)) return null;
+    this.destroyedIndices.add(index);
     return this.ladders[index];
   }
 
@@ -205,7 +230,7 @@ export class LadderSystem {
     const EPS = 0.01;
     const result: number[] = [];
     for (let i = 0; i < this.ladders.length; i++) {
-      if (this.merged.isDestroyed(i)) continue;
+      if (this.destroyedIndices.has(i) || this.merged.isDestroyed(i)) continue;
       const ld = this.ladders[i];
       if (
         Math.abs(ld.highWorldX - obsX) < halfW + EPS &&
@@ -218,7 +243,9 @@ export class LadderSystem {
   }
 
   clear(): void {
+    // Remove merged wrapper (if any)
     this.merged.clear(this.scene);
+    // Remove any individual meshes (pre-merge or post-merge additions)
     for (const group of this.meshes) {
       this.scene.remove(group);
       group.traverse((child) => {
@@ -229,6 +256,7 @@ export class LadderSystem {
     }
     this.meshes = [];
     this.ladders = [];
+    this.destroyedIndices.clear();
   }
 
   dispose(): void {

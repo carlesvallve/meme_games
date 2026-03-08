@@ -50,13 +50,19 @@ export class MergedMesh {
 
         const pos = geo.getAttribute('position') as THREE.BufferAttribute;
         const nrm = geo.getAttribute('normal') as THREE.BufferAttribute;
+        const existingColors = geo.getAttribute('color') as THREE.BufferAttribute | null;
         const mat = mesh.material as THREE.MeshStandardMaterial;
         const c = mat.color;
 
         for (let v = 0; v < pos.count; v++) {
           positions.push(pos.getX(v), pos.getY(v), pos.getZ(v));
           normals.push(nrm.getX(v), nrm.getY(v), nrm.getZ(v));
-          colors.push(c.r, c.g, c.b);
+          // Preserve existing vertex colors (from a previous merge), else use material color
+          if (existingColors) {
+            colors.push(existingColors.getX(v), existingColors.getY(v), existingColors.getZ(v));
+          } else {
+            colors.push(c.r, c.g, c.b);
+          }
         }
         geo.dispose();
       });
