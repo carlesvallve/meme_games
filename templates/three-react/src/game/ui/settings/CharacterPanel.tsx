@@ -182,11 +182,6 @@ export function CharacterPanel() {
               </button>
             </div>
             <HierarchyPanel />
-            <Toggle
-              label='Ground Pin'
-              value={groundPin}
-              onChange={setGroundPin}
-            />
           </>
         )}
       </Section>
@@ -216,6 +211,11 @@ export function CharacterPanel() {
             onChange={setSpeed}
           />
           <Toggle
+            label='Ground Pin'
+            value={groundPin}
+            onChange={setGroundPin}
+          />
+          <Toggle
             label='Test Mode'
             value={testAnim}
             onChange={setTestAnim}
@@ -225,6 +225,25 @@ export function CharacterPanel() {
         charModel !== 'none' && <div style={{ color: '#888', fontSize: 11, padding: '4px 0' }}>Loading model...</div>
       )}
       <Section label='Movement' accent='#8f8'>
+        <div style={rowStyle}>
+          <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>
+            Mode
+          </span>
+          <div style={{ display: 'flex', gap: 3, flex: 1 }}>
+            {SNAP_MODES.map((m) => (
+              <button
+                key={m}
+                onClick={() => setSnapMode(m)}
+                style={{
+                  ...btnStyle(snapMode === m),
+                  flex: 1,
+                }}
+              >
+                {m}
+              </button>
+            ))}
+          </div>
+        </div>
         <Slider
           label='Move Speed'
           value={moveSpeed}
@@ -233,24 +252,6 @@ export function CharacterPanel() {
           step={0.5}
           accent='#af6'
           onChange={setMoveSpeed}
-        />
-        <Slider
-          label='Step Up'
-          value={stepUp}
-          min={0}
-          max={1.5}
-          step={0.05}
-          accent='#af6'
-          onChange={setStepUp}
-        />
-        <Slider
-          label='Step Down'
-          value={stepDown}
-          min={0}
-          max={3}
-          step={0.05}
-          accent='#af6'
-          onChange={setStepDown}
         />
         <Slider
           label='Rot Speed'
@@ -270,16 +271,31 @@ export function CharacterPanel() {
           accent='#af6'
           onChange={setGravity}
         />
+        <Slider
+          label='Step Up'
+          value={stepUp}
+          min={0}
+          max={1.5}
+          step={0.05}
+          accent='#af6'
+          onChange={setStepUp}
+        />
+        <Slider
+          label='Step Down'
+          value={stepDown}
+          min={0}
+          max={3}
+          step={0.05}
+          accent='#af6'
+          onChange={setStepDown}
+        />
         <Toggle
           label='Hop'
           value={hop}
           onChange={setHop}
         />
-        <Toggle
-          label='Debug Path'
-          value={debugPath}
-          onChange={setDebugPath}
-        />
+      </Section>
+      <Section label='Pathfinding' accent='#8f8'>
         <Toggle
           label='String Pull'
           value={stringPull}
@@ -291,29 +307,15 @@ export function CharacterPanel() {
           onChange={setAutoMove}
         />
         <Toggle
-          label='Continuous Path'
+          label='Continuous'
           value={continuousPath}
           onChange={setContinuousPath}
         />
-        <div style={rowStyle}>
-          <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>
-            Movement
-          </span>
-          <div style={{ display: 'flex', gap: 3, flex: 1 }}>
-            {SNAP_MODES.map((m) => (
-              <button
-                key={m}
-                onClick={() => setSnapMode(m)}
-                style={{
-                  ...btnStyle(snapMode === m),
-                  flex: 1,
-                }}
-              >
-                {m}
-              </button>
-            ))}
-          </div>
-        </div>
+        <Toggle
+          label='Debug Path'
+          value={debugPath}
+          onChange={setDebugPath}
+        />
       </Section>
       <button
         onClick={() => useGameStore.setState({

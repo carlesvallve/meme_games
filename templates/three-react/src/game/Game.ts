@@ -446,7 +446,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
           hit.x,
           hit.z,
           useGameStore.getState().charMoveSpeed,
-          pathLine.getMarkerRadius(),
+          pathLine.getMarkerRadius(gridCellSize),
           isDrag,
         )
       ) {
@@ -790,8 +790,8 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
           model.setRawTimeScale(store.charSpeed);
         } else if (anim.state === 'jump') {
           const jumpAnim = resolveAnim(model, 'Jump');
-          if (jumpAnim && model.getCurrentClip() !== jumpAnim) model.play(jumpAnim, 0.1);
-          model.setTimeScale(anim.moveSpeed || moveSpeed);
+          if (jumpAnim && model.getCurrentClip() !== jumpAnim) model.play(jumpAnim, 0.2);
+          model.setRawTimeScale(0.75);
         } else {
           const idleAnim = resolveAnim(model, 'Idle') ?? 'Idle';
           if (model.getCurrentClip() !== idleAnim) model.play(idleAnim);

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import type { NavGrid } from './pathfinding/NavGrid';
+import { createGLTFLoader } from './loaders';
 import { findPath } from './pathfinding/AStar';
 
 const TURN_SPEED = 12;
@@ -45,7 +45,7 @@ export class KaykitCharacter {
     this.navGrid = navGrid;
     this.root = new THREE.Group();
 
-    const loader = new GLTFLoader();
+    const loader = createGLTFLoader();
     loader.load('/models/kaykit/Knight.glb', (gltf) => {
       const model = gltf.scene;
       model.scale.setScalar(0.5);

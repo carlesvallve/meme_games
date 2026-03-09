@@ -44,6 +44,7 @@ export const LADDER_SEARCH_RADIUS = 2; // navgrid cells to search for ladders
 export const LADDER_DOT_THRESHOLD = 0.3; // min alignment with movement direction
 
 // ── UI / Markers (Game.ts) ───────────────────────────────────────────
+export const MARKER_RADIUS_RATIO = 0.35; // marker outer radius = cellSize * this
 export const RING_STROKE = 0.05;
 export const MARKER_SNAP_SPEED = 16;
 export const GOAL_DRAG_THRESHOLD = 8;

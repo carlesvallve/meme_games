@@ -3,7 +3,7 @@ import type { CharacterModelOpts } from './CharacterModel';
 const GLTF_SCALE = 0.2;
 
 /** Shared animation file for all glTF characters (loaded once, cached globally). */
-export const GLTF_ANIM_URL = '/models/gltf-chars/shared-anims.gltf';
+export const GLTF_ANIM_URL = '/models/gltf-chars/shared-anims.glb';
 
 /** Shared animation set GLBs — loaded once and cached globally.
  *  Each contains constraint-retargeted animations for the Imminence skeleton. */
@@ -73,7 +73,7 @@ function makeGltfModels(names: string[]): CharacterModelDef[] {
   return names.map((name) => ({
     id: `gltf-${name.toLowerCase()}`,
     label: name.replace(/_/g, ' '),
-    opts: { meshUrl: `/models/gltf-chars/${name}.gltf`, scale: GLTF_SCALE, rotation: [0, 0, 0] },
+    opts: { meshUrl: `/models/gltf-chars/${name}.glb`, scale: GLTF_SCALE, rotation: [0, 0, 0] },
     loader: 'gltf' as const,
   }));
 }

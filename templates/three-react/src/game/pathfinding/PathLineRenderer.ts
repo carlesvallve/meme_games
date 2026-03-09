@@ -3,7 +3,10 @@ import { Line2 } from 'three/examples/jsm/lines/Line2.js';
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js';
 import { createTextLabel, updateTextLabel } from '../rendering/TextLabel';
-import { RING_STROKE, MARKER_FADE_DURATION, MARKER_SNAP_SPEED } from '../GameConstants';
+import { MARKER_RADIUS_RATIO, RING_STROKE, MARKER_FADE_DURATION, MARKER_SNAP_SPEED } from '../GameConstants';
+
+/** Y offset above terrain surface for path line and goal marker. */
+const PATH_Y_OFFSET = 0.02;
 
 export interface PathLineUpdateOpts {
   charPos: THREE.Vector3;
@@ -85,7 +88,7 @@ export class PathLineRenderer {
       // Trim vertices from the front that the character has already climbed past
       while (positions.length >= 9) {
         const nextY = positions[4]; // Y of second vertex
-        const charY = groundY + 0.05;
+        const charY = groundY + PATH_Y_OFFSET;
         const climbing = climbState.direction === 'up';
         // Remove first vertex if we've climbed past it or it's at the same height (horizontal approach)
         const pastIt = climbing ? charY > nextY - 0.01 : charY < nextY + 0.01;
@@ -97,7 +100,7 @@ export class PathLineRenderer {
       }
       // Update first vertex Y to track climb progress
       if (positions.length >= 3) {
-        positions[1] = groundY + 0.05;
+        positions[1] = groundY + PATH_Y_OFFSET;
       }
 
       this.createLine(positions);
@@ -114,13 +117,13 @@ export class PathLineRenderer {
 
     // Build positions: insert intermediate vertices at height transitions
     const positions: number[] = [];
-    let prevH = groundY + 0.05;
+    let prevH = getSurfaceAt(charPos.x, charPos.z) + PATH_Y_OFFSET;
     positions.push(waypoints[0].x, prevH, waypoints[0].z);
 
     for (let i = 1; i < waypoints.length; i++) {
       const from = waypoints[i - 1];
       const to = waypoints[i];
-      const toH = getSurfaceAt(to.x, to.z);
+      const toH = getSurfaceAt(to.x, to.z) + PATH_Y_OFFSET;
       const dx = to.x - from.x;
       const dz = to.z - from.z;
       const segLen = Math.sqrt(dx * dx + dz * dz);
@@ -182,7 +185,7 @@ export class PathLineRenderer {
       }
     }
     arr[si + 3] = ex;
-    arr[si + 4] = getSurfaceAt(x, z);
+    arr[si + 4] = getSurfaceAt(x, z) + PATH_Y_OFFSET;
     arr[si + 5] = ez;
     attr.data.needsUpdate = true;
     this.line.computeLineDistances();
@@ -210,7 +213,7 @@ export class PathLineRenderer {
       this.marker.geometry.dispose();
       this.markerMat?.dispose();
     }
-    const outer = cellSize * 0.45;
+    const outer = cellSize * MARKER_RADIUS_RATIO;
     const inner = outer - RING_STROKE;
     const geo = new THREE.RingGeometry(inner, outer, 32);
     geo.rotateX(-Math.PI / 2);
@@ -220,7 +223,7 @@ export class PathLineRenderer {
       opacity: 0,
     });
     this.marker = new THREE.Mesh(geo, this.markerMat);
-    this.marker.position.y = 0.05;
+    this.marker.position.y = PATH_Y_OFFSET;
     this.scene.add(this.marker);
     this.markerCellSize = cellSize;
   }
@@ -229,7 +232,7 @@ export class PathLineRenderer {
   showMarker(x: number, y: number, z: number, cellSize: number): void {
     this.ensureMarker(cellSize);
     if (!this.marker || !this.markerMat) return;
-    this.marker.position.set(x, y + 0.05, z);
+    this.marker.position.set(x, y + PATH_Y_OFFSET, z);
     this.markerMat.opacity = 1;
     this.markerFade = -1;
     this.markerSnapTarget = null;
@@ -239,7 +242,7 @@ export class PathLineRenderer {
   showMarkerWithSnap(rawX: number, rawZ: number, snapX: number, snapZ: number, y: number, cellSize: number): void {
     this.ensureMarker(cellSize);
     if (!this.marker || !this.markerMat) return;
-    this.marker.position.set(rawX, y + 0.05, rawZ);
+    this.marker.position.set(rawX, y + PATH_Y_OFFSET, rawZ);
     this.markerMat.opacity = 1;
     this.markerFade = -1;
     this.markerSnapTarget = { x: snapX, z: snapZ };
@@ -253,8 +256,9 @@ export class PathLineRenderer {
   }
 
   /** Get the marker's outer radius for path endpoint trimming. */
-  getMarkerRadius(): number {
-    return this.markerCellSize * 0.45 - RING_STROKE * 0.5;
+  getMarkerRadius(cellSize?: number): number {
+    const cs = cellSize ?? this.markerCellSize;
+    return cs * MARKER_RADIUS_RATIO - RING_STROKE * 0.5;
   }
 
   /** Get the marker's current world position (for path line endpoint tracking). */

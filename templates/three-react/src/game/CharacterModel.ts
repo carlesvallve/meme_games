@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { ANIM_SETS } from './CharacterModelDefs';
+import { createGLTFLoader } from './loaders';
 
 const BASE_MOVE_SPEED = 5;
 
@@ -29,7 +29,7 @@ function cleanupClip(clip: THREE.AnimationClip): THREE.AnimationClip {
 function loadAnimClips(url: string): Promise<THREE.AnimationClip[]> {
   let cached = animClipCache.get(url);
   if (cached) return cached;
-  const loader = new GLTFLoader();
+  const loader = createGLTFLoader();
   cached = new Promise<THREE.AnimationClip[]>((resolve, reject) => {
     loader.load(
       url,
@@ -96,7 +96,7 @@ export class CharacterModel {
     this.offsetY = opts.offsetY ?? 0;
 
     // Phase 1: Load mesh GLB
-    const loader = new GLTFLoader();
+    const loader = createGLTFLoader();
     loader.load(opts.meshUrl, (gltf) => {
       const model = gltf.scene;
       model.scale.setScalar(this.scale);

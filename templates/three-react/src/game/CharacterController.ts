@@ -456,7 +456,7 @@ export class CharacterController {
   private getSurfaceAt = (wx: number, wz: number): number => {
     const grid = this.navGrid.worldToGrid(wx, wz);
     const cell = this.navGrid.getCell(grid.gx, grid.gz);
-    return cell ? cell.surfaceHeight + 0.05 : 0.05;
+    return cell ? cell.surfaceHeight : 0;
   };
 
   private updatePathLine(): void {

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import type { MeshPartGroup, CharacterModelOpts } from './CharacterModel';
 import { GLTF_ANIM_URL } from './CharacterModelDefs';
+import { createGLTFLoader } from './loaders';
 const BASE_MOVE_SPEED = 2;
 
 /** Global cache: shared animation URL → promise of parsed clips. */
@@ -10,7 +10,7 @@ const gltfAnimClipCache = new Map<string, Promise<THREE.AnimationClip[]>>();
 function loadGltfAnimClips(url: string): Promise<THREE.AnimationClip[]> {
   let cached = gltfAnimClipCache.get(url);
   if (cached) return cached;
-  const loader = new GLTFLoader();
+  const loader = createGLTFLoader();
   cached = new Promise<THREE.AnimationClip[]>((resolve, reject) => {
     loader.load(
       url,
@@ -53,7 +53,7 @@ export class GltfCharacterModel {
     this.scale = opts.scale ?? 1;
     this.offsetY = opts.offsetY ?? 0;
 
-    const loader = new GLTFLoader();
+    const loader = createGLTFLoader();
     loader.load(opts.meshUrl, (gltf) => {
       const model = gltf.scene;
       model.scale.setScalar(this.scale);
