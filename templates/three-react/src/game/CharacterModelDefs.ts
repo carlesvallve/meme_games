@@ -19,28 +19,50 @@ export const ANIM_SETS = [
 export interface CharacterModelDef {
   id: string;
   label: string;
+  category: string;
   /** null = placeholder box (no GLB) */
   opts: Omit<CharacterModelOpts, 'onLoaded'> | null;
   /** 'imminence' = CharacterModel (mesh+shared anims), 'gltf' = GltfCharacterModel (self-contained) */
   loader?: 'imminence' | 'gltf';
+  dummyShape?: 'box' | 'capsule' | 'arrow';
+  dummyColor?: number;
+}
+
+const DUMMY_SHAPES = ['box', 'capsule', 'arrow'] as const;
+const DUMMY_COLORS: [string, number][] = [
+  ['Red', 0xff4444], ['Blue', 0x4488ff], ['Green', 0x44ff44],
+  ['Yellow', 0xffff44], ['Purple', 0xaa44ff], ['Orange', 0xff8844],
+];
+
+function makeDummyModels(): CharacterModelDef[] {
+  const models: CharacterModelDef[] = [];
+  for (const shape of DUMMY_SHAPES) {
+    for (const [colorName, colorHex] of DUMMY_COLORS) {
+      models.push({
+        id: `dummy-${shape}-${colorName.toLowerCase()}`,
+        label: `${shape[0].toUpperCase() + shape.slice(1)} ${colorName}`,
+        category: 'Dummy',
+        opts: null,
+        dummyShape: shape,
+        dummyColor: colorHex,
+      });
+    }
+  }
+  return models;
+}
+
+function makeGltfModels(names: string[], category: string): CharacterModelDef[] {
+  return names.map((name) => ({
+    id: `gltf-${name.toLowerCase()}`,
+    label: name.replace(/_/g, ' '),
+    category,
+    opts: { meshUrl: `/models/gltf-chars/${name}.glb`, scale: GLTF_SCALE, rotation: [0, 0, 0] },
+    loader: 'gltf' as const,
+  }));
 }
 
 export const CHARACTER_MODELS: CharacterModelDef[] = [
-  { id: 'none', label: 'Box (default)', opts: null },
-  // ── Imminence (mesh + shared anim GLBs) ──
-  {
-    id: 'imminence-male',
-    label: 'Imminence Male',
-    opts: { meshUrl: '/models/scifi-soldiers/Imminence-Update-Male.glb', scale: 0.5, rotation: [0, 0, 0] },
-    loader: 'imminence',
-  },
-  {
-    id: 'imminence-female',
-    label: 'Imminence Female',
-    opts: { meshUrl: '/models/scifi-soldiers/Imminence-Update-Female.glb', scale: 0.5, rotation: [0, 0, 0] },
-    loader: 'imminence',
-  },
-  // ── Pre-retargeted glTF characters (self-contained mesh + animations) ──
+  ...makeDummyModels(),
   ...makeGltfModels([
     'BaseCharacter',
     'BlueSoldier_Female', 'BlueSoldier_Male',
@@ -66,14 +88,7 @@ export const CHARACTER_MODELS: CharacterModelDef[] = [
     'Witch', 'Wizard',
     'Worker_Female', 'Worker_Male',
     'Zombie_Female', 'Zombie_Male',
-  ]),
+  ], 'Quaternius'),
 ];
 
-function makeGltfModels(names: string[]): CharacterModelDef[] {
-  return names.map((name) => ({
-    id: `gltf-${name.toLowerCase()}`,
-    label: name.replace(/_/g, ' '),
-    opts: { meshUrl: `/models/gltf-chars/${name}.glb`, scale: GLTF_SCALE, rotation: [0, 0, 0] },
-    loader: 'gltf' as const,
-  }));
-}
+export const MODEL_CATEGORIES = [...new Set(CHARACTER_MODELS.map(m => m.category))];

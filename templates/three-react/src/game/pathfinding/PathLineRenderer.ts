@@ -412,10 +412,13 @@ export class PathLineRenderer {
       this.prevDistText = text;
     }
 
-    // Position above goal
+    // Label follows marker when visible, otherwise path goal
     const goal = path[path.length - 1];
-    const goalY = getSurfaceAt(goal.x, goal.z);
-    this.distLabel.position.set(goal.x, goalY + 0.3, goal.z);
+    const useMarker = this.marker && this.markerMat && this.markerMat.opacity > 0;
+    const lx = useMarker ? this.marker!.position.x : goal.x;
+    const lz = useMarker ? this.marker!.position.z : goal.z;
+    const goalY = getSurfaceAt(lx, lz);
+    this.distLabel.position.set(lx, goalY + 0.3, lz);
     (this.distLabel.material as THREE.SpriteMaterial).opacity = 1;
     this.distLabel.visible = true;
   }

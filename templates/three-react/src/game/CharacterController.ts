@@ -103,7 +103,8 @@ export class CharacterController {
 
   // Character model (GLB with skeleton + animations)
   private model: AnyCharacterModel | null = null;
-  private placeholderMesh: THREE.Mesh | null = null;
+  private placeholderGroup: THREE.Group | null = null;
+  private loadGen = 0; // generation counter — invalidates stale async loads
   /** Called when model finishes loading — passes animation name list */
   onAnimationsLoaded: ((names: string[]) => void) | null = null;
 
@@ -111,17 +112,7 @@ export class CharacterController {
     this.navGrid = navGrid;
     this.root = new THREE.Group();
 
-    // Placeholder box until model loads
-    const geo = new THREE.BoxGeometry(0.25, 0.5, 0.25);
-    geo.translate(0, 0.25, 0);
-    const mat = new THREE.MeshStandardMaterial({
-      color: 0x44aaff,
-      roughness: 0.6,
-    });
-    this.placeholderMesh = new THREE.Mesh(geo, mat);
-    this.placeholderMesh.castShadow = true;
-    this.placeholderMesh.receiveShadow = true;
-    this.root.add(this.placeholderMesh);
+    // No visible placeholder on startup — first model swap will show something
 
     // Shift = toggle walk/run
     this._onKeyDown = (e: KeyboardEvent) => {
@@ -132,51 +123,132 @@ export class CharacterController {
     window.addEventListener('keydown', this._onKeyDown);
   }
 
-  /** Load a GLB character model to replace the placeholder box.
+  /** Load a GLB character model. Keeps old model/placeholder visible until new mesh is ready.
    *  loaderType: 'imminence' = CharacterModel (mesh+shared anims), 'gltf' = GltfCharacterModel (self-contained) */
   loadModel(opts: CharacterModelOpts, loaderType: 'imminence' | 'gltf' = 'imminence'): void {
-    // Clean up previous model if any
-    this.clearModel();
+    const gen = ++this.loadGen;
+    // Keep references to old visuals — we'll remove them only when the new mesh is ready
+    const oldModel = this.model;
+    const oldPlaceholder = this.placeholderGroup;
+    this.model = null;
+    this.placeholderGroup = null;
+
     const origOnLoaded = opts.onLoaded;
     const ModelClass = loaderType === 'gltf' ? GltfCharacterModel : CharacterModel;
-    this.model = new ModelClass({
+    const newModel = new ModelClass({
       ...opts,
       onMeshReady: () => {
-        // Show model immediately when mesh loads (before animations)
-        if (this.placeholderMesh) {
-          this.root.remove(this.placeholderMesh);
-          this.placeholderMesh.geometry.dispose();
-          (this.placeholderMesh.material as THREE.Material).dispose();
-          this.placeholderMesh = null;
+        // Stale load — a newer loadModel/clearModel call happened while we were loading
+        if (gen !== this.loadGen) {
+          newModel.dispose();
+          return;
         }
-        this.root.add(this.model!.group);
-        // Debug: verify hierarchy
-        const rootPos = this.root.position;
-        const grpPos = this.model!.group.position;
-        console.log(`[CharController] Model group added to root. root pos=(${rootPos.x.toFixed(2)}, ${rootPos.y.toFixed(2)}, ${rootPos.z.toFixed(2)}), group pos=(${grpPos.x.toFixed(2)}, ${grpPos.y.toFixed(2)}, ${grpPos.z.toFixed(2)}), root.children=${this.root.children.length}`);
+        // Remove old visuals now that the new mesh is ready
+        if (oldModel) {
+          this.root.remove(oldModel.group);
+          oldModel.dispose();
+        }
+        if (oldPlaceholder) {
+          this.root.remove(oldPlaceholder);
+          CharacterController.disposePlaceholder(oldPlaceholder);
+        }
+        this.model = newModel;
+        this.root.add(newModel.group);
       },
       onLoaded: (names) => {
+        if (gen !== this.loadGen) return;
         origOnLoaded?.(names);
         this.onAnimationsLoaded?.(names);
       },
     });
   }
 
-  /** Remove current model and restore placeholder box. */
-  clearModel(): void {
+  /** Create a placeholder group with body geometry + directional indicator. */
+  private static createPlaceholder(
+    shape: 'box' | 'capsule' | 'arrow' = 'box',
+    color: number = 0x44aaff,
+  ): THREE.Group {
+    const group = new THREE.Group();
+    const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.6 });
+
+    if (shape === 'arrow') {
+      // Horizontal shaft along +Z (forward), elevated to mid-height
+      const shaft = new THREE.CylinderGeometry(0.06, 0.06, 0.3, 8);
+      shaft.rotateX(Math.PI / 2); // lay along Z axis
+      shaft.translate(0, 0.25, -0.02);
+      const shaftMesh = new THREE.Mesh(shaft, mat);
+      shaftMesh.castShadow = true;
+      group.add(shaftMesh);
+      // Arrow cone pointing forward (+Z)
+      const cone = new THREE.ConeGeometry(0.14, 0.2, 8);
+      cone.rotateX(Math.PI / 2); // point along +Z
+      cone.translate(0, 0.25, 0.24);
+      const coneMesh = new THREE.Mesh(cone, mat);
+      coneMesh.castShadow = true;
+      group.add(coneMesh);
+    } else {
+      // Body mesh
+      let geo: THREE.BufferGeometry;
+      if (shape === 'capsule') {
+        geo = new THREE.CapsuleGeometry(0.125, 0.25, 8, 12);
+        geo.translate(0, 0.25, 0);
+      } else {
+        geo = new THREE.BoxGeometry(0.25, 0.5, 0.25);
+        geo.translate(0, 0.25, 0);
+      }
+      const body = new THREE.Mesh(geo, mat);
+      body.castShadow = true;
+      body.receiveShadow = true;
+      group.add(body);
+
+      // Eyes — two small dark spheres inset into the front face
+      const r = ((color >> 16) & 0xff) / 255;
+      const g = ((color >> 8) & 0xff) / 255;
+      const b = (color & 0xff) / 255;
+      const eyeMat = new THREE.MeshStandardMaterial({
+        color: new THREE.Color(r * 0.15, g * 0.15, b * 0.15),
+        roughness: 0.3,
+      });
+      const eyeRadius = 0.03;
+      const eyeZ = shape === 'capsule' ? 0.11 : 0.12;
+      for (const side of [-1, 1]) {
+        const eyeGeo = new THREE.SphereGeometry(eyeRadius, 8, 6);
+        const eye = new THREE.Mesh(eyeGeo, eyeMat);
+        eye.position.set(side * 0.055, 0.37, eyeZ);
+        group.add(eye);
+      }
+    }
+
+    return group;
+  }
+
+  /** Dispose all meshes in a placeholder group. */
+  private static disposePlaceholder(group: THREE.Group): void {
+    group.traverse((child) => {
+      if ((child as THREE.Mesh).isMesh) {
+        const mesh = child as THREE.Mesh;
+        mesh.geometry.dispose();
+        (mesh.material as THREE.Material).dispose();
+      }
+    });
+  }
+
+  /** Remove current model and show a placeholder shape (or nothing if no shape given). */
+  clearModel(shape?: 'box' | 'capsule' | 'arrow', color?: number): void {
+    ++this.loadGen; // invalidate any in-flight async loads
     if (this.model) {
       this.root.remove(this.model.group);
       this.model.dispose();
       this.model = null;
     }
-    if (!this.placeholderMesh) {
-      const geo = new THREE.BoxGeometry(0.25, 0.5, 0.25);
-      geo.translate(0, 0.25, 0);
-      const mat = new THREE.MeshStandardMaterial({ color: 0x44aaff, roughness: 0.6 });
-      this.placeholderMesh = new THREE.Mesh(geo, mat);
-      this.placeholderMesh.castShadow = true;
-      this.placeholderMesh.receiveShadow = true;
-      this.root.add(this.placeholderMesh);
+    if (this.placeholderGroup) {
+      this.root.remove(this.placeholderGroup);
+      CharacterController.disposePlaceholder(this.placeholderGroup);
+      this.placeholderGroup = null;
+    }
+    if (shape) {
+      this.placeholderGroup = CharacterController.createPlaceholder(shape, color);
+      this.root.add(this.placeholderGroup);
     }
   }
 
@@ -868,9 +940,8 @@ export class CharacterController {
       }
     }
 
-    // ── Rebuild debug path line each frame to track character smoothly ──
+    // ── Update path line + distance label each frame while path is active ──
     if (
-      this.pathLine.isEnabled() &&
       this.path.length > 0 &&
       this.pathIndex < this.path.length &&
       !this.pathPaused
@@ -1083,9 +1154,8 @@ export class CharacterController {
     }
     this.pathLine.dispose();
     this.model?.dispose();
-    if (this.placeholderMesh) {
-      this.placeholderMesh.geometry.dispose();
-      (this.placeholderMesh.material as THREE.Material).dispose();
+    if (this.placeholderGroup) {
+      CharacterController.disposePlaceholder(this.placeholderGroup);
     }
     this.root.traverse((child) => {
       if ((child as THREE.Mesh).isMesh) {

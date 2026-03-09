@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useGameStore } from '../../../store';
 import { SettingsWindow, Section, Select, Slider, Toggle, btnStyle, rowStyle, resetBtnStyle } from './shared';
-import { CHARACTER_MODELS } from '../../CharacterModelDefs';
+import { CHARACTER_MODELS, MODEL_CATEGORIES } from '../../CharacterModelDefs';
 
 function HierarchyPanel() {
   const version = useGameStore((s) => s.hierarchyVersion);
@@ -78,12 +78,23 @@ function HierarchyPanel() {
 }
 
 const SNAP_MODES = ['free', '4dir', '8dir'] as const;
-const MODEL_OPTIONS = CHARACTER_MODELS.map((m) => m.id);
-const MODEL_LABELS = CHARACTER_MODELS.map((m) => m.label);
+
+// Group models by category for quick lookup
+const MODELS_BY_CATEGORY = new Map<string, typeof CHARACTER_MODELS>();
+for (const m of CHARACTER_MODELS) {
+  if (!MODELS_BY_CATEGORY.has(m.category)) MODELS_BY_CATEGORY.set(m.category, []);
+  MODELS_BY_CATEGORY.get(m.category)!.push(m);
+}
+
+function getCategoryForModel(modelId: string): string {
+  const def = CHARACTER_MODELS.find((m) => m.id === modelId);
+  return def?.category ?? MODEL_CATEGORIES[0];
+}
 
 export function CharacterPanel() {
   const charModel = useGameStore((s) => s.charModel);
   const setCharModel = useGameStore((s) => s.setCharModel);
+  const [category, setCategory] = useState(() => getCategoryForModel(charModel));
   const animList = useGameStore((s) => s.charAnimationList);
   const animGroup = useGameStore((s) => s.charAnimGroup);
   const setAnimGroup = useGameStore((s) => s.setCharAnimGroup);
@@ -163,14 +174,25 @@ export function CharacterPanel() {
     <SettingsWindow windowId="char">
       <Section label='Model' first accent='#8f8'>
         <Select
+          label='Category'
+          value={category}
+          options={MODEL_CATEGORIES}
+          accent='#f8a'
+          onChange={(cat: string) => {
+            setCategory(cat);
+            const models = MODELS_BY_CATEGORY.get(cat);
+            if (models && models.length > 0) setCharModel(models[0].id);
+          }}
+        />
+        <Select
           label='Model'
           value={charModel}
-          options={MODEL_OPTIONS}
-          labels={MODEL_LABELS}
+          options={(MODELS_BY_CATEGORY.get(category) ?? []).map((m) => m.id)}
+          labels={(MODELS_BY_CATEGORY.get(category) ?? []).map((m) => m.label)}
           accent='#f8a'
           onChange={setCharModel}
         />
-        {charModel !== 'none' && (
+        {category !== 'Dummy' && (
           <>
             <div style={rowStyle}>
               <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>Parts</span>

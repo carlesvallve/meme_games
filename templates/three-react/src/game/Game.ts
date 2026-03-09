@@ -233,8 +233,8 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     currentModelId = modelId;
     const def = CHARACTER_MODELS.find((m) => m.id === modelId);
     if (!def || !def.opts) {
-      // "none" = revert to placeholder box
-      character.clearModel();
+      // Dummy or missing = placeholder shape with optional color
+      character.clearModel(def?.dummyShape, def?.dummyColor);
       useGameStore.getState().setCharAnimationList([]);
       return;
     }
