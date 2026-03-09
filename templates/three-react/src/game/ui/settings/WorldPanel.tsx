@@ -44,7 +44,7 @@ export function WorldPanel() {
   const setAutoMerge = useGameStore((s) => s.setAutoMerge);
 
   return (
-    <SettingsWindow>
+    <SettingsWindow windowId="world">
       <Section label='Grid' first accent='#8f8'>
         <Slider
           label='Opacity'

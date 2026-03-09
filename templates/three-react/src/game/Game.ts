@@ -181,6 +181,8 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   // ── World reveal FX ──────────────────────────────────────────────────
   const worldReveal = new WorldRevealFX();
   worldReveal.init(cam, postProcess);
+  const OCCLUSION_THRESHOLD = 4; // frames of sustained occlusion before activating
+  let occlusionCounter = 0;
 
   // ── Input ───────────────────────────────────────────────────────────
   const input = new Input();
@@ -860,15 +862,13 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     worldReveal.update(dt);
 
     // Occlusion reveal: raycast camera→player, fade walls that occlude character
-    // In isometric/top-down views the straight camera→player ray sails over
-    // short walls, so we cast a fan of rays at ground level to catch them.
-    {
+    if (store.wallRevealEnabled) {
       const playerPos = character.getPosition();
       const groundY = character.getGroundY();
       const playerWorldPos = new THREE.Vector3(playerPos.x, groundY + 0.5, playerPos.z);
       const camPos = cam.camera.position;
 
-      let occluded = false;
+      let occludedThisFrame = false;
       if (obstacleGen.meshes.length > 0) {
         // Cast 3 rays at different target heights: ground, knee, chest
         const heights = [groundY + 0.05, groundY + 0.25, groundY + 0.5];
@@ -879,10 +879,22 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
           const dist = rayOrigin.distanceTo(target);
           const raycaster = new THREE.Raycaster(rayOrigin, dir, 0.1, dist);
           const hits = raycaster.intersectObjects(obstacleGen.meshes, true);
-          if (hits.length > 0) { occluded = true; break; }
+          // Only count hits whose top is above the character's ground level
+          // (ignore stair steps / terrain the character is standing on)
+          const blocking = hits.some(hit => hit.point.y > groundY + 0.15);
+          if (blocking) { occludedThisFrame = true; break; }
         }
       }
-      updateOcclusionReveal(playerWorldPos, camPos, occluded);
+      // Hysteresis: require sustained occlusion to activate, deactivate immediately
+      if (occludedThisFrame) {
+        occlusionCounter = Math.min(occlusionCounter + 1, OCCLUSION_THRESHOLD + 1);
+      } else {
+        occlusionCounter = 0;
+      }
+      updateOcclusionReveal(playerWorldPos, camPos, occlusionCounter >= OCCLUSION_THRESHOLD);
+    } else {
+      // Force reveal off when disabled
+      updateOcclusionReveal(new THREE.Vector3(), cam.camera.position, false);
     }
 
     // Update camera

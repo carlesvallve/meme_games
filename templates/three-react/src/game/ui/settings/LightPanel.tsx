@@ -50,8 +50,8 @@ export function LightPanel() {
   const setSunDebug = useGameStore((s) => s.setSunDebug);
 
   return (
-    <SettingsWindow>
-      <Section label='Light' first>
+    <SettingsWindow windowId="light">
+      <Section label='Light' first accent='#8f8'>
         <div style={rowStyle}>
           <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>
             Preset
@@ -74,7 +74,7 @@ export function LightPanel() {
         </div>
       </Section>
 
-      <Section label='Day Cycle' accent='#8cf'>
+      <Section label='Day Cycle' accent='#8f8'>
         <Slider
           label={formatTime(timeOfDay)}
           value={timeOfDay}
@@ -112,7 +112,7 @@ export function LightPanel() {
         />
       </Section>
 
-      <Section label='Torch' accent='#fa4'>
+      <Section label='Torch' accent='#8f8'>
         <Toggle
           label='Enabled'
           value={torchEnabled}

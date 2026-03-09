@@ -1,5 +1,21 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, createContext, useContext, useCallback } from 'react';
 import { Layer } from '../../core/Entity';
+
+/* ── Persistent foldout state — survives panel unmount/remount ── */
+
+/** Per-section collapsed state, keyed by "windowId::sectionLabel" */
+const sectionStateMap = new Map<string, boolean>();
+/** Per-window global caret state */
+const windowStateMap = new Map<string, { generation: number; targetCollapsed: boolean }>();
+
+function getSectionKey(windowId: string, label: string) { return `${windowId}::${label}`; }
+
+interface FoldoutCtx {
+  windowId: string;
+  generation: number;
+  targetCollapsed: boolean;
+}
+const FoldoutContext = createContext<FoldoutCtx>({ windowId: '', generation: 0, targetCollapsed: false });
 
 /* ── Constants ── */
 
@@ -55,7 +71,7 @@ export const panelStyle: React.CSSProperties = {
 };
 
 export const resetBtnStyle = {
-  marginTop: 4,
+  marginTop: 12,
   padding: '4px 12px',
   background: 'rgba(255,100,100,0.15)',
   color: '#f88',
@@ -83,16 +99,51 @@ export const separator = {
 export const ROW_HEIGHT = 20;
 export const rowStyle: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 6, minHeight: ROW_HEIGHT };
 
-export function Section({ label, accent, first, children }: {
-  label: string; accent?: string; first?: boolean; children: React.ReactNode;
+export function Section({ label, accent, first, collapsed: controlledCollapsed, onToggle, children }: {
+  label: string; accent?: string; first?: boolean;
+  collapsed?: boolean; onToggle?: () => void;
+  children: React.ReactNode;
 }) {
+  const { windowId, generation, targetCollapsed } = useContext(FoldoutContext);
+  const key = getSectionKey(windowId, label);
+  const [localCollapsed, setLocalCollapsed] = useState(() => sectionStateMap.get(key) ?? false);
+  const lastGen = useRef(generation);
+
+  // Sync local state when global toggle fires (generation changes)
+  if (generation !== lastGen.current) {
+    lastGen.current = generation;
+    setLocalCollapsed(targetCollapsed);
+    sectionStateMap.set(key, targetCollapsed);
+  }
+
+  const isCollapsed = controlledCollapsed ?? localCollapsed;
+  const toggle = onToggle ?? (() => setLocalCollapsed(c => {
+    const next = !c;
+    sectionStateMap.set(key, next);
+    return next;
+  }));
+
   return (
     <div style={{
       ...(first ? undefined : separator),
-      display: 'flex', flexDirection: 'column', gap: 4,
+      display: 'flex', flexDirection: 'column', gap: isCollapsed ? 0 : 4,
     }}>
-      <div style={{ ...sectionTitle, ...(accent ? { color: accent } : undefined) }}>{label.toUpperCase()}</div>
-      {children}
+      <div
+        onClick={toggle}
+        style={{
+          ...sectionTitle,
+          ...(accent ? { color: accent } : undefined),
+          cursor: 'pointer',
+          userSelect: 'none',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 4,
+        }}
+      >
+        <span style={{ fontSize: 8, width: 8, display: 'inline-block', transition: 'transform 0.15s', transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }}>▼</span>
+        {label.toUpperCase()}
+      </div>
+      {!isCollapsed && children}
     </div>
   );
 }
@@ -106,24 +157,62 @@ export const selectStyle: React.CSSProperties = {
 
 /* ── Components ── */
 
-export function SettingsWindow({ children }: { children: React.ReactNode }) {
+export function SettingsWindow({ windowId = '', children }: { windowId?: string; children: React.ReactNode }) {
   useEffect(() => { injectRangeStyles(); }, []);
+  const stored = windowStateMap.get(windowId);
+  const [generation, setGeneration] = useState(stored?.generation ?? 0);
+  const [targetCollapsed, setTargetCollapsed] = useState(stored?.targetCollapsed ?? false);
+  const toggle = useCallback(() => {
+    setTargetCollapsed(prev => {
+      const next = !prev;
+      setGeneration(g => {
+        const nextGen = g + 1;
+        windowStateMap.set(windowId, { generation: nextGen, targetCollapsed: next });
+        return nextGen;
+      });
+      return next;
+    });
+  }, [windowId]);
+  const ctx: FoldoutCtx = { windowId, generation, targetCollapsed };
+
   return (
-    <div
-      style={{
-        ...panelStyle,
-        marginBottom: 8,
-        touchAction: 'pan-y',
-        maxHeight: 'calc(100dvh - 80px)',
-        overflowY: 'auto',
-      }}
-      onPointerDown={(e) => e.stopPropagation()}
-      onPointerMove={(e) => e.stopPropagation()}
-      onTouchMove={(e) => e.stopPropagation()}
-      onWheel={(e) => e.stopPropagation()}
-    >
-      {children}
-    </div>
+    <FoldoutContext.Provider value={ctx}>
+      <div
+        style={{
+          ...panelStyle,
+          marginBottom: 8,
+          touchAction: 'pan-y',
+          maxHeight: 'calc(100dvh - 80px)',
+          overflowY: 'auto',
+          position: 'relative',
+        }}
+        onPointerDown={(e) => e.stopPropagation()}
+        onPointerMove={(e) => e.stopPropagation()}
+        onTouchMove={(e) => e.stopPropagation()}
+        onWheel={(e) => e.stopPropagation()}
+      >
+        <button
+          onClick={toggle}
+          title={targetCollapsed ? 'Expand all' : 'Collapse all'}
+          style={{
+            position: 'sticky',
+            top: 0,
+            float: 'right',
+            zIndex: 2,
+            background: 'none',
+            border: 'none',
+            color: '#666',
+            cursor: 'pointer',
+            fontSize: 12,
+            padding: '0 2px',
+            lineHeight: '14px',
+          }}
+        >
+          {targetCollapsed ? '▶' : '▼'}
+        </button>
+        {children}
+      </div>
+    </FoldoutContext.Provider>
   );
 }
 

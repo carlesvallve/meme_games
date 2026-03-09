@@ -20,10 +20,12 @@ export function PostFXPanel() {
   const setPostProcess = useGameStore((s) => s.setPostProcess);
   const particleToggles = useGameStore((s) => s.particleToggles);
   const toggleParticle = useGameStore((s) => s.toggleParticle);
+  const wallReveal = useGameStore((s) => s.wallRevealEnabled);
+  const setWallReveal = useGameStore((s) => s.setWallRevealEnabled);
 
   return (
-    <SettingsWindow>
-      <Section label='Particles' first>
+    <SettingsWindow windowId="postfx">
+      <Section label='Particles' first accent='#8f8'>
         {PARTICLE_TOGGLES.map((t) => (
           <Toggle
             key={t.key}
@@ -34,7 +36,15 @@ export function PostFXPanel() {
         ))}
       </Section>
 
-      <Section label='Post FX'>
+      <Section label='Shaders' accent='#8f8'>
+        <Toggle
+          label='Wall Reveal'
+          value={wallReveal}
+          onChange={setWallReveal}
+        />
+      </Section>
+
+      <Section label='PostFX' accent='#8f8'>
         <Toggle
           label='Enabled'
           value={postProcess.enabled}
@@ -246,7 +256,7 @@ export function PostFXPanel() {
             onClick={() => setPostProcess({ ...DEFAULT_POST_PROCESS })}
             style={resetBtnStyle}
           >
-            Reset PostFX
+            Reset Defaults
           </button>
         </>
       )}

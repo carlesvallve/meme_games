@@ -160,8 +160,8 @@ export function CharacterPanel() {
   };
 
   return (
-    <SettingsWindow>
-      <Section label='Model' first accent='#f8a'>
+    <SettingsWindow windowId="char">
+      <Section label='Model' first accent='#8f8'>
         <Select
           label='Model'
           value={charModel}
@@ -182,58 +182,49 @@ export function CharacterPanel() {
               </button>
             </div>
             <HierarchyPanel />
-          </>
-        )}
-        {animList.length > 0 ? (
-          <>
-            {groups.length > 1 && (
-              <Select
-                label='Anim Set'
-                value={effectiveGroup}
-                options={groups}
-                accent='#f8a'
-                onChange={handleGroupChange}
-              />
-            )}
-            <Select
-              label='Animation'
-              value={animation}
-              options={currentAnims}
-              labels={animLabels}
-              accent='#f8a'
-              onChange={setAnimation}
-            />
-          </>
-        ) : (
-          charModel !== 'none' && <div style={{ color: '#888', fontSize: 11 }}>Loading model...</div>
-        )}
-        {animList.length > 0 && (
-          <Slider
-            label='Anim Speed'
-            value={speed}
-            min={0}
-            max={3}
-            step={0.1}
-            accent='#f8a'
-            onChange={setSpeed}
-          />
-        )}
-        {charModel !== 'none' && (
-          <>
             <Toggle
               label='Ground Pin'
               value={groundPin}
               onChange={setGroundPin}
             />
-            <Toggle
-              label='Test Anim'
-              value={testAnim}
-              onChange={setTestAnim}
-            />
           </>
         )}
       </Section>
-      <Section label='Movement' accent='#af6'>
+      {animList.length > 0 ? (
+        <Section label='Animation' accent='#8f8'>
+          {groups.length > 1 && (
+            <Select
+              label='Anim Set'
+              value={effectiveGroup}
+              options={groups}
+              onChange={handleGroupChange}
+            />
+          )}
+          <Select
+            label='Clip'
+            value={animation}
+            options={currentAnims}
+            labels={animLabels}
+            onChange={setAnimation}
+          />
+          <Slider
+            label='Speed'
+            value={speed}
+            min={0}
+            max={3}
+            step={0.1}
+            onChange={setSpeed}
+          />
+          <Toggle
+            label='Test Mode'
+            value={testAnim}
+            onChange={setTestAnim}
+          />
+        </Section>
+      ) : (
+        charModel !== 'none' && <div style={{ color: '#888', fontSize: 11, padding: '4px 0' }}>Loading model...</div>
+      )}
+      <Section label='Movement' accent='#8f8'>
         <Slider
           label='Move Speed'
           value={moveSpeed}

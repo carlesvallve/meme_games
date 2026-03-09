@@ -106,22 +106,40 @@ if (u_worldRevealActive > 0.01) {
 
 // Occlusion reveal: make walls transparent when between camera and player
 if (u_revealActive > 0.001) {
-  vec3 toPlayer = u_revealCenter - u_cameraPos;
-  vec3 lineDir = normalize(toPlayer + vec3(0.001));
-  float xzLen = length(vec2(toPlayer.x, toPlayer.z));
-  float horizontalness = xzLen / max(length(toPlayer), 0.001);
+  // Camera→player line in XZ
+  vec2 camXZ = vec2(u_cameraPos.x, u_cameraPos.z);
+  vec2 playerXZ = vec2(u_revealCenter.x, u_revealCenter.z);
+  vec2 lineXZ = playerXZ - camXZ;
+  float lineLenSq = dot(lineXZ, lineXZ);
+
+  // View gate: disable when camera is nearly overhead
+  vec3 toPlayer3 = u_revealCenter - u_cameraPos;
+  float xzLen = length(vec2(toPlayer3.x, toPlayer3.z));
+  float horizontalness = xzLen / max(length(toPlayer3), 0.001);
   float viewGate = smoothstep(0.05, 0.15, horizontalness);
 
-  vec2 toCamXZ = -normalize(vec2(lineDir.x, lineDir.z) + vec2(0.0001));
-  vec2 fragDeltaXZ = vec2(v_wRevealPos.x - u_revealCenter.x, v_wRevealPos.z - u_revealCenter.z);
-  float fragDistXZ = length(fragDeltaXZ);
-  vec2 fragDirXZ = fragDeltaXZ / max(fragDistXZ, 0.001);
+  // Project fragment onto camera→player line in XZ (0=camera, 1=player)
+  vec2 fragXZ = vec2(v_wRevealPos.x, v_wRevealPos.z);
+  vec2 fragFromCam = fragXZ - camXZ;
+  float t = dot(fragFromCam, lineXZ) / max(lineLenSq, 0.001);
 
-  float angleDot = dot(fragDirXZ, toCamXZ);
-  float inCone = smoothstep(-0.1, 0.3, angleDot) * viewGate;
-  float distFade = smoothstep(u_revealRadius, u_revealRadius + u_revealFalloff, fragDistXZ);
+  // Only affect fragments between camera and player (with small margins)
+  // Fade in near camera (t=0.05..0.15), full effect in middle, fade near player (t=0.85..1.0)
+  float tGate = smoothstep(0.05, 0.15, t) * (1.0 - smoothstep(0.85, 1.0, t));
 
-  float revealAlpha = mix(1.0, mix(1.0, distFade, inCone), u_revealActive);
+  // Perpendicular distance from the camera→player line (cone width)
+  vec2 projected = camXZ + lineXZ * clamp(t, 0.0, 1.0);
+  float perpDist = length(fragXZ - projected);
+  // Cone widens from camera to player: allow ~1.5 units at player side
+  float coneWidth = mix(0.5, u_revealRadius, clamp(t, 0.0, 1.0));
+  float coneFade = 1.0 - smoothstep(coneWidth, coneWidth + u_revealFalloff, perpDist);
+
+  // Don't fade fragments directly under/near the player
+  float distToPlayer = length(fragXZ - playerXZ);
+  float proximityGuard = smoothstep(0.3, 0.8, distToPlayer);
+
+  float reveal = tGate * coneFade * viewGate * proximityGuard;
+  float revealAlpha = mix(1.0, 1.0 - reveal, u_revealActive);
   gl_FragColor.a *= revealAlpha;
 }`,
     );
@@ -140,8 +158,8 @@ export function updateOcclusionReveal(
 ): void {
   worldRevealUniforms.u_revealCenter.value.copy(playerPos);
   worldRevealUniforms.u_cameraPos.value.copy(cameraPos);
-  worldRevealUniforms.u_revealRadius.value = 3.0;
-  worldRevealUniforms.u_revealFalloff.value = 2.0;
+  worldRevealUniforms.u_revealRadius.value = 1.5;  // cone half-width at player side
+  worldRevealUniforms.u_revealFalloff.value = 1.0;  // soft edge width
 
   const target = occluded ? 1.0 : 0.0;
   smoothedOcclusionActive += (target - smoothedOcclusionActive) * 0.12;
