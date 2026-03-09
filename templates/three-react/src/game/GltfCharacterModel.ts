@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import type { MeshPartGroup, CharacterModelOpts } from './CharacterModel';
-
 const BASE_MOVE_SPEED = 2;
 
 /**
@@ -94,7 +93,7 @@ export class GltfCharacterModel {
       this.computeRestPoseOffset(model);
       this.mixer = new THREE.AnimationMixer(model);
 
-      // Register all embedded animations
+      // Register embedded animations
       for (const clip of gltf.animations) {
         const action = this.mixer.clipAction(clip);
         this.actions.set(clip.name, action);

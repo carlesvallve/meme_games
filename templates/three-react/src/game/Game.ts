@@ -780,7 +780,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     }
 
     const pos = character.getPosition();
-    cam.setTarget(pos.x, pos.y, pos.z);
+    cam.setTarget(pos.x, character.getGroundY(), pos.z);
     cam.setCharacterState(character.getFacingAngle(), character.getIsMoving());
     sfxAudio.setPlayerPosition(pos.x, pos.z);
 
@@ -827,7 +827,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       const side = Math.cos(character.root.rotation.y);
       torchLight.position.set(
         cPos.x + fwd * (tp.offsetForward ?? 0.5) + side * (tp.offsetRight ?? 0),
-        tp.offsetUp ?? 1.5,
+        cPos.y + (tp.offsetUp ?? 1.5),
         cPos.z + side * (tp.offsetForward ?? 0.5) - fwd * (tp.offsetRight ?? 0),
       );
     } else {

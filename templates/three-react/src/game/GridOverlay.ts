@@ -203,10 +203,12 @@ export class GridOverlay {
       const z = cell.worldZ;
       const y = cell.surfaceHeight + 0.02;
 
-      // X shape: two diagonal line segments
+      // Inner square border: 4 line segments
       positions.push(
-        x - qh, y, z - qh,  x + qh, y, z + qh,
-        x + qh, y, z - qh,  x - qh, y, z + qh,
+        x - qh, y, z - qh,  x + qh, y, z - qh, // bottom
+        x + qh, y, z - qh,  x + qh, y, z + qh, // right
+        x + qh, y, z + qh,  x - qh, y, z + qh, // top
+        x - qh, y, z + qh,  x - qh, y, z - qh, // left
       );
     }
 

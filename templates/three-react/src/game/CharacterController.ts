@@ -1072,6 +1072,11 @@ export class CharacterController {
     return this.root.position;
   }
 
+  /** Ground-level Y (no hop bounce) — use for camera target. */
+  getGroundY(): number {
+    return this.visualGroundY;
+  }
+
   dispose(): void {
     if (this._onKeyDown) {
       window.removeEventListener('keydown', this._onKeyDown);
