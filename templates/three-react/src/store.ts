@@ -307,7 +307,7 @@ export const useGameStore = create<GameStore>((set) => ({
   charAnimGroup: '',
   setCharAnimGroup: (charAnimGroup) => set({ charAnimGroup }),
   charAnimation: 'Idle',
-  charSpeed: (saved.charSpeed as number) ?? 1,
+  charSpeed: (saved.charSpeed as number) ?? 2,
   charMoveSpeed: (saved.charMoveSpeed as number) ?? 5,
   charHop: (saved.charHop as boolean) ?? true,
   charDebugPath: (saved.charDebugPath as boolean) ?? false,

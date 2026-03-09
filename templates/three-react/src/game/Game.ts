@@ -22,6 +22,7 @@ import {
   updateSunDebug,
   disposeSunDebugHelper,
   WorldRevealFX,
+  updateOcclusionReveal,
 } from './rendering';
 import type { GameInstance, ParticleSystem } from '../types';
 import {
@@ -105,21 +106,36 @@ function syncParticles(
 /** Find an animation clip by keyword across both grouped ("Movement/Run01") and flat ("Run") names. */
 function resolveAnim(model: { getAnimationNames(): string[] }, keyword: string): string | null {
   const names = model.getAnimationNames();
-  // Exact match first
+  // 1. Exact match (case-sensitive)
   if (names.includes(keyword)) return keyword;
-  // Case-insensitive exact (flat names like "Run", "Idle", "Jump")
+  // 2. Case-insensitive exact match on full name
   const lower = keyword.toLowerCase();
   const exact = names.find(n => n.toLowerCase() === lower);
   if (exact) return exact;
-  // Partial match: "Run" matches "Movement/Run01" or "Run_Carry"
-  // Prefer shorter matches (closer to the keyword)
+  // 3. Exact match on suffix after "/" (e.g. "Run" matches "Movement/Run")
+  const suffixExact = names.find(n => {
+    const slash = n.lastIndexOf('/');
+    if (slash < 0) return false;
+    return n.slice(slash + 1).toLowerCase() === lower;
+  });
+  if (suffixExact) return suffixExact;
+  // 4. Partial match — keyword is a prefix of the suffix
+  //    Strongly prefer exact-length suffix matches over longer ones
   const matches = names.filter(n => {
     const last = n.includes('/') ? n.slice(n.lastIndexOf('/') + 1) : n;
     return last.toLowerCase().startsWith(lower);
   });
   if (matches.length > 0) {
-    // Prefer exact suffix match over prefix-only
-    return matches.sort((a, b) => a.length - b.length)[0];
+    // Sort: exact suffix length first, then by total name length
+    return matches.sort((a, b) => {
+      const aLast = a.includes('/') ? a.slice(a.lastIndexOf('/') + 1) : a;
+      const bLast = b.includes('/') ? b.slice(b.lastIndexOf('/') + 1) : b;
+      // If one suffix exactly equals the keyword, prefer it
+      const aExact = aLast.toLowerCase() === lower ? 0 : 1;
+      const bExact = bLast.toLowerCase() === lower ? 0 : 1;
+      if (aExact !== bExact) return aExact - bExact;
+      return a.length - b.length;
+    })[0];
   }
   return null;
 }
@@ -224,7 +240,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       scale: def.opts.scale,
       rotation: def.opts.rotation,
       onLoaded: (names) => {
-        console.log(`Model "${def.label}" loaded: ${names.length} animations`);
+        console.log(`Model "${def.label}" loaded: ${names.length} animations:`, names);
         useGameStore.getState().setCharAnimationList(names);
       },
     }, def.loader ?? 'imminence');
@@ -842,6 +858,32 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
 
     // World reveal animation
     worldReveal.update(dt);
+
+    // Occlusion reveal: raycast camera→player, fade walls that occlude character
+    // In isometric/top-down views the straight camera→player ray sails over
+    // short walls, so we cast a fan of rays at ground level to catch them.
+    {
+      const playerPos = character.getPosition();
+      const groundY = character.getGroundY();
+      const playerWorldPos = new THREE.Vector3(playerPos.x, groundY + 0.5, playerPos.z);
+      const camPos = cam.camera.position;
+
+      let occluded = false;
+      if (obstacleGen.meshes.length > 0) {
+        // Cast 3 rays at different target heights: ground, knee, chest
+        const heights = [groundY + 0.05, groundY + 0.25, groundY + 0.5];
+        const rayOrigin = camPos.clone();
+        for (const h of heights) {
+          const target = new THREE.Vector3(playerPos.x, h, playerPos.z);
+          const dir = new THREE.Vector3().subVectors(target, rayOrigin).normalize();
+          const dist = rayOrigin.distanceTo(target);
+          const raycaster = new THREE.Raycaster(rayOrigin, dir, 0.1, dist);
+          const hits = raycaster.intersectObjects(obstacleGen.meshes, true);
+          if (hits.length > 0) { occluded = true; break; }
+        }
+      }
+      updateOcclusionReveal(playerWorldPos, camPos, occluded);
+    }
 
     // Update camera
     cam.updatePosition(dt);

@@ -405,6 +405,9 @@ export class CharacterModel {
   }
 
   setGroundPin(enabled: boolean): void {
+    if (this.groundPinEnabled && !enabled && this.modelRoot) {
+      this.modelRoot.position.y = this.offsetY;
+    }
     this.groundPinEnabled = enabled;
   }
 

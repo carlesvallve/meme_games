@@ -169,7 +169,7 @@ export function Select({ label, value, options, labels, accent = '#6af', onChang
       <span style={{ color: '#aaa', width: 90, flexShrink: 0 }}>{label}</span>
       <select
         value={value}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={(e) => { onChange(e.target.value); e.target.blur(); }}
         style={{
           ...selectStyle,
           ['--thumb-color' as any]: accent,

@@ -16,6 +16,7 @@ export {
 } from '../shaders/RevealShader';
 export {
   patchWorldRevealMaterial,
+  updateOcclusionReveal,
   WorldRevealFX,
 } from '../shaders/WorldReveal';
 export {

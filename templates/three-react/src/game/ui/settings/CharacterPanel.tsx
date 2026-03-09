@@ -327,7 +327,7 @@ export function CharacterPanel() {
       <button
         onClick={() => useGameStore.setState({
           charAnimation: 'Idle',
-          charSpeed: 1,
+          charSpeed: 2,
           charMoveSpeed: 5,
           charStepUp: 0.5,
           charStepDown: 1.0,

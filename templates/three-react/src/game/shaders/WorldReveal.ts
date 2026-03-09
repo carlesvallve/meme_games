@@ -11,6 +11,12 @@ const _defaults = {
   u_worldRevealEdge: { value: 0.15 },
   u_worldRevealSpread: { value: 0.5 },
   u_worldRevealRadial: { value: 0.3 },
+  // Occlusion reveal (see-through-walls)
+  u_revealCenter: { value: new THREE.Vector3() },
+  u_cameraPos: { value: new THREE.Vector3() },
+  u_revealActive: { value: 0.0 },
+  u_revealRadius: { value: 3.0 },
+  u_revealFalloff: { value: 2.0 },
 };
 if (!_w.__worldRevealUniforms) _w.__worldRevealUniforms = _defaults;
 export const worldRevealUniforms = _w.__worldRevealUniforms;
@@ -39,6 +45,12 @@ export function patchWorldRevealMaterial(mat: THREE.MeshStandardMaterial): void 
     shader.uniforms.u_worldRevealEdge = worldRevealUniforms.u_worldRevealEdge;
     shader.uniforms.u_worldRevealSpread = worldRevealUniforms.u_worldRevealSpread;
     shader.uniforms.u_worldRevealRadial = worldRevealUniforms.u_worldRevealRadial;
+    // Occlusion reveal
+    shader.uniforms.u_revealCenter = worldRevealUniforms.u_revealCenter;
+    shader.uniforms.u_cameraPos = worldRevealUniforms.u_cameraPos;
+    shader.uniforms.u_revealActive = worldRevealUniforms.u_revealActive;
+    shader.uniforms.u_revealRadius = worldRevealUniforms.u_revealRadius;
+    shader.uniforms.u_revealFalloff = worldRevealUniforms.u_revealFalloff;
 
     shader.vertexShader = shader.vertexShader.replace(
       '#include <common>',
@@ -58,6 +70,11 @@ uniform float u_worldRevealMaxH;
 uniform float u_worldRevealEdge;
 uniform float u_worldRevealSpread;
 uniform float u_worldRevealRadial;
+uniform vec3 u_revealCenter;
+uniform vec3 u_cameraPos;
+uniform float u_revealActive;
+uniform float u_revealRadius;
+uniform float u_revealFalloff;
 varying vec3 v_wRevealPos;
 
 float revealHash(vec2 p) {
@@ -85,10 +102,51 @@ if (u_worldRevealActive > 0.01) {
   float edgeThickness = 0.03;
   float glow = smoothstep(u_worldRevealEdge - edgeThickness, u_worldRevealEdge, revealDist);
   gl_FragColor.rgb += vec3(2.0, 1.6, 0.8) * glow * u_worldRevealActive;
+}
+
+// Occlusion reveal: make walls transparent when between camera and player
+if (u_revealActive > 0.001) {
+  vec3 toPlayer = u_revealCenter - u_cameraPos;
+  vec3 lineDir = normalize(toPlayer + vec3(0.001));
+  float xzLen = length(vec2(toPlayer.x, toPlayer.z));
+  float horizontalness = xzLen / max(length(toPlayer), 0.001);
+  float viewGate = smoothstep(0.05, 0.15, horizontalness);
+
+  vec2 toCamXZ = -normalize(vec2(lineDir.x, lineDir.z) + vec2(0.0001));
+  vec2 fragDeltaXZ = vec2(v_wRevealPos.x - u_revealCenter.x, v_wRevealPos.z - u_revealCenter.z);
+  float fragDistXZ = length(fragDeltaXZ);
+  vec2 fragDirXZ = fragDeltaXZ / max(fragDistXZ, 0.001);
+
+  float angleDot = dot(fragDirXZ, toCamXZ);
+  float inCone = smoothstep(-0.1, 0.3, angleDot) * viewGate;
+  float distFade = smoothstep(u_revealRadius, u_revealRadius + u_revealFalloff, fragDistXZ);
+
+  float revealAlpha = mix(1.0, mix(1.0, distFade, inCone), u_revealActive);
+  gl_FragColor.a *= revealAlpha;
 }`,
     );
   };
   mat.needsUpdate = true;
+}
+
+// ── Occlusion reveal — see through walls when they occlude the character ──
+
+let smoothedOcclusionActive = 0;
+
+export function updateOcclusionReveal(
+  playerPos: THREE.Vector3,
+  cameraPos: THREE.Vector3,
+  occluded: boolean,
+): void {
+  worldRevealUniforms.u_revealCenter.value.copy(playerPos);
+  worldRevealUniforms.u_cameraPos.value.copy(cameraPos);
+  worldRevealUniforms.u_revealRadius.value = 3.0;
+  worldRevealUniforms.u_revealFalloff.value = 2.0;
+
+  const target = occluded ? 1.0 : 0.0;
+  smoothedOcclusionActive += (target - smoothedOcclusionActive) * 0.12;
+  if (Math.abs(smoothedOcclusionActive - target) < 0.01) smoothedOcclusionActive = target;
+  worldRevealUniforms.u_revealActive.value = smoothedOcclusionActive;
 }
 
 // ── WorldRevealFX — self-contained reveal animation + juicy effects ──

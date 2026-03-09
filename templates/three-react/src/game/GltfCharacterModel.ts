@@ -241,6 +241,10 @@ export class GltfCharacterModel {
   }
 
   setGroundPin(enabled: boolean): void {
+    if (this.groundPinEnabled && !enabled && this.modelRoot) {
+      // Reset to base offset when disabling
+      this.modelRoot.position.y = this.offsetY;
+    }
     this.groundPinEnabled = enabled;
   }
 

@@ -79,6 +79,8 @@ export class MergedMesh {
       vertexColors: true,
       roughness: opts.roughness ?? 0.85,
       metalness: opts.metalness ?? 0.05,
+      transparent: true,
+      depthWrite: true,
     });
     patchWorldRevealMaterial(mergedMat);
 
