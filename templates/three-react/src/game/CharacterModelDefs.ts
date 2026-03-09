@@ -2,6 +2,9 @@ import type { CharacterModelOpts } from './CharacterModel';
 
 const GLTF_SCALE = 0.2;
 
+/** Shared animation file for all glTF characters (loaded once, cached globally). */
+export const GLTF_ANIM_URL = '/models/gltf-chars/shared-anims.gltf';
+
 /** Shared animation set GLBs — loaded once and cached globally.
  *  Each contains constraint-retargeted animations for the Imminence skeleton. */
 export const ANIM_SETS = [

@@ -1,15 +1,36 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import type { MeshPartGroup, CharacterModelOpts } from './CharacterModel';
+import { GLTF_ANIM_URL } from './CharacterModelDefs';
 const BASE_MOVE_SPEED = 2;
 
+/** Global cache: shared animation URL → promise of parsed clips. */
+const gltfAnimClipCache = new Map<string, Promise<THREE.AnimationClip[]>>();
+
+function loadGltfAnimClips(url: string): Promise<THREE.AnimationClip[]> {
+  let cached = gltfAnimClipCache.get(url);
+  if (cached) return cached;
+  const loader = new GLTFLoader();
+  cached = new Promise<THREE.AnimationClip[]>((resolve, reject) => {
+    loader.load(
+      url,
+      (gltf) => {
+        console.log(`[GltfAnimCache] Loaded ${gltf.animations.length} clips from ${url}`);
+        resolve(gltf.animations);
+      },
+      undefined,
+      reject,
+    );
+  });
+  gltfAnimClipCache.set(url, cached);
+  return cached;
+}
+
 /**
- * GltfCharacterModel — loads self-contained glTF files with embedded animations.
- * Drop-in replacement for CharacterModel when using pre-retargeted glTF models
- * (e.g. from the /Downloads/glTF/ library).
+ * GltfCharacterModel — loads glTF character mesh + shared animations.
  *
- * Each glTF contains mesh + skeleton + all animation clips in one file.
- * No shared animation loading needed — everything is self-contained.
+ * Phase 1: Load character .gltf (mesh + skeleton only, no animations)
+ * Phase 2: Load shared-anims.gltf (cached globally) → apply clips via mixer
  */
 export class GltfCharacterModel {
   readonly group: THREE.Group;
@@ -93,23 +114,51 @@ export class GltfCharacterModel {
       this.computeRestPoseOffset(model);
       this.mixer = new THREE.AnimationMixer(model);
 
-      // Register embedded animations
+      // Register any embedded animations (backwards compat with self-contained files)
       for (const clip of gltf.animations) {
         const action = this.mixer.clipAction(clip);
         this.actions.set(clip.name, action);
       }
 
-      console.log(`[GltfCharModel] Loaded: ${gltf.animations.length} anims, ${namedMeshNodes.size} mesh nodes, ${this.footBones.length} foot bones`);
-
       this.meshReady = true;
       opts.onMeshReady?.();
 
-      this.loaded = true;
-      const allNames = ['T-Pose', ...Array.from(this.actions.keys())];
-      const idleAnim = allNames.find((n) => /idle/i.test(n)) ?? allNames[1];
-      if (idleAnim) this.play(idleAnim, 0);
-      opts.onLoaded?.(allNames);
+      // Phase 2: Load shared animations from cache
+      if (gltf.animations.length === 0) {
+        this.loadSharedAnimations(opts);
+      } else {
+        // Self-contained file (has embedded anims) — finish immediately
+        this.finishLoading(opts);
+      }
     });
+  }
+
+  private loadSharedAnimations(opts: CharacterModelOpts): void {
+    loadGltfAnimClips(GLTF_ANIM_URL).then((clips) => {
+      if (!this.mixer) return;
+      for (const clip of clips) {
+        if (!this.actions.has(clip.name)) {
+          const action = this.mixer.clipAction(clip);
+          this.actions.set(clip.name, action);
+        }
+      }
+      console.log(`[GltfCharModel] Applied ${clips.length} shared animations`);
+      this.finishLoading(opts);
+    }).catch((err) => {
+      console.error('[GltfCharModel] Failed to load shared animations:', err);
+      // Still finish loading — model will work without animations
+      this.finishLoading(opts);
+    });
+  }
+
+  private finishLoading(opts: CharacterModelOpts): void {
+    this.loaded = true;
+    const allNames = ['T-Pose', ...Array.from(this.actions.keys())];
+    const idleAnim = allNames.find((n) => /idle/i.test(n)) ?? allNames[1];
+    if (idleAnim) this.play(idleAnim, 0);
+
+    console.log(`[GltfCharModel] Loaded: ${this.actions.size} anims, meshReady=${this.meshReady}, ${this.footBones.length} foot bones`);
+    opts.onLoaded?.(allNames);
   }
 
   private computeRestPoseOffset(model: THREE.Object3D): void {
