@@ -261,6 +261,8 @@ interface GameStore {
   setWorldRevealEnabled: (v: boolean) => void;
   wallRevealEnabled: boolean;
   setWallRevealEnabled: (v: boolean) => void;
+  wallRevealDither: boolean;
+  setWallRevealDither: (v: boolean) => void;
   ladderDensity: number;
   setLadderDensity: (v: number) => void;
   onGenerateObstacles: (() => void) | null;
@@ -377,6 +379,8 @@ export const useGameStore = create<GameStore>((set) => ({
   setWorldRevealEnabled: (worldRevealEnabled) => set({ worldRevealEnabled }),
   wallRevealEnabled: (saved.wallRevealEnabled as boolean) ?? false,
   setWallRevealEnabled: (wallRevealEnabled) => set({ wallRevealEnabled }),
+  wallRevealDither: (saved.wallRevealDither as boolean) ?? true,
+  setWallRevealDither: (wallRevealDither) => set({ wallRevealDither }),
   ladderDensity: (saved.ladderDensity as number) ?? 0.5,
   setLadderDensity: (ladderDensity) => set({ ladderDensity }),
   onStartGame: null,

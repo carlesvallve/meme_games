@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import type { AABBBox } from './pathfinding/NavGrid';
 import { WORLD_SIZE, EARTHY_COLORS } from './GameConstants';
-import { patchWorldRevealMaterial } from './shaders/WorldReveal';
+import { patchWorldTransitionMaterial } from './shaders/WorldTransitionShader';
+import { patchRevealMaterial } from './shaders/RevealShader';
 import { useGameStore } from '../store';
 import { MergedMesh } from './MergedMesh';
 
@@ -51,7 +52,8 @@ export class ObstacleGenerator {
       roughness: 0.85,
       metalness: 0.05,
     });
-    patchWorldRevealMaterial(mat);
+    patchWorldTransitionMaterial(mat);
+      patchRevealMaterial(mat);
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.set(x, 0, z);
     mesh.castShadow = true;
@@ -466,7 +468,8 @@ export class ObstacleGenerator {
         roughness: 0.85,
         metalness: 0.05,
       });
-      patchWorldRevealMaterial(mat);
+      patchWorldTransitionMaterial(mat);
+      patchRevealMaterial(mat);
       const mesh = new THREE.Mesh(geo, mat);
       mesh.position.set(wx, 0, wz);
       mesh.castShadow = true;
@@ -509,7 +512,8 @@ export class ObstacleGenerator {
         roughness: 0.85,
         metalness: 0.05,
       });
-      patchWorldRevealMaterial(mat);
+      patchWorldTransitionMaterial(mat);
+      patchRevealMaterial(mat);
       const mesh = new THREE.Mesh(geo, mat);
       mesh.position.set(obs.x, 0, obs.z);
       mesh.castShadow = true;

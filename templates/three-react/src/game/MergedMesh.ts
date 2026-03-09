@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { patchWorldRevealMaterial } from './shaders/WorldReveal';
+import { patchWorldTransitionMaterial } from './shaders/WorldTransitionShader';
+import { patchRevealMaterial, applyRevealDepthMaterial } from './shaders/RevealShader';
 
 export interface MergedMeshOptions {
   roughness?: number;
@@ -79,14 +80,15 @@ export class MergedMesh {
       vertexColors: true,
       roughness: opts.roughness ?? 0.85,
       metalness: opts.metalness ?? 0.05,
-      transparent: true,
-      depthWrite: true,
     });
-    patchWorldRevealMaterial(mergedMat);
+    patchWorldTransitionMaterial(mergedMat);
+    patchRevealMaterial(mergedMat);
 
     const mergedMesh = new THREE.Mesh(mergedGeo, mergedMat);
     mergedMesh.castShadow = opts.castShadow !== false;
     mergedMesh.receiveShadow = opts.receiveShadow === true;
+    // Ensure shadow depth pass also discards occluded fragments
+    applyRevealDepthMaterial(mergedMesh);
 
     // Dispose originals
     for (const source of sources) {

@@ -9,7 +9,8 @@ import {
   LADDER_WALL_OFFSET,
   LADDER_COST,
 } from './GameConstants';
-import { patchWorldRevealMaterial } from './shaders/WorldReveal';
+import { patchWorldTransitionMaterial } from './shaders/WorldTransitionShader';
+import { patchRevealMaterial } from './shaders/RevealShader';
 import { MergedMesh } from './MergedMesh';
 
 export interface LadderDef {
@@ -52,7 +53,8 @@ export class LadderSystem {
       roughness: 0.8,
       metalness: 0.1,
     });
-    patchWorldRevealMaterial(this.mat);
+    patchWorldTransitionMaterial(this.mat);
+    patchRevealMaterial(this.mat);
   }
 
   /** Place a ladder between a low cell and a high cell.

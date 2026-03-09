@@ -10,15 +10,17 @@ export {
 export type { SkyColors } from './Sky';
 export { PostProcessStack } from './PostProcessing';
 export {
-  updateReveal,
-  patchSceneArchitecture,
+  patchRevealMaterial,
   revealUniforms,
+  updateOcclusionReveal,
+  isPointRevealed,
+  applyRevealDepthMaterial,
 } from '../shaders/RevealShader';
 export {
-  patchWorldRevealMaterial,
-  updateOcclusionReveal,
-  WorldRevealFX,
-} from '../shaders/WorldReveal';
+  patchWorldTransitionMaterial,
+  worldTransitionUniforms,
+  WorldBuildFX,
+} from '../shaders/WorldTransitionShader';
 export {
   updateDayCycle,
   applyDungeonLighting,

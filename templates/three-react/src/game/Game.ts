@@ -21,8 +21,9 @@ import {
   createSunDebugHelper,
   updateSunDebug,
   disposeSunDebugHelper,
-  WorldRevealFX,
+  WorldBuildFX,
   updateOcclusionReveal,
+  isPointRevealed,
 } from './rendering';
 import type { GameInstance, ParticleSystem } from '../types';
 import {
@@ -179,8 +180,8 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   postProcess.sync(useGameStore.getState().postProcess);
 
   // ── World reveal FX ──────────────────────────────────────────────────
-  const worldReveal = new WorldRevealFX();
-  worldReveal.init(cam, postProcess);
+  const worldBuild = new WorldBuildFX();
+  worldBuild.init(cam, postProcess);
   const OCCLUSION_THRESHOLD = 4; // frames of sustained occlusion before activating
   let occlusionCounter = 0;
 
@@ -406,7 +407,9 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     let hitPoint: THREE.Vector3 | null = null;
     if (obstacleGen.meshes.length > 0) {
       const obsHits = groundRaycaster.intersectObjects(obstacleGen.meshes);
-      if (obsHits.length > 0) hitPoint = obsHits[0].point;
+      // Skip hits on cubes made transparent by the occlusion reveal shader
+      const solidHit = obsHits.find(h => !isPointRevealed(h.point));
+      if (solidHit) hitPoint = solidHit.point;
     }
     if (!hitPoint) {
       const groundHits = groundRaycaster.intersectObject(ground);
@@ -641,7 +644,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       autoMergeIfEnabled();
       if (useGameStore.getState().worldRevealEnabled) {
         const maxH = obstacleGen.obstacles.reduce((m, o) => Math.max(m, o.height), 0);
-        worldReveal.start(maxH);
+        worldBuild.start(maxH);
       }
     },
     onMergeWorld: () => mergeWorld(),
@@ -859,7 +862,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     }
 
     // World reveal animation
-    worldReveal.update(dt);
+    worldBuild.update(dt);
 
     // Occlusion reveal: raycast camera→player, fade walls that occlude character
     if (store.wallRevealEnabled) {
@@ -891,10 +894,10 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       } else {
         occlusionCounter = 0;
       }
-      updateOcclusionReveal(playerWorldPos, camPos, occlusionCounter >= OCCLUSION_THRESHOLD);
+      updateOcclusionReveal(playerWorldPos, camPos, occlusionCounter >= OCCLUSION_THRESHOLD, store.wallRevealDither);
     } else {
       // Force reveal off when disabled
-      updateOcclusionReveal(new THREE.Vector3(), cam.camera.position, false);
+      updateOcclusionReveal(new THREE.Vector3(), cam.camera.position, false, store.wallRevealDither);
     }
 
     // Update camera

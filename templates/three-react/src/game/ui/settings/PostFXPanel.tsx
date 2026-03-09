@@ -22,6 +22,8 @@ export function PostFXPanel() {
   const toggleParticle = useGameStore((s) => s.toggleParticle);
   const wallReveal = useGameStore((s) => s.wallRevealEnabled);
   const setWallReveal = useGameStore((s) => s.setWallRevealEnabled);
+  const wallRevealDither = useGameStore((s) => s.wallRevealDither);
+  const setWallRevealDither = useGameStore((s) => s.setWallRevealDither);
 
   return (
     <SettingsWindow windowId="postfx">
@@ -42,6 +44,13 @@ export function PostFXPanel() {
           value={wallReveal}
           onChange={setWallReveal}
         />
+        {wallReveal && (
+          <Toggle
+            label='Dither Mode'
+            value={wallRevealDither}
+            onChange={setWallRevealDither}
+          />
+        )}
       </Section>
 
       <Section label='PostFX' accent='#8f8'>
