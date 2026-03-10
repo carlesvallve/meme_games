@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { ANIM_SETS } from './CharacterModelDefs';
 import { createGLTFLoader } from './loaders';
+import { computeAutoFit } from './autoFitScale';
 
 const BASE_MOVE_SPEED = 5;
 
@@ -64,6 +65,12 @@ export interface CharacterModelOpts {
   onMeshReady?: () => void;
   /** Called when model + animations finish loading */
   onLoaded?: (animNames: string[]) => void;
+  /** Apply sRGB→linear color fix for double-linearized models (e.g. retargeted Quaternius pack) */
+  fixDoubleLinear?: boolean;
+  /** If set, auto-scale the model to fit within this cell size.
+   *  Bipeds (height > xz extent): fit XZ footprint to cell.
+   *  Quadrupeds (xz extent > height): fit height to cell. */
+  autoFitCellSize?: number;
 }
 
 /**
@@ -81,6 +88,8 @@ export class CharacterModel {
   private meshReady = false;
   private scale: number;
   private offsetY: number;
+  /** Lowest point of the model in unscaled model-local space (for dynamic grounding). */
+  private localMinY = 0;
   private modelRoot: THREE.Object3D | null = null;
   /** Foot bones used for ground-pinning each frame */
   private footBones: THREE.Bone[] = [];
@@ -99,6 +108,13 @@ export class CharacterModel {
     const loader = createGLTFLoader();
     loader.load(opts.meshUrl, (gltf) => {
       const model = gltf.scene;
+
+      // Auto-fit: measure foot-bone spread (or bottom-slice fallback) to fit cell
+      if (opts.autoFitCellSize) {
+        const fit = computeAutoFit(model, opts.autoFitCellSize, opts.meshUrl);
+        this.scale = fit.scale;
+      }
+
       model.scale.setScalar(this.scale);
       model.position.y = this.offsetY;
 
@@ -213,11 +229,14 @@ export class CharacterModel {
     opts.onLoaded?.(allNames);
   }
 
-  /** Compute ground offset from T-pose so feet sit at Y=0 in group space. */
+  /** Measure the model's lowest point in unscaled local space and store it.
+   *  The actual position.y is computed dynamically based on current effective scale. */
   private computeRestPoseOffset(model: THREE.Object3D): void {
+    const savedScale = model.scale.x;
+    model.scale.setScalar(1);
     this.group.updateMatrixWorld(true);
-    const groupY = this.group.getWorldPosition(new THREE.Vector3()).y;
 
+    const groupY = this.group.getWorldPosition(new THREE.Vector3()).y;
     let minY = Infinity;
     const bonePos = new THREE.Vector3();
     model.traverse((child) => {
@@ -228,11 +247,18 @@ export class CharacterModel {
     });
 
     if (minY < Infinity) {
-      const correction = minY - groupY;
-      this.offsetY -= correction;
-      model.position.y = this.offsetY;
-      console.log(`[CharacterModel] T-pose ground offset: ${correction.toFixed(4)}, offsetY: ${this.offsetY.toFixed(4)}`);
+      this.localMinY = minY - groupY - model.position.y;
+    } else {
+      const box = new THREE.Box3().setFromObject(model);
+      if (box.min.y < -0.01) {
+        this.localMinY = box.min.y;
+      }
     }
+
+    model.scale.setScalar(savedScale);
+    this.offsetY = -this.localMinY * savedScale;
+    model.position.y = this.offsetY;
+    console.log(`[CharacterModel] localMinY: ${this.localMinY.toFixed(4)}, offsetY: ${this.offsetY.toFixed(4)}`);
   }
 
   /** Get the lowest foot bone Y in group-local space. */
@@ -417,6 +443,17 @@ export class CharacterModel {
 
   isLoaded(): boolean {
     return this.loaded;
+  }
+
+  /** Apply a multiplier on top of the base (auto-fit) scale. */
+  setScaleMultiplier(m: number): void {
+    if (this.modelRoot) {
+      const effectiveScale = this.scale * m;
+      this.modelRoot.scale.setScalar(effectiveScale);
+      // Recompute grounding: lift model so lowest point sits at Y=0
+      this.offsetY = -this.localMinY * effectiveScale;
+      this.modelRoot.position.y = this.offsetY;
+    }
   }
 
   getAnimationNames(): string[] {

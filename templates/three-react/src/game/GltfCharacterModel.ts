@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { MeshPartGroup, CharacterModelOpts } from './CharacterModel';
 import { GLTF_ANIM_URL } from './CharacterModelDefs';
 import { createGLTFLoader } from './loaders';
+import { computeAutoFit } from './autoFitScale';
 const BASE_MOVE_SPEED = 2;
 
 /** Global cache: shared animation URL → promise of parsed clips. */
@@ -42,6 +43,8 @@ export class GltfCharacterModel {
   private meshReady = false;
   private scale: number;
   private offsetY: number;
+  /** Lowest point of the model in unscaled model-local space (for dynamic grounding). */
+  private localMinY = 0;
   private modelRoot: THREE.Object3D | null = null;
   private footBones: THREE.Bone[] = [];
   private meshMap = new Map<string, THREE.Object3D>();
@@ -56,6 +59,13 @@ export class GltfCharacterModel {
     const loader = createGLTFLoader();
     loader.load(opts.meshUrl, (gltf) => {
       const model = gltf.scene;
+
+      // Auto-fit: measure foot-bone spread (or bottom-slice fallback) to fit cell
+      if (opts.autoFitCellSize) {
+        const fit = computeAutoFit(model, opts.autoFitCellSize, opts.meshUrl);
+        this.scale = fit.scale;
+      }
+
       model.scale.setScalar(this.scale);
       model.position.y = this.offsetY;
 
@@ -68,22 +78,21 @@ export class GltfCharacterModel {
         );
       }
 
-      // Collect mesh nodes + fix material colors.
-      // These glTF models store baseColorFactor in linear space but with values
-      // that appear to have been double-linearized (sRGB values stored as linear).
-      // Apply sRGB→linear decode to recover intended brightness.
+      // Collect mesh nodes + optionally fix double-linearized material colors.
+      const fixColors = opts.fixDoubleLinear ?? false;
       const namedMeshNodes = new Map<string, THREE.Object3D>();
       model.traverse((child) => {
         if ((child as THREE.Mesh).isMesh) {
           const mesh = child as THREE.Mesh;
           mesh.castShadow = true;
           mesh.receiveShadow = true;
-          // Fix double-linearized colors: convert from sRGB to linear to undo the extra gamma
-          const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-          for (const mat of mats) {
-            if ((mat as THREE.MeshStandardMaterial).color) {
-              const c = (mat as THREE.MeshStandardMaterial).color;
-              c.convertLinearToSRGB();
+          if (fixColors) {
+            const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+            for (const mat of mats) {
+              if ((mat as THREE.MeshStandardMaterial).color) {
+                const c = (mat as THREE.MeshStandardMaterial).color;
+                c.convertLinearToSRGB();
+              }
             }
           }
           const node = mesh.parent && mesh.parent !== model ? mesh.parent : mesh;
@@ -161,8 +170,14 @@ export class GltfCharacterModel {
     opts.onLoaded?.(allNames);
   }
 
+  /** Measure the model's lowest point in unscaled local space and store it.
+   *  The actual position.y is computed dynamically based on current effective scale. */
   private computeRestPoseOffset(model: THREE.Object3D): void {
+    // Temporarily reset scale to 1 to measure unscaled local min Y
+    const savedScale = model.scale.x;
+    model.scale.setScalar(1);
     this.group.updateMatrixWorld(true);
+
     const groupY = this.group.getWorldPosition(new THREE.Vector3()).y;
     let minY = Infinity;
     const bonePos = new THREE.Vector3();
@@ -172,11 +187,22 @@ export class GltfCharacterModel {
         if (bonePos.y < minY) minY = bonePos.y;
       }
     });
+
     if (minY < Infinity) {
-      const correction = minY - groupY;
-      this.offsetY -= correction;
-      model.position.y = this.offsetY;
+      // localMinY = how far below group origin the lowest bone sits (unscaled)
+      this.localMinY = minY - groupY - model.position.y;
+    } else {
+      // No bones — use bounding box
+      const box = new THREE.Box3().setFromObject(model);
+      if (box.min.y < -0.01) {
+        this.localMinY = box.min.y;
+      }
     }
+
+    // Restore scale and set initial position
+    model.scale.setScalar(savedScale);
+    this.offsetY = (this.offsetY) + (-this.localMinY * savedScale);
+    model.position.y = this.offsetY;
   }
 
   private getLowestFootY(): number {
@@ -300,6 +326,17 @@ export class GltfCharacterModel {
   isMeshReady(): boolean { return this.meshReady; }
   isLoaded(): boolean { return this.loaded; }
   getAnimationNames(): string[] { return Array.from(this.actions.keys()); }
+
+  /** Apply a multiplier on top of the base (auto-fit) scale. */
+  setScaleMultiplier(m: number): void {
+    if (this.modelRoot) {
+      const effectiveScale = this.scale * m;
+      this.modelRoot.scale.setScalar(effectiveScale);
+      // Recompute grounding: lift model so lowest point sits at Y=0
+      this.offsetY = -this.localMinY * effectiveScale;
+      this.modelRoot.position.y = this.offsetY;
+    }
+  }
 
   play(name: string, fadeTime = 0.2): boolean {
     if (name === this.currentClipName && this.currentAction) return true;

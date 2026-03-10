@@ -94,6 +94,10 @@ function getCategoryForModel(modelId: string): string {
 export function CharacterPanel() {
   const charModel = useGameStore((s) => s.charModel);
   const setCharModel = useGameStore((s) => s.setCharModel);
+  const charScale = useGameStore((s) => s.charScale);
+  const setCharScale = useGameStore((s) => s.setCharScale);
+  const charAutoScale = useGameStore((s) => s.charAutoScale);
+  const setCharAutoScale = useGameStore((s) => s.setCharAutoScale);
   const [category, setCategory] = useState(() => getCategoryForModel(charModel));
   const animList = useGameStore((s) => s.charAnimationList);
   const animGroup = useGameStore((s) => s.charAnimGroup);
@@ -191,6 +195,20 @@ export function CharacterPanel() {
           labels={(MODELS_BY_CATEGORY.get(category) ?? []).map((m) => m.label)}
           accent='#f8a'
           onChange={setCharModel}
+        />
+        <Toggle
+          label='Auto Scale'
+          value={charAutoScale}
+          onChange={setCharAutoScale}
+        />
+        <Slider
+          label={charAutoScale ? 'Scale Mult' : 'Scale'}
+          value={charScale}
+          min={charAutoScale ? 0.2 : 0.01}
+          max={charAutoScale ? 3 : 1}
+          step={charAutoScale ? 0.05 : 0.01}
+          accent='#f8a'
+          onChange={setCharScale}
         />
         {category !== 'Dummy' && (
           <>
@@ -342,6 +360,7 @@ export function CharacterPanel() {
       <button
         onClick={() => useGameStore.setState({
           charAnimation: 'Idle',
+          charScale: 1,
           charSpeed: 2,
           charMoveSpeed: 5,
           charStepUp: 0.5,

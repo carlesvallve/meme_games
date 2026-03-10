@@ -226,10 +226,14 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
     cam.shake(Math.min(cells * 0.04, 0.25), Math.min(cells * 0.06, 0.3));
   };
 
-  // Model loading — reacts to store.charModel changes
+  // Model loading — reacts to store.charModel / autoScale changes
   let currentModelId = '';
-  function syncModel(modelId: string): void {
-    if (modelId === currentModelId) return;
+  let currentAutoScale = useGameStore.getState().charAutoScale;
+  function syncModel(modelId: string, forceReload = false): void {
+    const autoScale = useGameStore.getState().charAutoScale;
+    const autoScaleChanged = autoScale !== currentAutoScale;
+    currentAutoScale = autoScale;
+    if (!forceReload && !autoScaleChanged && modelId === currentModelId) return;
     currentModelId = modelId;
     const def = CHARACTER_MODELS.find((m) => m.id === modelId);
     if (!def || !def.opts) {
@@ -239,9 +243,8 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
       return;
     }
     character.loadModel({
-      meshUrl: def.opts.meshUrl,
-      scale: def.opts.scale,
-      rotation: def.opts.rotation,
+      ...def.opts,
+      autoFitCellSize: useGameStore.getState().charAutoScale ? gridCellSize : undefined,
       onLoaded: (names) => {
         console.log(`Model "${def.label}" loaded: ${names.length} animations:`, names);
         useGameStore.getState().setCharAnimationList(names);
@@ -754,6 +757,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
 
     // Sync character model from dropdown
     syncModel(store.charModel);
+    character.getModel()?.setScaleMultiplier(store.charScale);
     character.setHopEnabled(store.charHop);
 
     const inp = input.update();

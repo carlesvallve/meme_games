@@ -186,6 +186,10 @@ interface GameStore {
   // Character
   charModel: string;
   setCharModel: (v: string) => void;
+  charScale: number;
+  setCharScale: (v: number) => void;
+  charAutoScale: boolean;
+  setCharAutoScale: (v: boolean) => void;
   charAnimGroup: string;
   setCharAnimGroup: (v: string) => void;
   charAnimation: string;
@@ -308,6 +312,10 @@ export const useGameStore = create<GameStore>((set) => ({
 
   charModel: (saved.charModel as string) ?? 'none',
   setCharModel: (charModel) => set({ charModel }),
+  charScale: (saved.charScale as number) ?? 1,
+  setCharScale: (charScale) => set({ charScale }),
+  charAutoScale: (saved.charAutoScale as boolean) ?? true,
+  setCharAutoScale: (charAutoScale) => set({ charAutoScale }),
   charAnimGroup: '',
   setCharAnimGroup: (charAnimGroup) => set({ charAnimGroup }),
   charAnimation: 'Idle',
