@@ -469,7 +469,7 @@ export function createGame(canvas: HTMLCanvasElement): GameInstance {
   let goalPointerId = -1;
 
   const onPointerDownGoal = (e: PointerEvent) => {
-    if (e.button !== 0) return;
+    if (e.button !== 0 || e.altKey) return;
     audioSystem.init();
     goalPointerId = e.pointerId;
     goalPointerDown = true;

@@ -126,19 +126,20 @@ export class Camera {
     // Prevent browser from hijacking touch for scroll/zoom
     canvas.style.touchAction = 'none';
 
-    // Pointer down — only right mouse button (2) starts camera rotation.
+    // Pointer down — right mouse button (2) or Alt+left-click starts camera rotation.
+    // Alt+left-click is needed for Chrome mobile simulator where right-click is intercepted.
     // Touch rotation is handled by two-finger touch events below.
     this.onPointerDown = (e: PointerEvent) => {
       this.activePointers++;
-      if (e.button === 2) {
+      if (e.button === 2 || (e.button === 0 && e.altKey)) {
         this.startDrag(e.clientX, e.clientY);
       }
     };
 
-    // Mousedown fallback for right-click — some browsers/simulators don't fire
+    // Mousedown fallback for right-click / Alt+click — some browsers/simulators don't fire
     // pointerdown for button 2 reliably (e.g. Chrome mobile simulator).
     this.onMouseDown = (e: MouseEvent) => {
-      if (e.button === 2 && !this.isDragging) {
+      if ((e.button === 2 || (e.button === 0 && e.altKey)) && !this.isDragging) {
         this.startDrag(e.clientX, e.clientY);
       }
     };
