@@ -4,8 +4,52 @@ A pnpm monorepo for building trend-driven browser games with Phaser 3, procedura
 
 ## Quick Start
 
+### Prerequisites
+
+- Node.js 18+
+- [pnpm](https://pnpm.io/)
+- [Git LFS](https://git-lfs.com/) — required for 3D models and textures
+
+### Clone & Setup
+
+This repo uses **Git LFS** for large binary files (3D models, images). Install Git LFS **before** cloning:
+
 ```bash
+# 1. Install Git LFS (one-time per machine)
+brew install git-lfs        # macOS
+# sudo apt install git-lfs  # Ubuntu/Debian
+# choco install git-lfs     # Windows
+
+# 2. Enable Git LFS (one-time per machine)
+git lfs install
+
+# 3. Clone (LFS files download automatically)
+git clone <repo-url>
+cd meme_games
+
+# 4. Install dependencies
 pnpm install
+```
+
+If you cloned **before** installing Git LFS, fix it with:
+
+```bash
+git lfs install && git lfs pull
+```
+
+#### LFS-tracked file types
+
+| Type | Extensions |
+|------|-----------|
+| 3D Models | `*.glb`, `*.fbx`, `*.gltf` |
+| Images | `*.png`, `*.jpg`, `*.jpeg`, `*.hdr`, `*.psd`, `*.tga` |
+| Textures | `*.exr`, `*.ktx2`, `*.basis` |
+
+Verify with `git lfs ls-files`. See `.gitattributes` for the full list.
+
+### Run a game
+
+```bash
 pnpm --filter @sttg/slop-survivor dev    # start dev server on localhost:3000
 ```
 
