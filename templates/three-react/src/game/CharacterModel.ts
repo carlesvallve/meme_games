@@ -71,6 +71,9 @@ export interface CharacterModelOpts {
    *  Bipeds (height > xz extent): fit XZ footprint to cell.
    *  Quadrupeds (xz extent > height): fit height to cell. */
   autoFitCellSize?: number;
+  /** Per-pack shared animation GLB URL. If set, animations are loaded from this URL
+   *  instead of the default GLTF_ANIM_URL. Models with embedded anims ignore this. */
+  sharedAnimUrl?: string;
 }
 
 /**

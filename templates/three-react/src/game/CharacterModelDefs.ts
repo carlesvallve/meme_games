@@ -54,12 +54,18 @@ function makeGltfModels(
   names: string[], category: string,
   basePath = '/models/q-casual',
   fixDoubleLinear = false,
+  sharedAnimUrl?: string,
 ): CharacterModelDef[] {
   return names.map((name) => ({
     id: `gltf-${category.toLowerCase()}-${name.toLowerCase()}`,
     label: name.replace(/_/g, ' '),
     category,
-    opts: { meshUrl: `${basePath}/${name}.glb`, rotation: [0, 0, 0], fixDoubleLinear },
+    opts: {
+      meshUrl: `${basePath}/${name}.glb`,
+      rotation: [0, 0, 0] as [number, number, number],
+      fixDoubleLinear,
+      ...(sharedAnimUrl ? { sharedAnimUrl } : {}),
+    },
     loader: 'gltf' as const,
   }));
 }
@@ -95,27 +101,48 @@ export const CHARACTER_MODELS: CharacterModelDef[] = [
     'Zombie_Female', 'Zombie_Male',
   ], 'Q-Casual', '/models/q-casual', true),
 
-  // ── Q-Apocalypse (self-contained animations) ──
+  // ── Q-Apocalypse ──
   ...makeGltfModels([
-    'Characters_GermanShepherd', 'Characters_Lis', 'Characters_Lis_SingleWeapon',
-    'Characters_Matt', 'Characters_Matt_SingleWeapon', 'Characters_Pug',
+    'Characters_Lis', 'Characters_Lis_SingleWeapon',
+    'Characters_Matt', 'Characters_Matt_SingleWeapon',
     'Characters_Sam', 'Characters_Sam_SingleWeapon',
     'Characters_Shaun', 'Characters_Shaun_SingleWeapon',
+  ], 'Q-Apocalypse', '/models/q-apocalypse', false,
+    '/models/q-apocalypse/shared-anims.glb'),
+  // Q-Apocalypse self-contained (unique rigs)
+  ...makeGltfModels([
+    'Characters_GermanShepherd', 'Characters_Pug',
     'Zombie_Arm', 'Zombie_Basic', 'Zombie_Chubby', 'Zombie_Ribcage',
   ], 'Q-Apocalypse', '/models/q-apocalypse'),
 
-  // ── Q-CubeWorld (self-contained animations) ──
+  // ── Q-CubeWorld ──
   ...makeGltfModels([
     'Character_Female_1', 'Character_Female_2', 'Character_Male_1', 'Character_Male_2',
-    'Cat', 'Chick', 'Chicken', 'Dog', 'Horse', 'Pig', 'Raccoon', 'Sheep', 'Wolf',
-    'Demon', 'Giant', 'Goblin', 'Hedgehog', 'Skeleton', 'Skeleton_Armor',
+  ], 'Q-CubeWorld', '/models/q-cubeworld', false,
+    '/models/q-cubeworld/shared-anims-2.glb'),
+  ...makeGltfModels([
+    'Demon', 'Giant', 'Goblin', 'Skeleton', 'Skeleton_Armor',
     'Wizard', 'Yeti', 'Zombie',
+  ], 'Q-CubeWorld', '/models/q-cubeworld', false,
+    '/models/q-cubeworld/shared-anims-4.glb'),
+  ...makeGltfModels([
+    'Cat', 'Dog', 'Raccoon', 'Sheep', 'Wolf',
+  ], 'Q-CubeWorld', '/models/q-cubeworld', false,
+    '/models/q-cubeworld/shared-anims-1.glb'),
+  // Q-CubeWorld self-contained (unique rigs)
+  ...makeGltfModels([
+    'Chick', 'Chicken', 'Horse', 'Pig', 'Hedgehog',
   ], 'Q-CubeWorld', '/models/q-cubeworld'),
 
-  // ── Q-Animals (self-contained animations) ──
+  // ── Q-Animals ──
   ...makeGltfModels([
-    'Alpaca', 'Bull', 'Cow', 'Deer', 'Donkey', 'Fox',
-    'Horse', 'Horse_White', 'Husky', 'ShibaInu', 'Stag', 'Wolf',
+    'Donkey', 'Horse', 'Horse_White',
+  ], 'Q-Animals', '/models/q-animals', false,
+    '/models/q-animals/shared-anims.glb'),
+  // Q-Animals self-contained (unique rigs)
+  ...makeGltfModels([
+    'Alpaca', 'Bull', 'Cow', 'Deer', 'Fox',
+    'Husky', 'ShibaInu', 'Stag', 'Wolf',
   ], 'Q-Animals', '/models/q-animals'),
 
   // ── Q-Cyberpunk (self-contained animations) ──
@@ -126,31 +153,45 @@ export const CHARACTER_MODELS: CharacterModelDef[] = [
     'Turret_Cannon', 'Turret_Gun', 'Turret_GunDouble', 'Turret_Teleporter',
   ], 'Q-Cyberpunk', '/models/q-cyberpunk'),
 
-  // ── Q-SpaceKit (self-contained animations) ──
+  // ── Q-SpaceKit ──
   ...makeGltfModels([
     'Astronaut_BarbaraTheBee', 'Astronaut_FernandoTheFlamingo',
     'Astronaut_FinnTheFrog', 'Astronaut_RaeTheRedPanda',
-    'Enemy_ExtraSmall', 'Enemy_Flying', 'Enemy_Large', 'Enemy_Small',
+    'Enemy_Large',
+  ], 'Q-SpaceKit', '/models/q-spacekit', false,
+    '/models/q-spacekit/shared-anims.glb'),
+  ...makeGltfModels([
     'Mech_BarbaraTheBee', 'Mech_FernandoTheFlamingo',
     'Mech_FinnTheFrog', 'Mech_RaeTheRedPanda',
+  ], 'Q-SpaceKit', '/models/q-spacekit', false,
+    '/models/q-spacekit/shared-anims-4.glb'),
+  // Q-SpaceKit self-contained (unique rigs)
+  ...makeGltfModels([
+    'Enemy_ExtraSmall', 'Enemy_Flying', 'Enemy_Small',
   ], 'Q-SpaceKit', '/models/q-spacekit'),
 
-  // ── Q-LowPoly Men (self-contained animations) ──
+  // ── Q-LowPoly Men ──
   ...makeGltfModels([
     'Adventurer', 'Beach', 'Casual_2', 'Casual_Hoodie', 'Farmer',
     'King', 'Punk', 'Spacesuit', 'Suit', 'Swat', 'Worker',
-  ], 'Q-LowPoly Men', '/models/q-lowpolymen'),
+  ], 'Q-LowPoly Men', '/models/q-lowpolymen', false,
+    '/models/q-lowpolymen/shared-anims.glb'),
 
-  // ── Q-LowPoly Women (self-contained animations) ──
+  // ── Q-LowPoly Women ──
   ...makeGltfModels([
     'Adventurer', 'Casual', 'Formal', 'Medieval', 'Punk',
     'SciFi', 'Soldier', 'Suit', 'Witch', 'Worker',
-  ], 'Q-LowPoly Women', '/models/q-lowpolywomen'),
+  ], 'Q-LowPoly Women', '/models/q-lowpolywomen', false,
+    '/models/q-lowpolywomen/shared-anims.glb'),
 
-  // ── Q-Robots (self-contained animations) ──
+  // ── Q-Robots ──
   ...makeGltfModels([
-    'Tex_George', 'Tex_Leela', 'Tex_Mike', 'Tex_Stan',
-    'Flat_George', 'Flat_Leela', 'Flat_Mike', 'Flat_Stan',
+    'Flat_Mike', 'Flat_Stan', 'Tex_Mike', 'Tex_Stan',
+  ], 'Q-Robots', '/models/q-robots', false,
+    '/models/q-robots/shared-anims.glb'),
+  // Q-Robots self-contained (unique rigs)
+  ...makeGltfModels([
+    'Tex_George', 'Tex_Leela', 'Flat_George', 'Flat_Leela',
   ], 'Q-Robots', '/models/q-robots'),
 
   // ── Q-Shooter (self-contained animations) ──
@@ -158,20 +199,37 @@ export const CHARACTER_MODELS: CharacterModelDef[] = [
     'Character_Enemy', 'Character_Hazmat', 'Character_Soldier',
   ], 'Q-Shooter', '/models/q-shooter'),
 
-  // ── Q-Monsters (self-contained animations) ──
+  // ── Q-Monsters (Big rig) ──
   ...makeGltfModels([
-    'Big_Alien', 'Big_Birb', 'Big_BlueDemon', 'Big_Bunny', 'Big_Cactoro',
+    'Big_Alien', 'Big_Birb', 'Big_BlueDemon', 'Big_Cactoro',
     'Big_Demon', 'Big_Dino', 'Big_Fish', 'Big_Frog', 'Big_Monkroose',
     'Big_MushroomKing', 'Big_Ninja', 'Big_Orc', 'Big_Orc_Skull', 'Big_Tribal', 'Big_Yeti',
+  ], 'Q-Monsters', '/models/q-monsters', false,
+    '/models/q-monsters/shared-anims-1.glb'),
+  // Q-Monsters (Blob rig)
+  ...makeGltfModels([
     'Blob_Alien', 'Blob_Birb', 'Blob_Cactoro', 'Blob_Cat', 'Blob_Chicken',
     'Blob_Dog', 'Blob_Fish', 'Blob_GreenBlob', 'Blob_GreenSpikyBlob',
     'Blob_Mushnub', 'Blob_Mushnub_Evolved', 'Blob_Ninja', 'Blob_Orc',
     'Blob_Pigeon', 'Blob_PinkBlob', 'Blob_Wizard', 'Blob_Yeti',
+  ], 'Q-Monsters', '/models/q-monsters', false,
+    '/models/q-monsters/shared-anims-3.glb'),
+  // Q-Monsters (Flying small rig)
+  ...makeGltfModels([
     'Flying_Alpaking', 'Flying_Alpaking_Evolved', 'Flying_Armabee', 'Flying_Armabee_Evolved',
-    'Flying_Demon', 'Flying_Dragon', 'Flying_Dragon_Evolved',
-    'Flying_Ghost', 'Flying_Ghost_Skull', 'Flying_Glub', 'Flying_Glub_Evolved',
-    'Flying_Goleling', 'Flying_Goleling_Evolved', 'Flying_Hywirl',
-    'Flying_Pigeon', 'Flying_Squidle', 'Flying_Tribal',
+    'Flying_Dragon', 'Flying_Glub', 'Flying_Glub_Evolved',
+    'Flying_Goleling', 'Flying_Goleling_Evolved', 'Flying_Pigeon',
+  ], 'Q-Monsters', '/models/q-monsters', false,
+    '/models/q-monsters/shared-anims-4.glb'),
+  // Q-Monsters (Flying ghost rig)
+  ...makeGltfModels([
+    'Flying_Ghost', 'Flying_Ghost_Skull', 'Flying_Hywirl', 'Flying_Tribal',
+  ], 'Q-Monsters', '/models/q-monsters', false,
+    '/models/q-monsters/shared-anims-7.glb'),
+  // Q-Monsters self-contained (unique rigs)
+  ...makeGltfModels([
+    'Big_Bunny',
+    'Flying_Demon', 'Flying_Dragon_Evolved', 'Flying_Squidle',
   ], 'Q-Monsters', '/models/q-monsters'),
 ];
 

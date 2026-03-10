@@ -143,7 +143,8 @@ export class GltfCharacterModel {
   }
 
   private loadSharedAnimations(opts: CharacterModelOpts): void {
-    loadGltfAnimClips(GLTF_ANIM_URL).then((clips) => {
+    const animUrl = opts.sharedAnimUrl ?? GLTF_ANIM_URL;
+    loadGltfAnimClips(animUrl).then((clips) => {
       if (!this.mixer) return;
       for (const clip of clips) {
         if (!this.actions.has(clip.name)) {
